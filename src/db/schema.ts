@@ -23,6 +23,7 @@ export const applications = pgTable("applications", {
   riskCategory: varchar("risk_category", { length: 50 }),
   
   // JSONB for flexible inputs & multi-division comments
+  
   details: jsonb("details").$type<{
     inputs: Record<string, any>; 
     assignedDivisions: string[]; 
