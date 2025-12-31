@@ -25,7 +25,7 @@ export default function FileUpload({ onUploadComplete, label }: { onUploadComple
 
       if (uploadError) throw uploadError;
 
-      const { data } = supabase.storage.from('dossiers').getPublicUrl(filePath);
+      const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
       onUploadComplete(data.publicUrl);
     } catch (error) {
       alert('Error uploading file!');
