@@ -56,9 +56,10 @@ export default async function DirectorPage() {
                   {(app.details as any).assignedDivisions.join(", ")}
                 </td>
                 <td className="p-4 border-b">
-                  <button className="bg-green-600 text-white px-4 py-1 rounded text-sm font-bold">
-                    Push to Staff
-                  </button>
+                  <PushToStaffButton 
+                    appId={app.id} 
+                    divisions={(app.details as any).assignedDivisions} 
+                  />
                 </td>
               </tr>
             ))}
