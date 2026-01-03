@@ -11,6 +11,12 @@ export default function QMSCountdown({ startTime, limitHours }: QMSCountdownProp
   const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
+
+    // If there's no start time, don't try to calculate
+    if (!startTime) {
+        setTimeLeft("PENDING");
+        return;
+    }
     const deadline = new Date(startTime).getTime() + limitHours * 60 * 60 * 1000;
 
     const interval = setInterval(() => {
