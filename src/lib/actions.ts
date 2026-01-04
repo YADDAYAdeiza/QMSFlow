@@ -49,3 +49,43 @@ export async function submitLODApplication(data: any) {
     startTime: new Date(),
   });
 }
+
+"use server"
+
+import { db } from "@/db";
+import { applications, qmsTimelines } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+
+export async function assignToStaff(applicationId: number, divisions: string[]) {
+  // 1. Update the Application Point and add a Comment to the History
+  await db.update(applications)
+    .set({
+      currentPoint: 'Staff',
+      details: sql`jsonb_set(
+        details, 
+        '{comments}', 
+        (details->'comments') || jsonb_build_array(jsonb_build_object(
+          'from', 'DDD',
+          'role', 'Divisional Deputy Director',
+          'text', 'Assigned to Staff for technical review.',
+          'timestamp', ${new Date().toISOString()}
+        ))
+      )`
+    })
+    .where(eq(applications.id, applicationId));
+
+  // 2. Start the QMS Clock for each assigned division
+  // This creates the audit trail for "Staff" timing
+  for (const div of divisions) {
+    await db.insert(qmsTimelines).values({
+      applicationId: applicationId,
+      point: 'Staff',
+      division: div,
+      startTime: new Date(),
+    });
+  }
+
+  revalidatePath('/dashboard/ddd');
+  revalidatePath('/dashboard/[division]', 'layout');
+}

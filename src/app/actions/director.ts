@@ -2,7 +2,7 @@
 
 import { db } from "@/db";
 import { applications } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 
 export async function getDirectorInbox() {
@@ -30,4 +30,25 @@ export async function pushToDivisions(applicationId: number, selectedDivisions: 
   // 2. STOP the Director's clock and START the Staff's clock
   // We will build the sophisticated "Timing Engine" next, 
   // but for now, we mark the move.
+}
+
+export async function pushToDDD(applicationId: number, selectedDivisions: string[]) {
+  // We use sql.raw or structured sql to merge JSONB
+  await db.update(applications)
+    .set({ 
+      currentPoint: 'Divisional Deputy Director',
+      // This syntax ensures 'details' isn't overwritten. 
+      // It updates 'assignedDivisions' while keeping 'inputs' and 'comments'
+      details: sql`jsonb_set(
+        jsonb_set(details, '{assignedDivisions}', ${JSON.stringify(selectedDivisions)}),
+        '{comments}',
+        (details->'comments') || jsonb_build_array(jsonb_build_object(
+          'from', 'Director',
+          'role', 'Director',
+          'text', 'Application pushed to DDD for Staff Assignment',
+          'timestamp', ${new Date().toISOString()}
+        ))
+      )`
+    })
+    .where(eq(applications.id, applicationId));
 }

@@ -30,7 +30,7 @@ export default function PushToStaffButton({
         isPending ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'
       }`}
     >
-      {isPending ? "Pushing..." : "Push to Staff"}
+      {isPending ? "Pushing..." : "Push to Division(s)"}
     </button>
   );
 }
