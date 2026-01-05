@@ -1,6 +1,6 @@
 import LODEntryForm from "@/components/LODEntryForm";
 
-export default function Home() {
+export default async function Home() {
   return (
     <main className="min-h-screen bg-gray-100 p-8">
       <div className="max-auto max-w-4xl">

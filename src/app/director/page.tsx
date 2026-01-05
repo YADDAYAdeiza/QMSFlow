@@ -1,5 +1,5 @@
 import { getDirectorInbox } from "@/app/actions/director";
-import PushToStaffButton from "@/components/PushToStaffButton";
+import PushToDDDButton from "@/components/PushToDDDButton";
 
 export default async function DirectorPage() {
   const inbox = await getDirectorInbox();
@@ -56,7 +56,7 @@ export default async function DirectorPage() {
                   {(app.details as any).assignedDivisions.join(", ")}
                 </td>
                 <td className="p-4 border-b">
-                  <PushToStaffButton 
+                  <PushToDDDButton
                     appId={app.id} 
                     divisions={(app.details as any).assignedDivisions} 
                   />

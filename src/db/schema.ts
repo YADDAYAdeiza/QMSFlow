@@ -43,16 +43,26 @@ export const applications = pgTable("applications", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  role: varchar("role", { length: 50 }).default('Staff'), // 'Staff', 'DDD', 'Director'
+  division: varchar("division", { length: 100 }), // 'VMD', 'PAD', etc.
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+
 // QMS TIMING TABLE
 export const qmsTimelines = pgTable("qms_timelines", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").references(() => applications.id),
-  staffId: uuid("staff_id"), 
+  staffId: uuid("staff_id").references(() => users.id), // Linked to the specific person
   point: varchar("point", { length: 100 }).notNull(),
   division: varchar("division", { length: 255 }),
-  
   startTime: timestamp("start_time").defaultNow(),
-  endTime: timestamp("end_time"), 
+  endTime: timestamp("end_time"),
 });
 
 // --- 2. RELATIONS ---
