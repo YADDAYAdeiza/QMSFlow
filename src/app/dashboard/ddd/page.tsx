@@ -1,65 +1,39 @@
 import { db } from "@/db";
 import { applications } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import AssignToStaffButton from "@/components/AssignToStaffButton";
+import StaffSelector from "@/components/StaffSelector";
 
-export default async function DDDPage() {
-  // Fetch dossiers waiting for DDD assignment
+export default async function DDDInboxPage() {
   const dddInbox = await db.query.applications.findMany({
     where: eq(applications.currentPoint, 'Divisional Deputy Director'),
-    with: {
-      company: true,
-    },
+    with: { company: true }
   });
 
   return (
-    <div className="p-8 bg-gray-50 min-h-screen">
-      <h1 className="text-2xl font-bold mb-6">DDD: Divisional Assignment Hub</h1>
-      
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-gray-100 text-sm uppercase text-gray-600">
-            <tr>
-              <th className="p-4 border-b">App #</th>
-              <th className="p-4 border-b">Type</th>
-              <th className="p-4 border-b">Company</th>
-              <th className="p-4 border-b">Director's Recommended Divisions</th>
-              <th className="p-4 border-b">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {dddInbox.map((app) => (
-              <tr key={app.id} className="hover:bg-gray-50">
-                <td className="p-4 border-b font-mono font-medium">{app.applicationNumber}</td>
-                <td className="p-4 border-b text-sm">{app.type}</td>
-                <td className="p-4 border-b text-sm">{app.company?.name}</td>
-                <td className="p-4 border-b">
-                  <div className="flex gap-1 flex-wrap">
-                    {app.details.assignedDivisions.map((div) => (
-                      <span key={div} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full font-semibold">
-                        {div}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="p-4 border-b">
-                  {/* This button will trigger the final push to Staff and start QMS */}
-                  <AssignToStaffButton 
-                    appId={app.id} 
-                    divisions={app.details.assignedDivisions} 
-                  />
-                </td>
-              </tr>
-            ))}
-            {dddInbox.length === 0 && (
-              <tr>
-                <td colSpan={5} className="p-8 text-center text-gray-500 italic">
-                  Inbox empty. No applications awaiting assignment.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+    <div className="p-8">
+      <h1 className="text-2xl font-bold mb-6">DDD Assignment Hub</h1>
+      <div className="space-y-4">
+        {dddInbox.map(app => (
+          <div key={app.id} className="p-4 bg-white shadow rounded-lg border flex justify-between items-center">
+            <div>
+              <p className="font-mono text-sm text-blue-600">{app.applicationNumber}</p>
+              <h3 className="font-bold">{app.company?.name}</h3>
+              <p className="text-xs text-gray-500">Type: {app.type}</p>
+            </div>
+            
+            <div className="flex flex-col gap-2">
+              <span className="text-[10px] uppercase font-bold text-gray-400">Assign Technical Reviewer:</span>
+              {/* Note: In your logic, one app might have multiple divisions. 
+                  We map through assigned divisions to assign a person for each. */}
+              {app.details.assignedDivisions.map(div => (
+                <div key={div} className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold">{div} Division:</span>
+                  <StaffSelector appId={app.id} division={div} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

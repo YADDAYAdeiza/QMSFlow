@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 
 export async function assignToStaff(applicationId: number, staffId: string, division: string) {
   const timestamp = new Date().toISOString();
+  const message = `Assigned to technical staff for review in ${division}`;
 
   // 1. Move Point to Staff & Log the specific assignment
   await db.update(applications)
@@ -18,7 +19,7 @@ export async function assignToStaff(applicationId: number, staffId: string, divi
         (details->'comments') || jsonb_build_array(jsonb_build_object(
           'from', 'DDD',
           'role', 'Divisional Deputy Director',
-          'text', ${`Assigned to technical staff for review in ${division}`},
+          'text', ${message}::text,
           'timestamp', ${timestamp}::text
         ))
       )`
@@ -35,4 +36,5 @@ export async function assignToStaff(applicationId: number, staffId: string, divi
   });
 
   revalidatePath('/dashboard/ddd');
+  revalidatePath(`/dashboard/${division.toLowerCase()}`);
 }
