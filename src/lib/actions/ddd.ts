@@ -1,39 +1,29 @@
 "use server"
 
 import { db } from "@/db";
-import { applications, qmsTimelines } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { qmsTimelines, applications } from "@/db/schema";
+import { eq, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 export async function assignToStaff(applicationId: number, staffId: string, division: string) {
-  const timestamp = new Date().toISOString();
-  const message = `Assigned to technical staff for review in ${division}`;
-
-  // 1. Move Point to Staff & Log the specific assignment
+  // 1. Update the application to show it's now at the "Staff" point
   await db.update(applications)
-    .set({
-      currentPoint: 'Staff',
-      details: sql`jsonb_set(
-        details, 
-        '{comments}', 
-        (details->'comments') || jsonb_build_array(jsonb_build_object(
-          'from', 'DDD',
-          'role', 'Divisional Deputy Director',
-          'text', ${message}::text,
-          'timestamp', ${timestamp}::text
-        ))
-      )`
-    })
+    .set({ currentPoint: 'Staff' })
     .where(eq(applications.id, applicationId));
 
-  // 2. Start the INDIVIDUAL QMS Clock
-  await db.insert(qmsTimelines).values({
-    applicationId: applicationId,
-    staffId: staffId, // This is the UUID of the specific person
-    point: 'Staff',
-    division: division,
-    startTime: new Date(),
-  });
+  // 2. IMPORTANT: Update the timeline row so it leaves the DDD inbox
+  // We change the 'point' so the DDD query (which looks for 'Divisional Deputy Director') 
+  // no longer finds this specific record.
+  await db.update(qmsTimelines)
+    .set({ 
+      staffId: staffId, 
+      point: 'Technical Review' // Changing the point moves it out of the DDD inbox
+    })
+    .where(and(
+      eq(qmsTimelines.applicationId, applicationId),
+      eq(qmsTimelines.division, division.toUpperCase()),
+      isNull(qmsTimelines.endTime)
+    ));
 
   revalidatePath('/dashboard/ddd');
   revalidatePath(`/dashboard/${division.toLowerCase()}`);

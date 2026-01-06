@@ -1,63 +1,58 @@
-
-import { createClient } from '@/utils/supabase/client';
-import QMSCountdown from '@/components/QMSCountdown'; // Import the countdown here
-import ReviewButton from '@/components/ReviewButton';
+import { db } from "@/db";
+import { qmsTimelines, applications, companies } from "@/db/schema";
+import { eq, and, isNull, ilike } from "drizzle-orm";
+import Link from "next/link";
 
 export default async function StaffDashboard({ params }: { params: Promise<{ division: string }> }) {
-  const supabase = await createClient();
+  const { division } = await params;
+  const myDivision = division.toUpperCase();
 
+  // This query finds tasks assigned to THIS division at the TECHNICAL REVIEW stage
+  const staffTasks = await db
+    .select({
+      id: qmsTimelines.id,
+      applicationId: qmsTimelines.applicationId,
+      startTime: qmsTimelines.startTime,
+      point: qmsTimelines.point,
+      applicationNumber: applications.applicationNumber,
+      companyName: companies.name,
+    })
+    .from(qmsTimelines)
+    .innerJoin(applications, eq(qmsTimelines.applicationId, applications.id))
+    .leftJoin(companies, eq(applications.companyId, companies.id))
+    .where(
+      and(
+        ilike(qmsTimelines.division, myDivision),
+        eq(qmsTimelines.point, 'Technical Review'), // Filter for the "Action" stage
+        isNull(qmsTimelines.endTime),
+        // FIX: Only show tasks assigned specifically to THIS person
+        // eq(qmsTimelines.staffId, currentStaffId)
+      )
+    );
 
-const { division } = await params;
-const upperDivision = division.toUpperCase();
-
-console.log(division, 'Here')
-const { data: applications, error } = await supabase
-  .from('applications')
-  .select('*')
-  // This targets the JSONB column 'details' 
-  // It looks for the key 'assignedDivisions' containing the specific division in an array
-  .contains('details', { assignedDivisions: [upperDivision] })
-  .eq('current_point', 'Staff');
-
-if (error) {
-  console.error("Query Error:", error.message);
-}
-
-
-console.log("Fetched Applications:", applications);
-    console.log('Thsi is applications', applications)
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold mb-6">{division.toUpperCase()} Staff Queue</h1>
-      
-      <table className="min-w-full bg-white border border-gray-200">
-        <thead>
-          <tr className="bg-gray-50">
-            <th className="p-3 text-left border-b">Dossier ID</th>
-            <th className="p-3 text-left border-b">QMS Time Remaining</th>
-            <th className="p-3 text-left border-b">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-            {applications?.map((app) => (
-                <tr key={app.id}>
-                    <td className="p-3 border-b">{String(app.id).slice(0, 8)}</td>
-                    
-                    {/* Pass created_at here */}
-                    <td className="p-3 border-b font-mono">
-                        <QMSCountdown 
-                        startTime={app.created_at} 
-                        limitHours={48} 
-                        />
-                    </td>
+      <h1 className="text-2xl font-bold mb-6">{myDivision} Staff Workspace</h1>
+      <div className="grid gap-4">
+        {staffTasks.map((task) => (
+          <div key={task.id} className="bg-white p-6 rounded-xl shadow-sm border flex justify-between items-center">
+            <div>
+              <span className="text-xs font-mono font-bold text-green-600 bg-green-50 px-2 py-1 rounded">
+                IN REVIEW
+              </span>
+              <h2 className="text-xl font-bold mt-2">{task.companyName}</h2>
+              <p className="text-sm text-gray-500">App: {task.applicationNumber}</p>
+            </div>
 
-                    <td className="p-3 border-b">
-                        <ReviewButton inputs={app.details?.inputs} />
-                    </td>
-                </tr>
-            ))}
-        </tbody>
-      </table>
+            <Link 
+              href={`/dashboard/${division.toLowerCase()}/review/${task.applicationId}`}
+              className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold"
+            >
+              Open Dossier
+            </Link>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

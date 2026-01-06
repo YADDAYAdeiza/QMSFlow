@@ -10,7 +10,6 @@ interface PushToDDDButtonProps {
 
 export default function PushToDDDButton({ appId, divisions }: PushToDDDButtonProps) {
   const [isPending, startTransition] = useTransition();
-
   const handlePush = () => {
     startTransition(async () => {
       try {

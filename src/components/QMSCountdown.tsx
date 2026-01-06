@@ -1,49 +1,39 @@
-"use client";
+"use client"
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 
-interface QMSCountdownProps {
-  startTime: string; // ISO string from DB
-  limitHours: number; // e.g., 48
-}
-
-export default function QMSCountdown({ startTime, limitHours }: QMSCountdownProps) {
+export default function QMSCountdown({ startTime }: { startTime: Date }) {
   const [timeLeft, setTimeLeft] = useState("");
+  const [isUrgent, setIsUrgent] = useState(false);
 
   useEffect(() => {
-
-    // If there's no start time, don't try to calculate
-    if (!startTime) {
-        setTimeLeft("PENDING");
-        return;
-    }
-    const deadline = new Date(startTime).getTime() + limitHours * 60 * 60 * 1000;
-
-    const interval = setInterval(() => {
+    const calculateTime = () => {
+      const start = new Date(startTime).getTime();
+      const deadline = start + (48 * 60 * 60 * 1000); // 48 Hours in ms
       const now = new Date().getTime();
       const diff = deadline - now;
 
       if (diff <= 0) {
         setTimeLeft("OVERDUE");
-        clearInterval(interval);
+        setIsUrgent(true);
         return;
       }
 
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      
+      if (hours < 5) setIsUrgent(true);
+      setTimeLeft(`${hours}h ${minutes}m`);
+    };
 
-      setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [startTime, limitHours]);
-
-  const isOverdue = timeLeft === "OVERDUE";
+    calculateTime();
+    const timer = setInterval(calculateTime, 60000); // Update every minute
+    return () => clearInterval(timer);
+  }, [startTime]);
 
   return (
-    <span className={`font-mono font-bold ${isOverdue ? "text-red-600 animate-pulse" : "text-green-600"}`}>
+    <div className={`text-2xl font-mono font-bold ${isUrgent ? 'text-red-600 animate-pulse' : 'text-blue-700'}`}>
       {timeLeft}
-    </span>
+    </div>
   );
 }
