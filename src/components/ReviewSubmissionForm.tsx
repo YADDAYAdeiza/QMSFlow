@@ -32,9 +32,15 @@ export default function ReviewSubmissionForm({ appId, division, staffId }: { app
         <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">
           Technical Observations & Findings
         </label>
-        <textarea
+        {/* <textarea
           className="w-full h-64 p-4 border rounded-xl shadow-inner bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none"
           placeholder="Enter detailed technical review here..."
+          value={findings}
+          onChange={(e) => setFindings(e.target.value)}
+        /> */}
+        <textarea
+          className="w-full h-48 p-4 border rounded shadow-inner"
+          placeholder="Enter your technical findings and recommendations here..."
           value={findings}
           onChange={(e) => setFindings(e.target.value)}
         />
