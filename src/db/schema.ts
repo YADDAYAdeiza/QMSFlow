@@ -41,6 +41,7 @@ export const applications = pgTable("applications", {
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  status: text("status").default("PENDING"), // ADD THIS LINE
 });
 
 
@@ -55,14 +56,25 @@ export const users = pgTable("users", {
 
 
 // QMS TIMING TABLE
+// export const qmsTimelines = pgTable("qms_timelines", {
+//   id: serial("id").primaryKey(),
+//   applicationId: integer("application_id").references(() => applications.id),
+//   staffId: uuid("staff_id").references(() => users.id), // Linked to the specific person
+//   point: varchar("point", { length: 100 }).notNull(),
+//   division: varchar("division", { length: 255 }),
+//   startTime: timestamp("start_time").defaultNow(),
+//   endTime: timestamp("end_time"),
+// });
+
 export const qmsTimelines = pgTable("qms_timelines", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").references(() => applications.id),
-  staffId: uuid("staff_id").references(() => users.id), // Linked to the specific person
-  point: varchar("point", { length: 100 }).notNull(),
-  division: varchar("division", { length: 255 }),
+  staffId: text("staff_id"),
+  division: text("division"),
+  point: text("point"),
   startTime: timestamp("start_time").defaultNow(),
   endTime: timestamp("end_time"),
+  details: jsonb("details"), // ENSURE THIS IS HERE SO IT ISN'T DELETED
 });
 
 // --- 2. RELATIONS ---

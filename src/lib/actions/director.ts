@@ -5,6 +5,7 @@ import { qmsTimelines, applications } from "@/db/schema";
 import { eq, sql, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
+
 export async function pushToDDD(applicationId: number, selectedDivisions: string[]) {
   console.log("RECEIVED DIVISIONS:", selectedDivisions); // Check your terminal!
 
@@ -46,44 +47,40 @@ export async function pushToDDD(applicationId: number, selectedDivisions: string
 
 
 export async function issueFinalClearance(
-  applicationId: number,
+  applicationId: number, 
   directorComments: string
 ) {
   try {
     const now = new Date();
 
-    // 1. Close the Director's active clock
+    // 1. Check if there is an active Directorate clock first
+    // This prevents the "No values to set" error if the clock is already stopped
     await db.update(qmsTimelines)
       .set({ 
-        endTime: now,
-        point: 'Certificate Issued',
+        endTime: sql`now`,
         details: {
           director_final_notes: directorComments,
-          final_status: 'CLEARED'
+          final_decision: "APPROVED",
+          decision_date: now.toISOString()
         } as any
       })
       .where(and(
         eq(qmsTimelines.applicationId, applicationId),
         eq(qmsTimelines.division, 'DIRECTORATE'),
-        isNull(qmsTimelines.endTime)
+        // Only update if it's actually still open!
+        isNull(qmsTimelines.endTime) 
       ));
 
-    // 2. Update the main Application record to 'Completed'
+    // 2. ALWAYS update the Application Status
+    // Even if the timeline was already closed, we want to ensure the app is 'CLEARED'
     await db.update(applications)
-      .set({ 
-        // Assuming you have a status field in your applications table
-        // status: 'APPROVED' 
-      })
+      .set({ status: 'CLEARED' }) 
       .where(eq(applications.id, applicationId));
 
-    // 3. Clear all relevant caches
-    revalidatePath(`/dashboard/director`);
-    revalidatePath(`/dashboard/lod`);
-    revalidatePath(`/application/${applicationId}`);
-
+    revalidatePath(`/dashboard/director/review/${applicationId}`);
     return { success: true };
   } catch (error) {
-    console.error("Final Issuance Error:", error);
-    return { success: false, error: "Failed to issue certificate." };
+    console.error("Issuance Error:", error);
+    return { success: false, error: "Failed to finalize dossier." };
   }
 }
