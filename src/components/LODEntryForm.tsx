@@ -4,7 +4,7 @@ import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { lodFormSchema } from '@/lib/validations';
-import { submitLODApplication } from '@/lib/actions';
+import { submitLODApplication } from '@/lib/actions/index';
 import FileUpload from './FileUpload'; 
 
 export default function LODEntryForm() {
