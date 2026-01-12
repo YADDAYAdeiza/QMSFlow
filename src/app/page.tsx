@@ -1,3 +1,5 @@
+// "use server"
+
 import LODEntryForm from "@/components/LODEntryForm";
 
 export default function LODWorkstation() {

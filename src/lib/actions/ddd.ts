@@ -1,96 +1,8 @@
-// "use server"
-
-// import { db } from "@/db";
-// import { qmsTimelines, applications } from "@/db/schema";
-// import { eq, and, isNull } from "drizzle-orm";
-// import { revalidatePath } from "next/cache";
-
-// export async function assignToStaff(applicationId: number, staffId: string, division: string) {
-//   // 1. Update the application to show it's now at the "Staff" point
-//   await db.update(applications)
-//     .set({ currentPoint: 'Staff' })
-//     .where(eq(applications.id, applicationId));
-
-//   // 2. IMPORTANT: Update the timeline row so it leaves the DDD inbox
-//   // We change the 'point' so the DDD query (which looks for 'Divisional Deputy Director') 
-//   // no longer finds this specific record.
-//   await db.update(qmsTimelines)
-//     .set({ 
-//       staffId: staffId, 
-//       point: 'Technical Review' // Changing the point moves it out of the DDD inbox
-//     })
-//     .where(and(
-//       eq(qmsTimelines.applicationId, applicationId),
-//       eq(qmsTimelines.division, division.toUpperCase()),
-//       isNull(qmsTimelines.endTime)
-//     ));
-
-//   revalidatePath('/dashboard/ddd');
-//   revalidatePath(`/dashboard/${division.toLowerCase()}`);
-// }
-
-// "use server"
-
-// import { db } from "@/db";
-// import { qmsTimelines } from "@/db/schema";
-// import { eq, and, isNull } from "drizzle-orm";
-// import { revalidatePath } from "next/cache";
-
-// export async function approveToDirector(
-//   applicationId: number,
-//   division: string,
-//   dddComments: string
-// ) {
-//   try {
-//     const now = new Date();
-
-//     // 1. Close the DDD's active validation row
-//     await db.update(qmsTimelines)
-//       .set({ 
-//         endTime: now,
-//         point: 'Approved by DDD',
-//         details: {
-//           ddd_comment: dddComments,
-//           status: 'FORWARDED_TO_DIRECTOR'
-//         } as any
-//       })
-//       .where(and(
-//         eq(qmsTimelines.applicationId, applicationId),
-//         eq(qmsTimelines.division, division.toUpperCase()),
-//         isNull(qmsTimelines.endTime)
-//       ));
-
-//     // 2. Start the Director's Action Row
-//     // Note: The Director's clock often runs on a different SOP limit (e.g. 5 days)
-//     await db.insert(qmsTimelines).values({
-//       applicationId,
-//       division: 'DIRECTORATE',
-//       staffId: 'DIRECTOR_ID', // Replace with Director's actual ID later
-//       point: 'Director Final Review',
-//       startTime: now,
-//       details: {
-//         originating_division: division,
-//         division_comments: dddComments
-//       } as any
-//     });
-
-//     // 3. Revalidate the dashboards
-//     revalidatePath(`/dashboard/ddd`);
-//     revalidatePath(`/dashboard/director`);
-//     revalidatePath(`/dashboard/lod`); // So LOD sees the move
-
-//     return { success: true };
-//   } catch (error) {
-//     console.error("Approval Error:", error);
-//     return { success: false, error: "Failed to move to Director." };
-//   }
-// }
-
 "use server"
 
 import { db } from "@/db";
-import { qmsTimelines } from "@/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { qmsTimelines, applications } from "@/db/schema";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -99,21 +11,22 @@ import { revalidatePath } from "next/cache";
  */
 export async function assignToStaff(applicationId: number, staffId: string, division: string) {
   try {
-    const now = new Date();
+    const now = sql`now()`;
 
     // 1. Close the DDD's "Pending Assignment" segment
+    // We keep the point name consistent so it doesn't break your Inbox query
     await db.update(qmsTimelines)
       .set({ 
         endTime: now,
-        point: 'Assigned to Staff' 
       })
       .where(and(
         eq(qmsTimelines.applicationId, applicationId),
-        eq(qmsTimelines.division, division.toUpperCase()),
+        eq(qmsTimelines.point, 'Divisional Deputy Director'), // Target the specific DDD row
         isNull(qmsTimelines.endTime)
       ));
 
     // 2. Start the Staff's "Technical Review" segment
+    // FIXED: Bug #1 - This ensures the Staff dashboard "sees" the row
     await db.insert(qmsTimelines).values({
       applicationId,
       division: division.toUpperCase(),
@@ -123,6 +36,16 @@ export async function assignToStaff(applicationId: number, staffId: string, divi
       details: { iteration: 1 } as any
     });
 
+    // 3. NEW: Update the main Application Pointer
+    // This allows the Director/LOD to see the status without checking timelines
+    await db.update(applications)
+      .set({ 
+        currentPoint: 'Technical Review',
+        status: 'TECHNICAL_REVIEW' 
+      })
+      .where(eq(applications.id, applicationId));
+
+    // 4. Revalidate to clear the DDD's inbox immediately
     revalidatePath('/dashboard/ddd');
     revalidatePath(`/dashboard/${division.toLowerCase()}`);
     
@@ -137,19 +60,21 @@ export async function assignToStaff(applicationId: number, staffId: string, divi
  * PATH B: DDD Approves to Director
  * This stops the Division's involvement and starts the Directorate's Master Clock.
  */
+
 export async function approveToDirector(
   applicationId: number,
   division: string,
   dddComments: string
 ) {
   try {
-    const now = new Date();
+    const now = sql`now()`;
 
-    // 1. Close the DDD's active validation row
+    // 1. Close the DDD's active row
+    // FIX: We target 'Divisional Deputy Director' specifically to ensure we close the right segment
     await db.update(qmsTimelines)
       .set({ 
         endTime: now,
-        point: 'Approved by DDD',
+        comments: dddComments, // Storing here makes it easy for the Director to read
         details: {
           ddd_comment: dddComments,
           status: 'FORWARDED_TO_DIRECTOR'
@@ -157,7 +82,7 @@ export async function approveToDirector(
       })
       .where(and(
         eq(qmsTimelines.applicationId, applicationId),
-        eq(qmsTimelines.division, division.toUpperCase()),
+        eq(qmsTimelines.point, 'Divisional Deputy Director'), // Consistent naming
         isNull(qmsTimelines.endTime)
       ));
 
@@ -165,8 +90,7 @@ export async function approveToDirector(
     await db.insert(qmsTimelines).values({
       applicationId,
       division: 'DIRECTORATE',
-      staffId: 'DIRECTOR_ID', 
-      point: 'Director Final Review',
+      point: 'Director', // Keep this simple so the Director's query finds it
       startTime: now,
       details: {
         originating_division: division,
@@ -174,6 +98,16 @@ export async function approveToDirector(
       } as any
     });
 
+    // 3. NEW: Sync the Application Table
+    // This is the "Truth" for the LOD/Status tracker
+    await db.update(applications)
+      .set({ 
+        currentPoint: 'Director',
+        status: 'PENDING_FINAL_AUTHORIZATION' 
+      })
+      .where(eq(applications.id, applicationId));
+
+    // 4. Revalidate
     revalidatePath(`/dashboard/ddd`);
     revalidatePath(`/dashboard/director`);
     revalidatePath(`/dashboard/lod`); 

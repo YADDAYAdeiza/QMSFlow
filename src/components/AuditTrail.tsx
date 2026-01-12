@@ -1,103 +1,103 @@
 import React from 'react';
-import { format } from 'date-fns';
+import { CheckCircle2, Clock, MessageSquare, User } from 'lucide-react';
 
-export default function AuditTrail({ segments = [] }: { segments: any[] }) {
-  // Debug log to see the data in your browser console
+interface AuditSegment {
+  idx: number;
+  point: string;
+  division: string | null;
+  staffId: string | null;
+  startTime: string | Date;
+  endTime: string | Date | null;
+  comments: string | null; 
+}
 
+export default function AuditTrail({ segments }: { segments: AuditSegment[] }) {
   if (!segments || segments.length === 0) {
     return (
-      <div className="text-slate-400 text-xs italic py-4">
-        No workflow history found for this application.
+      <div className="flex items-center gap-2 p-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+        <Clock className="w-4 h-4 text-slate-400" />
+        <span className="text-slate-400 text-sm italic text-center">
+          No audit history available yet.
+        </span>
       </div>
     );
   }
 
   return (
-    <div className="flow-root">
-      <ul role="list" className="-mb-8">
-        {segments.map((segment, idx) => {
-          const isLast = idx === segments.length - 1;
-          
-          // Safety check for dates
-          const start = segment.startTime ? new Date(segment.startTime) : null;
-          const end = segment.endTime ? new Date(segment.endTime) : null;
+    <div className="space-y-1 mt-4">
+      {segments.map((segment, index) => {
+        const isCompleted = segment.endTime !== null;
+        
+        return (
+          <div key={`${segment.point}-${index}`} className="relative flex gap-4">
+            {/* Vertical Line Connector */}
+            {index !== segments.length - 1 && (
+              <span 
+                className={`absolute left-[11px] top-8 w-[2px] h-full ${
+                  isCompleted ? 'bg-emerald-100' : 'bg-slate-100'
+                }`} 
+              />
+            )}
 
-          const durationSeconds = end && start 
-            ? Math.floor((end.getTime() - start.getTime()) / 1000)
-            : null;
-
-          return (
-            <li key={idx}>
-              <div className="relative pb-8">
-                {/* Vertical Connector Line */}
-                {!isLast && (
-                  <span 
-                    className="absolute left-4 top-4 -ml-px h-full w-0.5 bg-gray-200" 
-                    aria-hidden="true" 
-                  />
+            {/* Icon Status Indicator */}
+            <div className="relative z-10 flex flex-col items-center">
+              <div className="p-0.5 bg-white rounded-full">
+                {isCompleted ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                ) : (
+                  <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
                 )}
-                
-                <div className="relative flex space-x-3">
-                  {/* Status Circle Icon */}
-                  <div>
-                    <span className={`h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-white ${
-                      segment.endTime ? 'bg-emerald-500' : 'bg-blue-500 animate-pulse'
-                    }`}>
-                      <div className="h-2.5 w-2.5 rounded-full bg-white" />
+              </div>
+            </div>
+
+            {/* Content Card */}
+            <div className="flex-1 pb-8">
+              <div className="flex justify-between items-start bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+                <div>
+                  <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wider">
+                    {segment.point}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 bg-slate-800 text-white rounded">
+                      {segment.division || 'GENERAL'}
                     </span>
-                  </div>
-
-                  {/* Content Block */}
-                  <div className="flex min-w-0 flex-1 justify-between space-x-4 pt-1.5">
-                    <div>
-                      <p className="text-sm text-gray-500">
-                        <span className="font-bold text-gray-900">{segment.point}</span> by{' '}
-                        <span className="font-medium text-blue-600 underline decoration-blue-200 underline-offset-4">
-                          {segment.division}
-                        </span>
-                      </p>
-                      
-                      {/* Show Staff Comments from JSONB */}
-                      {segment.details?.staff_comment && (
-                        <p className="mt-2 text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-100 italic">
-                          "{segment.details.staff_comment}"
-                        </p>
-                      )}
-
-                      {/* Show DDD Comments from JSONB */}
-                      {segment.details?.ddd_comment && (
-                        <p className="mt-2 text-xs text-amber-700 bg-amber-50 p-2 rounded border border-amber-100 italic">
-                          DDD: "{segment.details.ddd_comment}"
-                        </p>
-                      )}
-
-                      {/* Show Director Notes if present */}
-                      {segment.details?.director_final_notes && (
-                        <p className="mt-2 text-xs text-emerald-800 bg-emerald-50 p-2 rounded border border-emerald-100 font-medium">
-                          Director: "{segment.details.director_final_notes}"
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Time and Duration Label */}
-                    <div className="whitespace-nowrap text-right text-xs text-slate-400">
-                      <time dateTime={start?.toISOString()}>
-                        {start ? format(start, 'MMM d, HH:mm') : 'Pending'}
-                      </time>
-                      
-                      {durationSeconds && (
-                        <div className="font-mono text-[10px] text-emerald-600 font-bold mt-1 bg-emerald-50 px-1 rounded inline-block">
-                          {Math.floor(durationSeconds / 3600)}h {Math.floor((durationSeconds % 3600) / 60)}m
-                        </div>
-                      )}
-                    </div>
+                    {segment.staffId && (
+                      <span className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
+                        <User className="w-3 h-3" /> {segment.staffId}
+                      </span>
+                    )}
                   </div>
                 </div>
+                
+                {/* Date/Time Stamps */}
+                <div className="text-right">
+                  <p className="text-[10px] font-bold text-slate-600">
+                    {new Date(segment.startTime).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                  </p>
+                  <p className="text-[9px] text-slate-400 font-medium">
+                    {new Date(segment.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
               </div>
-            </li>
-          );
-        })}
-      </ul>
+
+              {/* STAFF NOTES / QMS FINDINGS (The Blue Box) */}
+              {segment.comments && (
+                <div className="mt-2 p-3 bg-blue-50/80 border border-blue-100 rounded-lg flex gap-3 shadow-sm">
+                  <MessageSquare className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest">
+                      Official Remarks:
+                    </p>
+                    <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                      {segment.comments}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

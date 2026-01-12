@@ -2,12 +2,12 @@
 
 import { db } from "@/db";
 import { applications, companies, qmsTimelines } from "@/db/schema";
-import { eq, sql } from "drizzle-orm"; // Added sql
-import { revalidatePath } from "next/cache"; // Added revalidatePath
+import { eq, sql } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 
 export async function submitLODApplication(data: any) {
   try {
-    // 1. Company Logic (Ensure the company exists in a structured table)
+    // 1. Get/Create Company
     let company = await db.query.companies.findFirst({
       where: eq(companies.name, data.companyName),
     });
@@ -20,47 +20,49 @@ export async function submitLODApplication(data: any) {
       company = newComp;
     }
 
-    // 2. Create Application
-    // Note: We use the JSONB 'details' field for evolving data as per your instructions
+    // 2. We use sql`now()` for the QMS timing (The Source of Truth)
+    const dbNow = sql`now()`; 
+
+    // 3. Create Application (Standard JavaScript Style)
     const [newApp] = await db.insert(applications).values({
       applicationNumber: data.appNumber,
       type: data.type,
       companyId: company.id,
-      status: 'PENDING_DIRECTOR', // Setting a clear initial status
-      currentPoint: 'Director', 
+      status: 'PENDING_DIRECTOR',
+      currentPoint: 'Director',
       details: {
-        factory_name: data.facilityName, // Aligning keys with your PDF generator
-        factory_address: data.companyAddress, 
+        factory_name: data.facilityName || data.companyName,
+        factory_address: data.companyAddress || "",
         products: [data.productCategory || "Product under review"],
-        poaUrl: data.poaUrl,
-        inspectionReportUrl: data.inspectionReportUrl,
-        assignedDivisions: data.divisions,
+        poaUrl: data.poaUrl || "",
+        inspectionReportUrl: data.inspectionReportUrl || "",
+        assignedDivisions: data.divisions || [],
         comments: [{
           from: "LOD",
           role: "LOD",
-          text: data.initialComment,
-          timestamp: new Date().toISOString()
+          text: data.initialComment || "Application Received",
+          // We use a regular string here for the JSON, 
+          // but the timeline table will use the REAL clock.
+          timestamp: new Date().toISOString() 
         }]
       }
     }).returning();
 
-    // 3. START THE QMS CLOCK (The Critical Step)
-    // We use sql`now()` to bypass your local computer's clock and use DB time
+    // 4. START THE QMS CLOCK (This is what fixes the "Out of Order" bug)
     await db.insert(qmsTimelines).values({
       applicationId: newApp.id,
-      staffId: "LOD_OFFICER", // Or dynamic if you have auth
+      staffId: "LOD_OFFICER",
       division: "LOD",
       point: 'Director',
-      startTime: sql`now()`, 
+      startTime: dbNow, // ✅ Uses the DB clock (sql`now()`)
     });
 
-    // 4. Refresh the data for all viewers
     revalidatePath("/");
     revalidatePath("/dashboard/applications");
 
     return { success: true, id: newApp.id };
   } catch (error) {
     console.error("QMS Submission Error:", error);
-    throw new Error("Failed to register application in QMS");
+    return { success: false, error: "Submission failed" };
   }
 }

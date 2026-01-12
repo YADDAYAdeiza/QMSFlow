@@ -59,7 +59,7 @@ export default async function TechnicalReviewPage({
   // 6. Generate Supabase URL for the iFrame
   const dossierPath = `0.9554887811327575.pdf`;
   const { data: urlData } = supabase.storage.from('documents').getPublicUrl(dossierPath);
-
+  console.log("DEBUG: Active Task Division is", activeTask.division)
   return (
     <div className="flex h-screen overflow-hidden bg-white">
       {/* LEFT: PDF VIEWER (2/3 Screen) */}
@@ -95,7 +95,7 @@ export default async function TechnicalReviewPage({
         <div className="flex-grow">
           <ReviewSubmissionForm 
             appId={applicationId} 
-            division={division} 
+            division={activeTask.division ?? 'VMD'} // Pull from the DB record instead of URL
             staffId={currentStaffId} 
           />
         </div>

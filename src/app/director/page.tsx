@@ -25,33 +25,28 @@ export default async function DirectorPage() {
                 <td className="p-4 border-b font-mono">{app.applicationNumber}</td>
                 <td className="p-4 border-b">{(app as any).company?.name}</td>
                 <td className="p-4 border-b">
-                    {/* If it's a Facility Verification */}
-                    {(app.details as any).inputs.poaUrl && (
-                        <a 
-                        href={(app.details as any).inputs.poaUrl} 
-                        target="_blank" 
-                        className="text-blue-600 underline text-sm block"
-                        >
-                        View POA
-                        </a>
-                    )}
+                  {(() => {
+                    // Look for the URL in multiple possible locations
+                    const details = (app.details as any);
+                    const docUrl = details?.inspectionReportUrl || 
+                                  details?.poaUrl || 
+                                  details?.inputs?.poaUrl || 
+                                  details?.inputs?.inspectionReportUrl;
 
-                    {/* If it's an Inspection Review */}
-                    {(app.details as any).inputs.inspectionReportUrl && (
-                        <a 
-                        href={(app.details as any).inputs.inspectionReportUrl} 
-                        target="_blank" 
-                        className="text-green-600 underline text-sm block"
-                        >
-                        View Inspection Report
-                        </a>
-                    )}
-                    
-                    {/* Fallback if something went wrong */}
-                    {!(app.details as any).inputs.poaUrl && !(app.details as any).inputs.inspectionReportUrl && (
-                        <span className="text-gray-400 text-xs italic">No docs uploaded</span>
-                    )}
-                    </td>
+                    if (!docUrl) return <span className="text-slate-400 italic text-xs">No Document</span>;
+
+                    return (
+                      <a
+                        href={docUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline font-bold text-sm"
+                      >
+                        VIEW DOSSIER ↗
+                      </a>
+                    );
+                  })()}
+                </td>
                 <td className="p-4 border-b">
                   {(app.details as any).assignedDivisions.join(", ")}
                 </td>

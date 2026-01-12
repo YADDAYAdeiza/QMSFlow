@@ -2,85 +2,107 @@
 
 import { db } from "@/db";
 import { qmsTimelines, applications } from "@/db/schema";
-import { eq, sql, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
-
 export async function pushToDDD(applicationId: number, selectedDivisions: string[]) {
-  console.log("RECEIVED DIVISIONS:", selectedDivisions); // Check your terminal!
-
   if (!selectedDivisions || selectedDivisions.length === 0) {
     throw new Error("No divisions selected for assignment.");
   }
 
-  const timestamp = new Date();
+  // Use this for every segment in this action to keep them perfectly in sync
+  const timestamp = sql`now()`; 
 
-  // 1. Update the Main Application Point
-  await db.update(applications)
-    .set({ currentPoint: 'Divisional Deputy Director' })
-    .where(eq(applications.id, applicationId));
-
-  // 2. Prepare entries with explicit key names
-  const timelineEntries = selectedDivisions.map((divName) => {
-    // Ensuring we return a clean object with no undefined values
-    return {
-      applicationId: applicationId,
-      division: divName.toUpperCase().trim(), // Force clean uppercase string
-      point: 'Divisional Deputy Director',
-      startTime: timestamp,
-    };
-  });
-
-  console.log("INSERTING ROWS:", timelineEntries);
-
-  // 3. Perform Insert
   try {
-    await db.insert(qmsTimelines).values(timelineEntries);
-  } catch (error) {
-    console.error("DATABASE INSERT ERROR:", error);
-    throw error;
-  }
-
-  revalidatePath('/dashboard/director');
-}
-
-
-
-export async function issueFinalClearance(
-  applicationId: number, 
-  directorComments: string
-) {
-  try {
-    const now = new Date();
-
-    // 1. Check if there is an active Directorate clock first
-    // This prevents the "No values to set" error if the clock is already stopped
+    // 1. Close the Director's current active segment
     await db.update(qmsTimelines)
       .set({ 
-        endTime: sql`now`,
-        details: {
-          director_final_notes: directorComments,
-          final_decision: "APPROVED",
-          decision_date: now.toISOString()
-        } as any
+        endTime: timestamp,
+        comments: `Assigned to: ${selectedDivisions.join(", ")}` 
       })
       .where(and(
         eq(qmsTimelines.applicationId, applicationId),
-        eq(qmsTimelines.division, 'DIRECTORATE'),
-        // Only update if it's actually still open!
-        isNull(qmsTimelines.endTime) 
+        eq(qmsTimelines.point, 'Director'),
+        isNull(qmsTimelines.endTime)
       ));
 
-    // 2. ALWAYS update the Application Status
-    // Even if the timeline was already closed, we want to ensure the app is 'CLEARED'
+    // 2. Move the application point forward
     await db.update(applications)
-      .set({ status: 'CLEARED' }) 
+      .set({ currentPoint: 'Divisional Deputy Director' })
       .where(eq(applications.id, applicationId));
 
-    revalidatePath(`/dashboard/director/review/${applicationId}`);
+    // 3. Create the new segments for the DDDs
+    const timelineEntries = selectedDivisions.map((divName) => ({
+      applicationId: applicationId,
+      division: divName.toUpperCase().trim(), 
+      point: 'Divisional Deputy Director',
+      startTime: timestamp, // ✅ Uses DB Clock
+    }));
+
+    await db.insert(qmsTimelines).values(timelineEntries);
+
+    revalidatePath('/dashboard/director');
     return { success: true };
+    
+  } catch (error) {
+    console.error("DATABASE WORKFLOW ERROR:", error);
+    throw error;
+  }
+}
+
+export async function issueFinalClearance(appId: number, directorNotes: string) {
+  try {
+    const app = await db.query.applications.findFirst({
+      where: eq(applications.id, appId),
+      with: { company: true }
+    });
+
+    if (!app) throw new Error("Application not found");
+
+    const companyFolderName = app.company?.name.replace(/[^a-z0-9]/gi, '_') || "Unknown_Company";
+    const appNumberClean = app.applicationNumber.replace(/[^a-z0-9]/gi, '-');
+    const archivePath = `${companyFolderName}/${appNumberClean}/Final_Clearance.pdf`;
+
+    const timestamp = sql`now()`; // ✅ One clock for everything
+
+    // 3. Update Application (Beginner-Friendly JavaScript Style)
+    await db.update(applications)
+      .set({
+        status: 'CLEARED',
+        currentPoint: 'Closed',
+        details: {
+          ...(app.details as object || {}), // Standard JS spread
+          director_final_notes: directorNotes,
+          archived_path: archivePath, 
+          bucket_name: 'documents',
+          issued_at: new Date().toISOString() // String label for the JSON
+        }
+      })
+      .where(eq(applications.id, appId));
+
+    // 4. Close the final QMS Timeline segment
+    await db.update(qmsTimelines)
+      .set({ 
+        endTime: timestamp, // ✅ Uses REAL DB Clock
+        comments: directorNotes 
+      })
+      .where(and(
+        eq(qmsTimelines.applicationId, appId),
+        eq(qmsTimelines.point, 'Director'),
+        isNull(qmsTimelines.endTime)
+      ));
+
+    revalidatePath("/dashboard/applications");
+    revalidatePath(`/dashboard/director/review/${appId}`);
+
+    return { 
+      success: true, 
+      message: "Application cleared and clock stopped.",
+      path: archivePath 
+    };
+    
   } catch (error) {
     console.error("Issuance Error:", error);
-    return { success: false, error: "Failed to finalize dossier." };
+    return { success: false, error: "Failed to issue final clearance" };
   }
 }

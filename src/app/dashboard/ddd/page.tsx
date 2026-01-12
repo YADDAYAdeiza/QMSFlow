@@ -68,6 +68,15 @@ export default async function DDDInboxPage({
               </div>
               
               <div className="bg-gray-50 p-4 rounded-lg border">
+                <a 
+                  href={`/dashboard/ddd/review/${task.applicationId}`}
+                  className="mt-4 inline-block text-xs font-bold text-blue-600 hover:text-blue-800 underline"
+                >
+                  OPEN FULL REVIEW & DOSSIER →
+                </a>
+              </div>
+              
+              <div className="bg-gray-50 p-4 rounded-lg border">
                 <StaffSelector 
                   appId={task.applicationId!} 
                   division={myDivision} 

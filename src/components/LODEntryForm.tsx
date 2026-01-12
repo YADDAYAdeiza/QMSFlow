@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useForm } from 'react-hook-form';
+import { useRouter } from "next/navigation";
 import { zodResolver } from '@hookform/resolvers/zod';
 import { lodFormSchema } from '@/lib/validations';
 import { submitLODApplication } from '@/lib/actions/index';
@@ -20,11 +21,13 @@ export default function LODEntryForm() {
     mode: "onChange"
   });
 
+  const router = useRouter(); // 2. Initialize it here
   const selectedType = watch("type");
 
   const onSubmit = async (data: any) => {
     try {
       await submitLODApplication(data);
+      router.refresh();
       // reset() is handled by the isSubmitSuccessful view or manually
     } catch (error) {
       console.error("Submission failed", error);
@@ -39,7 +42,7 @@ export default function LODEntryForm() {
             <p>Application has been moved to the Director's inbox.</p>
             <button 
               onClick={() => reset()} 
-              className="mt-4 text-sm underline font-bold"
+              className="mt-4 text-sm underline font-bold cursor-pointer"
             >
               Enter another application
             </button>

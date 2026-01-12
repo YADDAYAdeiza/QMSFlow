@@ -9,15 +9,19 @@ export default function ReviewSubmissionForm({ appId, division, staffId }: { app
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
-  const handleComplete = async () => {
+const handleComplete = async () => {
     if (!findings.trim()) return alert("Please enter your technical findings.");
     
     setIsSubmitting(true);
     try {
-      await submitStaffReview(appId, division, findings, staffId);
-      // Success! Go back to the main division dashboard
-      router.push(`/dashboard/${division.toLowerCase()}`);
-      router.refresh();
+      const response = await submitStaffReview(appId, division, findings, staffId);
+      
+      if (response.success) {
+        // Use window.location for a "hard" refresh if router.push feels glitchy
+        // or keep router.push for the SPA feel.
+        router.push(`/dashboard/${division.toLowerCase()}`);
+        router.refresh();
+      }
     } catch (error) {
       console.error(error);
       alert("Failed to save review.");
