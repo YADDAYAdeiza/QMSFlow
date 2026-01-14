@@ -124,19 +124,20 @@ export default function RejectionModal({
   // If the modal isn't supposed to be open, return nothing
   if (!isOpen) return null;
 
-  async function handleReturn() {
-    if (!reason) return alert("Please provide a reason for rejection");
-    
-    setLoading(true);
-    const result = await returnToStaff(appId, reason, isReassigning ? newStaffId : undefined);
-    
-    if (result.success) {
-      onSuccess();
-    } else {
-      alert("Failed to return application.");
-    }
-    setLoading(false);
+  // Inside RejectionModal.tsx
+const handleReturn = async () => {
+  if (!reason.trim()) return alert("Please provide a reason.");
+
+  // If not reassigning, we must pass the currentStaffId that was 
+  // passed into this modal as a prop!
+  const targetStaffId = isReassigning ? newStaffId : currentStaffId;
+
+  const result = await returnToStaff(appId, reason, targetStaffId);
+  
+  if (result.success) {
+    onSuccess();
   }
+};
 
   return (
     // Fixed: Added a full-screen overlay so it behaves like a real modal

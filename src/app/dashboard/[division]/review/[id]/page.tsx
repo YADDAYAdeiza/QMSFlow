@@ -4,6 +4,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { supabase } from "@/lib/supabase";
 import QMSCountdown from "@/components/QMSCountdown";
 import ReviewSubmissionForm from "@/components/ReviewSubmissionForm";
+import { notFound } from "next/navigation";
 
 export default async function TechnicalReviewPage({ 
   params 
@@ -13,28 +14,17 @@ export default async function TechnicalReviewPage({
   const { division, id } = await params;
   const applicationId = parseInt(id);
 
-  // 1. Static ID for Vibe-Coding testing
+  // 1. Current Staff ID (Static for Vibe-Coding/Testing phase)
   const currentStaffId = "60691c7a-3b54-4231-944d-da95f114fa85"; 
 
-  // 2. Fetch ALL history for this staff member on this application
-  // This is used for both the "Rework" notice and the Time Calculation
-  const allSegments = await db
-    .select()
-    .from(qmsTimelines)
-    .where(and(
-      eq(qmsTimelines.applicationId, applicationId),
-      eq(qmsTimelines.staffId, currentStaffId)
-    ));
-
-  // 3. Find the CURRENT active row to display the main info
-  const activeTask = allSegments.find(s => s.endTime === null);
-
-  if (!activeTask) return <div className="p-10 text-center font-bold">Task not found or already completed.</div>;
-
-  // 4. Fetch Application/Company data
+  // 2. Fetch the Application with FULL details and Company info
   const appData = await db
     .select({
-      appNumber: applications.applicationNumber,
+      id: applications.id,
+      applicationNumber: applications.applicationNumber,
+      details: applications.details, 
+      status: applications.status,
+      currentPoint: applications.currentPoint,
       companyName: companies.name,
     })
     .from(applications)
@@ -42,69 +32,114 @@ export default async function TechnicalReviewPage({
     .where(eq(applications.id, applicationId))
     .limit(1);
 
-  const taskInfo = appData[0];
+  const app = appData[0];
+  if (!app) return notFound();
 
-  // 5. CLOCK LOGIC: Calculate cumulative seconds already spent in PAST sessions
-  const secondsAlreadyUsed = allSegments.reduce((acc, segment) => {
+  // 3. Fetch ALL history segments for this application to calculate QMS time
+  const allSegments = await db
+    .select()
+    .from(qmsTimelines)
+    .where(eq(qmsTimelines.applicationId, applicationId))
+    .orderBy(qmsTimelines.startTime);
+
+  // 4. Find the CURRENT active row for this staff member
+  const activeTask = allSegments.find(s => s.endTime === null && s.staffId === currentStaffId);
+
+  // Safety Gate: If no active clock exists for this user, they shouldn't be here
+  if (!activeTask) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-50">
+        <div className="text-center p-12 bg-white rounded-3xl shadow-xl border border-slate-200">
+          <h2 className="text-2xl font-black text-slate-900 mb-2 uppercase tracking-tight italic">Task Out of Scope</h2>
+          <p className="text-slate-500 italic">This task has already been submitted or reassigned to another officer.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 5. QMS CLOCK LOGIC: Calculate cumulative seconds spent by THIS staff member across all rounds
+  const staffSegments = allSegments.filter(s => s.staffId === currentStaffId);
+  const secondsAlreadyUsed = staffSegments.reduce((acc, segment) => {
     if (segment.startTime && segment.endTime) {
       return acc + Math.floor((segment.endTime.getTime() - segment.startTime.getTime()) / 1000);
     }
     return acc;
   }, 0);
 
-  // SOP Limit is 48 hours
+  // SOP Limit is 48 hours total for technical review
   const QMS_LIMIT_SECONDS = 48 * 60 * 60; 
   const totalRemainingSeconds = QMS_LIMIT_SECONDS - secondsAlreadyUsed;
 
-  // 6. Generate Supabase URL for the iFrame
-  const dossierPath = `0.9554887811327575.pdf`;
-  const { data: urlData } = supabase.storage.from('documents').getPublicUrl(dossierPath);
-  console.log("DEBUG: Active Task Division is", activeTask.division)
+  // 6. DYNAMIC DOSSIER FETCHING (Using your 'Documents' bucket)
+  // Extracting filename from the poaUrl stored in JSONB
+  const rawUrl = (app.details as any)?.poaUrl || "";
+  const dossierFilename = rawUrl.split('/').pop() || "";
+  
+  // Generate the public URL for the iframe
+  const { data: urlData } = supabase.storage
+    .from('documents') 
+    .getPublicUrl(dossierFilename);
+
+  const finalPdfUrl = dossierFilename ? urlData.publicUrl : null;
+
   return (
-    <div className="flex h-screen overflow-hidden bg-white">
+    <div className="flex h-screen overflow-hidden bg-slate-50">
+      
       {/* LEFT: PDF VIEWER (2/3 Screen) */}
-      <div className="w-2/3 h-full border-r bg-gray-200">
-        <iframe 
-          src={`${urlData.publicUrl}#view=FitH&toolbar=0`} 
-          className="w-full h-full border-none"
-          title="Dossier"
-        />
+      <div className="w-2/3 h-full border-r border-slate-200 bg-slate-100 shadow-inner relative">
+        {finalPdfUrl ? (
+          <iframe 
+            src={`${finalPdfUrl}#view=FitH&toolbar=0`} 
+            className="w-full h-full border-none"
+            title="Dossier Viewer"
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-400">
+            <p className="italic">No Dossier Document linked to this application.</p>
+          </div>
+        )}
       </div>
 
       {/* RIGHT: CONTROL PANEL (1/3 Screen) */}
-      <div className="w-1/3 h-full flex flex-col p-6 bg-white overflow-y-auto">
+      <div className="w-1/3 h-full flex flex-col p-8 bg-white overflow-y-auto">
         
-        {/* REWORK ALERT: Show if there is more than 1 segment */}
-        {allSegments.length > 1 && (
-          <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-6 rounded-r">
-            <h4 className="text-amber-800 font-bold text-xs uppercase mb-1 tracking-wider">
-              DDD Feedback (Rework Session)
-            </h4>
-            <p className="text-sm text-amber-900 italic">
-              "{ (activeTask.details as any)?.previous_ddd_comment || 'Correction required by DDD.' }"
-            </p>
+        {/* HEADER SECTION */}
+        <div className="mb-8 pb-6 border-b border-slate-100">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="px-2 py-0.5 rounded text-[10px] font-black bg-blue-600 text-white uppercase tracking-widest">
+              {division.toUpperCase()} Division
+            </span>
+            {app.status === 'PENDING_REWORK' && (
+               <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-600 uppercase tracking-widest border border-rose-200">
+                Rework Session
+              </span>
+            )}
           </div>
-        )}
-
-        <div className="mb-8 border-b pb-4">
-          <h1 className="text-xl font-black text-slate-900 uppercase italic">Technical Review</h1>
-          <p className="text-sm font-mono text-blue-600">{taskInfo?.appNumber}</p>
-          <p className="font-bold text-gray-700">{taskInfo?.companyName}</p>
+          <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight italic">Technical Review</h1>
+          <p className="text-xs font-mono text-blue-600 font-bold mb-1">{app.applicationNumber}</p>
+          <p className="text-lg font-bold text-slate-700 leading-tight">{app.companyName}</p>
         </div>
 
+        {/* THE SUBMISSION FORM */}
         <div className="flex-grow">
           <ReviewSubmissionForm 
             appId={applicationId} 
-            division={activeTask.division ?? 'VMD'} // Pull from the DB record instead of URL
+            division={activeTask.division ?? 'VMD'} 
             staffId={currentStaffId} 
+            app={app} 
           />
         </div>
 
-        {/* THE CLOCK: Passing the calculated seconds remaining */}
-        <div className="mt-8 pt-4 border-t">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
-            Time Remaining (Net QMS)
-          </p>
+        {/* QMS COUNTDOWN FOOTER */}
+        <div className="mt-8 pt-6 border-t border-slate-100 bg-white sticky bottom-0">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+              Net QMS Clock
+            </p>
+            <p className="text-[10px] font-bold text-blue-600 uppercase">
+              Limit: 48 Hours
+            </p>
+          </div>
           <QMSCountdown 
             startTime={activeTask.startTime!} 
             initialRemainingSeconds={totalRemainingSeconds} 

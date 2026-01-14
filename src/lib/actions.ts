@@ -73,83 +73,64 @@ export async function submitLODApplication(data: any) {
 
 
 
-export async function returnToStaff(
-  appId: number, 
-  rejectionReason: string, 
-  newStaffId?: string 
-) {
+export async function returnToStaff(appId: number, rejectionReason: string, staffId: string) {
   try {
     return await db.transaction(async (tx) => {
       const dbNow = sql`now()`;
+      const app = await tx.query.applications.findFirst({ where: eq(applications.id, appId) });
+      if (!app) throw new Error("App not found");
 
-      // 1. Fetch the application
-      const app = await tx.query.applications.findFirst({
-        where: eq(applications.id, appId)
-      });
-
-      if (!app) throw new Error("Application not found");
-
-      // THE "DEEP CLEAN" FIX: Parse the details explicitly.
-      // This prevents Drizzle Proxy objects from corrupting the JSONB update.
       const oldDetails = JSON.parse(JSON.stringify(app.details || {}));
-      
-      // Determine who gets the rework
-      const assignedStaff = newStaffId || oldDetails.staff_reviewer_id;
-      
-      // FIX: Ensure we respect the original division (VMD, PAD, etc.)
-      const division = oldDetails.assignedDivisions?.[0] || 'VMD';
 
-      // 2. Close the DDD's vetting segment
-      await tx.update(qmsTimelines)
-        .set({ 
-          endTime: dbNow,
-          comments: `REWORK INITIATED: ${rejectionReason}` 
-        })
-        .where(and(
-          eq(qmsTimelines.applicationId, appId),
-          eq(qmsTimelines.point, 'Divisional Deputy Director'),
-          isNull(qmsTimelines.endTime)
-        ));
-
-      // 3. Update Application Status & Details
-      // We explicitly re-construct the object to ensure no nested keys are lost
       const updatedDetails = {
         ...oldDetails,
         last_rejection_reason: rejectionReason,
-        staff_reviewer_id: assignedStaff,
-        // Bonus: Increment a rework counter for QMS metrics
-        rework_count: (oldDetails.rework_count || 0) + 1 
+        rejection_history: [
+          ...(oldDetails.rejection_history || []),
+          {
+            reason: rejectionReason,
+            rejected_at: new Date().toISOString(),
+            round: (oldDetails.rejection_history?.length || 0) + 1
+          }
+        ]
       };
 
       await tx.update(applications)
-        .set({ 
+        .set({
           currentPoint: 'Technical Review',
           status: 'PENDING_REWORK',
-          details: updatedDetails 
+          details: updatedDetails,
         })
         .where(eq(applications.id, appId));
 
-      // 4. Open the NEW segment for the Reviewer
-      // IMPROVEMENT: Include the reason in the timeline comments so it's 
-      // immediately visible in the staff's Audit Trail.
-      await tx.insert(qmsTimelines).values({
-        applicationId: appId,
-        point: 'Technical Review',
-        division: division.toUpperCase(),
-        staffId: assignedStaff, 
-        startTime: dbNow,
-        comments: `Rework Required: ${rejectionReason}`
+      // 1. Close DDD Clock
+      await tx.update(qmsTimelines)
+        .set({ endTime: dbNow })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId), 
+          isNull(qmsTimelines.endTime)
+        ));
+
+      // 2. Open Staff Clock 
+      // FIX: Ensure we fall back to the first assigned division if app.division is null
+      const targetDivision = app.division || (oldDetails.assignedDivisions?.[0]) || "VMD";
+
+      await tx.insert(qmsTimelines).values({ 
+        applicationId: appId, 
+        point: 'Technical Review', 
+        staffId: staffId, // The ID of the technical reviewer
+        division: targetDivision.toUpperCase(), 
+        startTime: dbNow 
       });
 
-      // Clear the cache so dashboards update instantly
+      // 3. Clear the cache for both views
       revalidatePath(`/dashboard/ddd`);
-      revalidatePath(`/dashboard/staff`);
-      revalidatePath(`/dashboard/ddd/review/${appId}`);
+      revalidatePath(`/dashboard/${targetDivision.toLowerCase()}`);
       
       return { success: true };
     });
   } catch (error) {
-    console.error("Return Path Error:", error);
-    return { success: false, error: "Failed to return application" };
+    console.error("REWORK_ERROR:", error);
+    return { success: false };
   }
 }

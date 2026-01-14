@@ -7,59 +7,67 @@ import { revalidatePath } from "next/cache";
 
 export async function submitStaffReview(appId: number, division: string, findings: string, staffId: string) {
   try {
-    // We use a transaction so if one step fails, the clock doesn't get messed up
     return await db.transaction(async (tx) => {
-      
-      const dbNow = sql`now()`; // ✅ The "Source of Truth" for your Audit Trail
+      const dbNow = sql`now()`;
 
-      // 1. Fetch current details using the transaction client (tx)
+      // 1. Fetch current application to get existing details
       const app = await tx.query.applications.findFirst({
-        where: eq(applications.id, appId)
+        where: eq(applications.id, appId),
       });
 
       if (!app) throw new Error("Application not found");
 
-      // 2. Update Application Table (Standard JS Spread)
-      await tx.update(applications)
-        .set({ 
-          currentPoint: 'Divisional Deputy Director',
-          status: 'PENDING_VETTING',
-          details: {
-            ...(app.details as object || {}), // Safely preserve LOD data
-            staff_technical_findings: findings,
-            staff_reviewer_id: staffId,
-            staff_submitted_at: new Date().toISOString() // String label for JSON
+      const oldDetails = JSON.parse(JSON.stringify(app.details || {}));
+
+      // 2. CUMULATIVE LOGIC: Push findings into an array
+      const updatedDetails = {
+        ...oldDetails,
+        staff_reviewer_id: staffId, // <--- ADD THIS LINE to lock the ID in the JSON
+        staff_technical_findings: findings, // Latest for quick display
+        staff_submitted_at: new Date().toISOString(),
+        technical_history: [
+          ...(oldDetails.technical_history || []),
+          { 
+            findings, 
+            submitted_at: new Date().toISOString(),
+            round: (oldDetails.technical_history?.length || 0) + 1 
           }
+        ]
+      };
+
+      // 3. Update Application Table
+      await tx.update(applications)
+        .set({
+          currentPoint: 'Divisional Deputy Director',
+          status: 'UNDER_DDD_REVIEW',
+          details: updatedDetails,
+          updatedAt: dbNow,
         })
         .where(eq(applications.id, appId));
 
-      // 3. Close the Staff's segment in the Audit Trail
+      // 4. Close the Time Clock for Staff
       await tx.update(qmsTimelines)
-        .set({ 
-          endTime: dbNow, // ✅ Database Clock
-          comments: findings 
-        })
+        .set({ endTime: dbNow })
         .where(and(
           eq(qmsTimelines.applicationId, appId),
           eq(qmsTimelines.staffId, staffId),
           isNull(qmsTimelines.endTime)
         ));
 
-      // 4. Open the DDD's segment (The next step in the QMS)
+      // 5. Open the Time Clock for DDD
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
-        point: 'Divisional Deputy Director', 
+        point: 'Divisional Deputy Director',
         division: division.toUpperCase(),
-        startTime: dbNow, // ✅ Matches the endTime above perfectly
+        startTime: dbNow,
       });
 
+      revalidatePath(`/dashboard/${division.toLowerCase()}`);
       revalidatePath(`/dashboard/ddd`);
-      revalidatePath(`/dashboard/staff`);
-      
       return { success: true };
     });
   } catch (error) {
-    console.error("Staff Review Error:", error);
-    return { success: false, error: "Failed to submit review" };
+    console.error(error);
+    return { success: false };
   }
 }
