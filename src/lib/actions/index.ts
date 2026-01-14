@@ -49,13 +49,13 @@ export async function submitLODApplication(data: any) {
     }).returning();
 
     // 4. START THE QMS CLOCK (This is what fixes the "Out of Order" bug)
-    await db.insert(qmsTimelines).values({
+   await db.insert(qmsTimelines).values({
       applicationId: newApp.id,
       staffId: "LOD_OFFICER",
       division: "LOD",
       point: 'Director',
       startTime: dbNow, // ✅ Uses the DB clock (sql`now()`)
-    });
+    })
 
     revalidatePath("/");
     revalidatePath("/dashboard/applications");

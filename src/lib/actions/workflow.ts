@@ -8,10 +8,11 @@ import { revalidatePath } from "next/cache";
 export async function processDDRecommendation(appId: number, decision: 'FORWARD' | 'RETURN', comments: string) {
   try {
     // 1. Close the current DD Timeline segment
+    // This records exactly when the DD finished their vetting
     await db.update(qmsTimelines)
       .set({ 
         endTime: sql`now()`,
-        comments: comments // Save the DD's vetting remarks
+        comments: comments 
       })
       .where(and(
         eq(qmsTimelines.applicationId, appId),
@@ -20,38 +21,31 @@ export async function processDDRecommendation(appId: number, decision: 'FORWARD'
       ));
 
     if (decision === 'FORWARD') {
-      // MOVE TO DIRECTOR
+      // 2. MOVE TO DIRECTOR
       await db.update(applications)
-        .set({ currentPoint: 'Director', status: 'PENDING_DIRECTOR' })
+        .set({ 
+          currentPoint: 'Director', 
+          status: 'PENDING_DIRECTOR' 
+        })
         .where(eq(applications.id, appId));
 
-      // Start Director Timeline
+      // 3. Start Director Timeline segment
       await db.insert(qmsTimelines).values({
         applicationId: appId,
         point: 'Director',
         startTime: sql`now()`,
       });
-    } else {
-      // RETURN TO STAFF
-      await db.update(applications)
-        .set({ currentPoint: 'Staff', status: 'REWORK_REQUIRED' })
-        .where(eq(applications.id, appId));
-
-      // Re-open Staff Timeline
-      await db.insert(qmsTimelines).values({
-        applicationId: appId,
-        point: 'Technical Review', // Change 'Staff' to 'Technical Review'
-        startTime: sql`now()`,
-        comments: `Rework requested by DD: ${comments}`
-      });
-    }
-
-    revalidatePath("/dashboard/ddd");
-    revalidatePath(`/dashboard/ddd/review/${appId}`);
+      
+      revalidatePath("/dashboard/ddd");
+      return { success: true };
+    } 
+    
+    // If decision is 'RETURN', we do nothing here because the 
+    // RejectionModal calls returnToStaff() directly instead.
     return { success: true };
+
   } catch (error) {
-    console.error(error);
+    console.error("Workflow Error:", error);
     return { success: false };
   }
 }
-
