@@ -32,10 +32,9 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
   const directorHistory = app.details?.director_history || [];
   const lodComments = app.details?.comments || [];
 
-  // Index counters as fallback for sequential items
-  let directorIndex = 0;
+  // Index counters for sequential fallbacks
   let assignIndex = 0;
-  let techSeqIndex = 0; // Sequential fallback for tech findings
+  let techSeqIndex = 0; 
 
   const augmentedHistory = history.map((segment: any) => {
     let comment = null;
@@ -45,59 +44,56 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
       comment = lodComments[0]?.text || "Dossier Received by Liaison Office";
     }
 
-    // 2. MATCH TECHNICAL REVIEW (Timestamp-First + Round Fallback)
+    // 2. MATCH DIRECTOR (Using Timestamp to fix the "Initial Minute" placement)
+    else if (segment.point === 'Director' && segment.staff_id !== 'LOD_OFFICER') {
+      const segEndTime = segment.endTime ? new Date(segment.endTime).getTime() : null;
+      
+      // Match the director's instruction that was logged when this segment ended
+      const directorMatch = directorHistory.find((d: any) => {
+        const actionTime = new Date(d.timestamp || d.created_at).getTime();
+        return segEndTime && Math.abs(actionTime - segEndTime) < 5000;
+      });
+
+      comment = directorMatch?.instruction || segment.comments || null;
+    }
+
+    // 3. MATCH TECHNICAL REVIEW (Timestamp-First + Round Fallback)
     else if (segment.point === 'Technical Review') {
-      // Strategy A: Find findings submitted within this segment's lifespan (+5s buffer)
       let techMatch = techHistory.find((h: any) => {
         const subTime = new Date(h.submitted_at).getTime();
         const segStart = new Date(segment.startTime).getTime();
         const segEnd = segment.endTime ? new Date(segment.endTime).getTime() : null;
-        
         return subTime >= segStart && (!segEnd || subTime <= segEnd + 5000);
       });
 
-      // Strategy B: Fallback to current round sequence if segment is finished
       if (!techMatch && segment.endTime && techHistory[techSeqIndex]) {
         techMatch = techHistory[techSeqIndex];
       }
 
       comment = techMatch?.findings || "Technical review in progress...";
-      
-      // Increment sequence index only if the segment actually finished
       if (segment.endTime) techSeqIndex++;
     }
 
-    // 3. MATCH DDD (Rejections, Recommendations, and Assignments)
+    // 4. MATCH DDD (Rejections, Recommendations, and Assignments)
     else if (segment.point === 'Divisional Deputy Director') {
       const segEndTime = segment.endTime ? new Date(segment.endTime).getTime() : null;
 
-      // Find matching rejection by time
       const rejection = rejectHistory.find((r: any) => {
         const rejTime = new Date(r.rejected_at).getTime();
         return segEndTime && Math.abs(rejTime - segEndTime) < 5000;
       });
 
-      // Find matching recommendation to Director by time
       const recommendation = dddHistory.find((d: any) => {
         const recTime = new Date(d.timestamp).getTime();
         return segEndTime && Math.abs(recTime - segEndTime) < 5000;
       });
 
-      // Fallback to Assignment instruction (for the active step)
       const assignment = dddToStaffHistory[assignIndex];
-
       comment = rejection?.reason || recommendation?.note || assignment?.instruction || null;
       
-      // Only move the assignment pointer if we didn't find a final action for this segment
       if (!rejection && !recommendation && assignment) {
         assignIndex++;
       }
-    }
-
-    // 4. MATCH DIRECTOR (General instructions to DD)
-    else if (segment.point === 'Director' && segment.staff_id !== 'LOD_OFFICER') {
-      comment = directorHistory[directorIndex]?.instruction || null;
-      directorIndex++;
     }
 
     return { ...segment, comments: comment };
@@ -130,7 +126,6 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
-      {/* LEFT: DOSSIER PREVIEW */}
       <div className="w-1/2 h-full bg-white border-r shadow-inner relative">
         {pdfUrl ? (
           <iframe 
@@ -146,7 +141,6 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
         )}
       </div>
 
-      {/* RIGHT: DDD PANEL */}
       <div className="w-1/2 h-full flex flex-col p-8 overflow-y-auto bg-slate-50/50">
         <header className="mb-6">
           <div className="flex items-center gap-2 mb-1">
@@ -161,7 +155,6 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
           </p>
         </header>
 
-        {/* Audit Trail Section */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
           <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
             <History className="w-3 h-3" /> Dossier Lifecycle Audit
@@ -169,10 +162,7 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
           <AuditTrail segments={augmentedHistory} />
         </div>
 
-        {/* DECISION AREA */}
         <div className="mt-auto bg-white p-6 rounded-2xl border-2 border-slate-900 shadow-2xl space-y-6">
-          
-          {/* TECHNICAL HISTORY SUMMARY (Current round at top) */}
           <div className="bg-blue-50/30 p-4 rounded-xl border border-blue-100 shadow-inner">
             <div className="flex items-center gap-2 mb-4">
                <History className="w-4 h-4 text-blue-600" />
@@ -196,7 +186,6 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
             </div>
           </div>
 
-          {/* RECOMMENDATION NOTE INPUT */}
           <div className="space-y-2">
             <div className="flex justify-between items-center">
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
@@ -220,7 +209,7 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
             <button 
               disabled={isPending || !isDDDTurn || isCleared || !recommendationNote.trim()}
               onClick={handleApprove}
-              className="flex items-center justify-center gap-2 py-4 rounded-xl font-black transition-all uppercase tracking-widest text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg active:scale-95 disabled:bg-slate-100 disabled:text-slate-300 disabled:shadow-none"
+              className="flex items-center justify-center gap-2 py-4 rounded-xl font-black transition-all uppercase tracking-widest text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg active:scale-95 disabled:bg-slate-100"
             >
               <Send className="w-4 h-4" />
               {isPending ? "PROCESSING..." : "APPROVE TO DIRECTOR"}
@@ -229,7 +218,7 @@ export default function DeputyDirectorReviewClient({ history, app, pdfUrl }: any
             <button 
               disabled={isPending || !isDDDTurn || isCleared}
               onClick={() => setIsRejectionModalOpen(true)}
-              className="flex items-center justify-center gap-2 py-4 rounded-xl font-black transition-all uppercase tracking-widest text-[10px] bg-rose-600 hover:bg-rose-700 text-white shadow-lg active:scale-95 disabled:bg-slate-50 disabled:text-slate-200 disabled:shadow-none"
+              className="flex items-center justify-center gap-2 py-4 rounded-xl font-black transition-all uppercase tracking-widest text-[10px] bg-rose-600 hover:bg-rose-700 text-white shadow-lg active:scale-95 disabled:bg-slate-50"
             >
               <AlertCircle className="w-4 h-4" />
               RETURN FOR REWORK

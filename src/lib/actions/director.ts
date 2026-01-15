@@ -3,7 +3,9 @@
 import { db } from "@/db";
 import { qmsTimelines, applications } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
+import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
+
 
 // /**
 //  * Assigns an application to one or more divisions and records the Director's instruction.
@@ -90,73 +92,72 @@ export async function assignToDDD(
 }
 
 
-export async function issueFinalClearance(appId: number, directorNotes: string) {
+/**
+ * Finalizes the application by setting status to CLEARED
+ * and saving the archival path to the documents bucket.
+ */
+export async function issueFinalClearance(
+  appId: string, 
+  comments: string, 
+  storagePath: string
+) {
+  const supabase = await createClient();
+
   try {
-    return await db.transaction(async (tx) => {
-      // 1. Fetch current app for context
-      const app = await tx.query.applications.findFirst({
-        where: eq(applications.id, appId),
-        with: { company: true }
-      });
+    // 1. Fetch current application details to preserve existing JSONB data
+    const { data: currentApp, error: fetchError } = await supabase
+      .from('applications')
+      .select('details, applicationNumber')
+      .eq('id', appId)
+      .single();
 
-      if (!app) throw new Error("Application not found");
+    if (fetchError || !currentApp) {
+      throw new Error("Could not find application to update.");
+    }
 
-      // 2. Setup Archive Paths (Your logic)
-      const companyFolderName = app.company?.name.replace(/[^a-z0-9]/gi, '_') || "Unknown_Company";
-      const appNumberClean = app.applicationNumber.replace(/[^a-z0-9]/gi, '-');
-      const archivePath = `${companyFolderName}/${appNumberClean}/Final_Clearance.pdf`;
-      const timestamp = sql`now()`;
+    // 2. Prepare the updated JSONB payload
+    // We spread the existing details and add our new Director data
+    const updatedDetails = {
+      ...(currentApp.details || {}),
+      director_final_notes: comments,
+      archived_path: storagePath, // The path in the 'documents' bucket
+      final_approval_date: new Date().toISOString(),
+      issuance_metadata: {
+        system_version: "2.0-OptionAB",
+        archived_by: "Director_Role"
+      }
+    };
 
-      // 3. Prepare the "Full Story" JSONB
-      const oldDetails = (app.details as any) || {};
-      const updatedDetails = {
-        ...oldDetails,
-        director_final_notes: directorNotes,
-        archived_path: archivePath,
-        bucket_name: 'Documents', // Per your saved info
-        // NEW: This is the "Ledger" for auditors
-        issuance_history: [
-          ...(oldDetails.issuance_history || []),
-          {
-            notes: directorNotes,
-            timestamp: new Date().toISOString(),
-            action: 'FINAL_CLEARANCE_ISSUED'
-          }
-        ]
-      };
+    // 3. Update the Application record
+    // Status moves to CLEARED, Point moves to COMPLETED
+    const { error: updateError } = await supabase
+      .from('applications')
+      .update({
+        status: 'CLEARED',
+        currentPoint: 'COMPLETED',
+        details: updatedDetails,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', appId);
 
-      // 4. Update Application (Status + History)
-      await tx.update(applications)
-        .set({
-          status: 'CLEARED',
-          currentPoint: 'Closed',
-          details: updatedDetails
-        })
-        .where(eq(applications.id, appId));
+    if (updateError) {
+      throw new Error(`Database Update Failed: ${updateError.message}`);
+    }
 
-      // 5. Close the final QMS Timeline segment
-      // REMOVED 'comments' here since qms_timelines doesn't have it
-      await tx.update(qmsTimelines)
-        .set({ 
-          endTime: timestamp 
-        })
-        .where(and(
-          eq(qmsTimelines.applicationId, appId),
-          eq(qmsTimelines.point, 'Director'),
-          isNull(qmsTimelines.endTime)
-        ));
+    // 4. Refresh the page data for the Director's dashboard
+    revalidatePath('/dashboard/director');
+    revalidatePath(`/dashboard/director/${appId}`);
 
-      revalidatePath("/dashboard/applications");
-      revalidatePath(`/dashboard/director/review/${appId}`);
+    return { 
+      success: true, 
+      message: "Application cleared and document archived." 
+    };
 
-      return { 
-        success: true, 
-        message: "Application cleared and history logged.",
-        path: archivePath 
-      };
-    });
-  } catch (error) {
-    console.error("Issuance Error:", error);
-    return { success: false, error: "Failed to issue final clearance" };
+  } catch (err: any) {
+    console.error("Critical Server Action Error:", err.message);
+    return { 
+      success: false, 
+      error: err.message 
+    };
   }
 }
