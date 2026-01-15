@@ -1,96 +1,88 @@
 import { db } from "@/db";
-import { qmsTimelines, applications, companies } from "@/db/schema";
-import { eq, and, isNull, ilike } from "drizzle-orm"; // ilike is case-insensitive
-import StaffSelector from "@/components/StaffSelector";
+import { applications, companies, users } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
+import AssignToStaffModal from "@/components/AssignToStaffModal";
+import { supabase } from "@/lib/supabase";
 
-export default async function DDDInboxPage({ 
-  searchParams 
-}: { 
-  searchParams: Promise<{ div?: string }> 
-}) {
-  const resolvedParams = await searchParams;
-  const myDivision = (resolvedParams.div || "VMD").toUpperCase(); // Force Uppercase
-
-  // JOIN Query with flexible filtering
-  const myTasks = await db
+export default async function DDDInboxPage() {
+  // 1. Fetch applications currently sitting at the DDD level
+  const inbox = await db
     .select({
-      id: qmsTimelines.id,
-      applicationId: qmsTimelines.applicationId,
-      startTime: qmsTimelines.startTime,
-      point: qmsTimelines.point,
-      division: qmsTimelines.division,
+      id: applications.id,
       applicationNumber: applications.applicationNumber,
-      type: applications.type,
+      details: applications.details,
+      status: applications.status,
       companyName: companies.name,
     })
-    .from(qmsTimelines)
-    .innerJoin(applications, eq(qmsTimelines.applicationId, applications.id))
+    .from(applications)
     .leftJoin(companies, eq(applications.companyId, companies.id))
-    .where(
-      and(
-        // ilike handles VMD vs vmd. isNull(endTime) ensures it's still active.
-        ilike(qmsTimelines.division, myDivision),
-        isNull(qmsTimelines.endTime),
-          // ADD THIS LINE:
-        eq(qmsTimelines.point, 'Divisional Deputy Director')
-      )
-    );
+    .where(eq(applications.currentPoint, 'Divisional Deputy Director'));
+
+  // 2. Fetch available Technical Staff (filtering by role/division if needed)
+  const staffList = await db
+    .select({
+      id: users.id,
+      name: users.name,
+    })
+    .from(users)
+    // .where(eq(users.role, 'TECHNICAL_OFFICER')); // Adjust based on your schema roles
 
   return (
-    <div className="p-8 bg-gray-50 min-h-screen">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6 text-gray-800 border-b pb-4">
-          {myDivision} Assignment Hub
+    <div className="p-8 bg-slate-50 min-h-screen">
+      <header className="mb-8">
+        <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight italic">
+          DDD Assignment Desk
         </h1>
-        
-        {/* DEBUG SECTION - Remove this once it works */}
-        {myTasks.length === 0 && (
-          <div className="mb-8 p-4 bg-yellow-50 border border-yellow-200 rounded text-xs font-mono">
-            <p className="font-bold mb-2">Debug Info:</p>
-            <p>Target Division: {myDivision}</p>
-            <p>If you see this, check Supabase 'qms_timelines' table. 
-               Does a row exist with division: '{myDivision}' and end_time: NULL?</p>
-          </div>
-        )}
-
-        <div className="space-y-4">
-          {myTasks.map((task) => (
-            <div key={task.id} className="p-5 bg-white shadow-sm rounded-xl border flex justify-between items-center">
-              <div>
-                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                    {task.applicationNumber}
-                </span>
-                <h3 className="font-bold text-lg text-gray-900">{task.companyName}</h3>
-                <p className="text-sm text-gray-500">{task.type}</p>
-                <p className="text-[10px] text-gray-400 mt-2 uppercase">
-                  Point: {task.point} | Started: {task.startTime?.toLocaleString()}
-                </p>
-              </div>
-              
-              <div className="bg-gray-50 p-4 rounded-lg border">
-                <a 
-                  href={`/dashboard/ddd/review/${task.applicationId}`}
-                  className="mt-4 inline-block text-xs font-bold text-blue-600 hover:text-blue-800 underline"
-                >
-                  OPEN FULL REVIEW & DOSSIER →
-                </a>
-              </div>
-              
-              <div className="bg-gray-50 p-4 rounded-lg border">
-                <StaffSelector 
-                  appId={task.applicationId!} 
-                  division={myDivision} 
-                />
-              </div>
-            </div>
-          ))}
-
-          {myTasks.length === 0 && (
-            <div className="text-center py-12 bg-white rounded-xl border border-dashed text-gray-400">
-              No pending assignments found.
-            </div>
-          )}
-        </div>
+        <p className="text-slate-500 text-sm italic">Queue for Technical Allocation</p>
+      </header>
+      
+      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-slate-900 text-white">
+            <tr>
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest">App #</th>
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest">Company</th>
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest">Dossier</th>
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {inbox.map((app) => (
+              <tr key={app.id} className="hover:bg-blue-50/30 transition-colors border-b border-slate-100">
+                <td className="p-4 font-mono text-xs font-bold text-blue-600">{app.applicationNumber}</td>
+                <td className="p-4 text-sm font-bold text-slate-700">{app.companyName}</td>
+                <td className="p-4">
+                  {/* View Dossier Logic using the fixed public URL method */}
+                  {(() => {
+                    const rawUrl = (app.details as any)?.poaUrl || "";
+                    const filename = rawUrl.split('/').pop();
+                    if (!filename) return <span className="text-[10px] text-slate-300 italic">No File</span>;
+                    const { data } = supabase.storage.from('documents').getPublicUrl(filename);
+                    return (
+                      <a href={data.publicUrl} target="_blank" className="text-[10px] font-black text-slate-400 hover:text-blue-600 uppercase underline decoration-2">
+                        Open Doc ↗
+                      </a>
+                    );
+                  })()}
+                </td>
+                <td className="p-4 text-right">
+                  {/* THE MODAL IN ACTION */}
+                  <AssignToStaffModal 
+                    appId={app.id} 
+                    staffList={staffList} 
+                  />
+                </td>
+              </tr>
+            ))}
+            {inbox.length === 0 && (
+              <tr>
+                <td colSpan={4} className="p-12 text-center text-slate-400 italic text-sm">
+                  Your inbox is currently clear. All dossiers have been assigned.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

@@ -1,5 +1,7 @@
+import { supabase } from "@/lib/supabase"; // Ensure this path is correct
 import { getDirectorInbox } from "@/app/actions/director";
 import PushToDDDButton from "@/components/PushToDDDButton";
+import AssignToDDDButton from "@/components/AssignToDDDButton";
 
 export default async function DirectorPage() {
   const inbox = await getDirectorInbox();
@@ -26,32 +28,33 @@ export default async function DirectorPage() {
                 <td className="p-4 border-b">{(app as any).company?.name}</td>
                 <td className="p-4 border-b">
                   {(() => {
-                    // Look for the URL in multiple possible locations
                     const details = (app.details as any);
-                    const docUrl = details?.inspectionReportUrl || 
-                                  details?.poaUrl || 
-                                  details?.inputs?.poaUrl || 
-                                  details?.inputs?.inspectionReportUrl;
+                    // Extract filename from any of your possible URL fields
+                    const rawUrl = details?.poaUrl || details?.inspectionReportUrl || "";
+                    const filename = rawUrl.split('/').pop();
 
-                    if (!docUrl) return <span className="text-slate-400 italic text-xs">No Document</span>;
+                    if (!filename) return <span className="text-slate-400 italic text-xs">No Document</span>;
+
+                    // Use lowercase 'documents' as we identified earlier
+                    const { data: urlData } = supabase.storage.from('documents').getPublicUrl(filename);
 
                     return (
                       <a
-                        href={docUrl}
+                        href={urlData.publicUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline font-bold text-sm"
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-sm"
                       >
-                        VIEW DOSSIER ↗
+                        View Dossier ↗
                       </a>
                     );
                   })()}
-                </td>
+              </td>
                 <td className="p-4 border-b">
                   {(app.details as any).assignedDivisions.join(", ")}
                 </td>
                 <td className="p-4 border-b">
-                  <PushToDDDButton
+                  <AssignToDDDButton
                     appId={app.id} 
                     divisions={(app.details as any).assignedDivisions} 
                   />
