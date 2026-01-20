@@ -41,9 +41,9 @@ export async function submitLODApplication(data: any) {
           from: "LOD",
           role: "LOD",
           text: data.initialComment || "Application Received",
-          // We use a regular string here for the JSON, 
-          // but the timeline table will use the REAL clock.
-          timestamp: new Date().toISOString() 
+          timestamp: new Date().toISOString(),
+          round: 1, // ✅ Added round 1 explicitly
+          action: "INITIAL_INTAKE" // ✅ Added action for easier filtering
         }]
       }
     }).returning();

@@ -72,7 +72,6 @@ export async function submitLODApplication(data: any) {
 }
 
 
-
 export async function returnToStaff(appId: number, rejectionReason: string, staffId: string) {
   try {
     return await db.transaction(async (tx) => {
@@ -80,21 +79,31 @@ export async function returnToStaff(appId: number, rejectionReason: string, staf
       const app = await tx.query.applications.findFirst({ where: eq(applications.id, appId) });
       if (!app) throw new Error("App not found");
 
-      const oldDetails = JSON.parse(JSON.stringify(app.details || {}));
+      const oldDetails = (app.details as any) || {};
+      const oldComments = oldDetails.comments || [];
+
+      // 1. Determine Current Round (Stay in current round for a rework)
+      const currentRound = oldComments[oldComments.length - 1]?.round || 1;
+      const lastRound = oldComments[oldComments.length - 1]?.round || 1;
+      
+      // 2. Create the Unified Rejection Entry
+      const rejectionEntry = {
+        from: "Divisional Deputy Director",
+        role: "Divisional Deputy Director",
+        text: rejectionReason,
+        timestamp: new Date().toISOString(),
+        round: lastRound + 1, // ✅ Correctly triggers the new round
+        action: "RETURNED_FOR_REWORK",
+        assigned_to_id: staffId 
+      };
 
       const updatedDetails = {
         ...oldDetails,
-        last_rejection_reason: rejectionReason,
-        rejection_history: [
-          ...(oldDetails.rejection_history || []),
-          {
-            reason: rejectionReason,
-            rejected_at: new Date().toISOString(),
-            round: (oldDetails.rejection_history?.length || 0) + 1
-          }
-        ]
+        staff_reviewer_id: staffId, // Update the primary reviewer pointer
+        comments: [...oldComments, rejectionEntry] // Append to the Unified Trail
       };
 
+      // 3. Update Application Table
       await tx.update(applications)
         .set({
           currentPoint: 'Technical Review',
@@ -103,29 +112,28 @@ export async function returnToStaff(appId: number, rejectionReason: string, staf
         })
         .where(eq(applications.id, appId));
 
-      // 1. Close DDD Clock
+      // 4. QMS: Close DDD Clock
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
           eq(qmsTimelines.applicationId, appId), 
+          eq(qmsTimelines.point, 'Divisional Deputy Director'), // Be specific
           isNull(qmsTimelines.endTime)
         ));
 
-      // 2. Open Staff Clock 
-      // FIX: Ensure we fall back to the first assigned division if app.division is null
-      const targetDivision = app.division || (oldDetails.assignedDivisions?.[0]) || "VMD";
+      // 5. QMS: Open Staff Clock 
+      const targetDivision = (oldDetails.assignedDivisions?.[0]) || "VMD";
 
       await tx.insert(qmsTimelines).values({ 
         applicationId: appId, 
         point: 'Technical Review', 
-        staffId: staffId, // The ID of the technical reviewer
+        staffId: staffId, 
         division: targetDivision.toUpperCase(), 
         startTime: dbNow 
       });
 
-      // 3. Clear the cache for both views
       revalidatePath(`/dashboard/ddd`);
-      revalidatePath(`/dashboard/${targetDivision.toLowerCase()}`);
+      revalidatePath(`/dashboard/ddd/review/${appId}`);
       
       return { success: true };
     });

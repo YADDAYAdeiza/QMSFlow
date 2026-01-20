@@ -1,163 +1,168 @@
 "use server"
 
 import { db } from "@/db";
-import { qmsTimelines, applications } from "@/db/schema";
+import { applications, companies, qmsTimelines } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
-import { createClient } from "@/utils/supabase/server";
+// import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 
+
+// 1. Use the standard createClient from the main package
+import { createClient } from "@supabase/supabase-js";
+
+// "use server"
 
 // /**
 //  * Assigns an application to one or more divisions and records the Director's instruction.
 //  * @param applicationId - The ID of the application
 //  * @param selectedDivisions - Array of divisions (e.g., ["VMD", "PAD"])
 //  * @param directorComment - The instruction/minute from the Director
-//  */
-export async function assignToDDD(
-  applicationId: number, 
-  selectedDivisions: string[], 
-  directorComment: string
-) {
-  if (!selectedDivisions || selectedDivisions.length === 0) {
-    throw new Error("No divisions selected for assignment.");
-  }
 
-  // Consistent timestamp for all DB operations in this transaction
-  const timestamp = sql`now()`; 
-
+export async function assignToDDD(appId: number, divisions: string[], comment: string) {
   try {
-    return await db.transaction(async (tx) => {
-      // 1. Fetch current application to preserve existing JSONB details
-      const app = await tx.query.applications.findFirst({ 
-        where: eq(applications.id, applicationId) 
+    await db.transaction(async (tx) => {
+      // 1. Fetch current application to get existing comments
+      const app = await tx.query.applications.findFirst({
+        where: eq(applications.id, appId),
       });
-      
+
       if (!app) throw new Error("Application not found");
+      const oldDetails = (app.details as any) || {};
+      const oldComments = oldDetails.comments || [];
 
-      const oldDetails = JSON.parse(JSON.stringify(app.details || {}));
-
-      // 2. Update the JSONB "Director History"
-      // This ensures the instruction is permanent even if the timeline row is deleted
-      const updatedDetails = {
-        ...oldDetails,
-        director_history: [
-          ...(oldDetails.director_history || []),
-          {
-            instruction: directorComment,
-            assigned_at: new Date().toISOString(),
-            divisions: selectedDivisions
-          }
-        ]
+      // 2. Prepare the Director's Unified Comment
+      const directorComment = {
+        from: "Director",
+        role: "Director",
+        text: comment, // This is the instruction
+        timestamp: new Date().toISOString(),
+        round: 1, 
+        action: "ASSIGNED_TO_DDD"
       };
 
-      // 3. Update Application: Move to DDD point and save the new JSONB details
-      await tx.update(applications)
+      // 3. Update the Application Table (Crucial Step!)
+      // We update the current point AND append the comment to the JSONB details
+      await tx
+        .update(applications)
         .set({ 
           currentPoint: 'Divisional Deputy Director',
-          details: updatedDetails 
+          details: {
+            ...oldDetails,
+            assignedDivisions: divisions,
+            comments: [...oldComments, directorComment] // <--- This makes it show up on the DDD Dash
+          }
         })
-        .where(eq(applications.id, applicationId));
+        .where(eq(applications.id, appId));
 
-      // 4. QMS: Close the Director's current active timeline segment
-      await tx.update(qmsTimelines)
+      // 4. QMS: STOP Director's Clock
+      await tx
+        .update(qmsTimelines)
         .set({ 
-          endTime: timestamp,
-          comments: directorComment // Duplicate here for easy row-level lookup
+          endTime: sql`now()`, 
+          status: 'Completed',
+          // We keep the metadata here too as a backup/audit
+          metadata: { instruction: comment, assignedTo: divisions } 
         })
-        .where(and(
-          eq(qmsTimelines.applicationId, applicationId),
-          eq(qmsTimelines.point, 'Director'),
-          isNull(qmsTimelines.endTime)
-        ));
+        .where(
+          and(
+            eq(qmsTimelines.applicationId, appId),
+            eq(qmsTimelines.point, 'Director'),
+            isNull(qmsTimelines.endTime)
+          )
+        );
 
-      // 5. QMS: Create new active segments for each assigned Division's DDD
-      const timelineEntries = selectedDivisions.map((divName) => ({
-        applicationId: applicationId,
-        division: divName.toUpperCase().trim(), 
+      // 5. QMS: START DDD's Clock
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
         point: 'Divisional Deputy Director',
-        startTime: timestamp,
-      }));
-
-      await tx.insert(qmsTimelines).values(timelineEntries);
-
-      // 6. Refresh the UI
-      revalidatePath('/dashboard/director');
-      
-      return { success: true };
+        startTime: sql`now()`,
+        status: 'Pending'
+      });
     });
+
+    revalidatePath("/director");
+    revalidatePath("/dashboard/ddd"); // Ensure the DDD sees the update immediately
+    return { success: true };
   } catch (error) {
-    console.error("ASSIGN_TO_DDD_ERROR:", error);
-    return { success: false, error: "Failed to complete assignment workflow." };
+    console.error("Handoff failed:", error);
+    return { success: false };
   }
 }
-
 
 /**
  * Finalizes the application by setting status to CLEARED
  * and saving the archival path to the documents bucket.
  */
+
+
 export async function issueFinalClearance(
-  appId: string, 
-  comments: string, 
+  appId: number, 
+  remarks: string, 
   storagePath: string
 ) {
-  const supabase = await createClient();
-
   try {
-    // 1. Fetch current application details to preserve existing JSONB data
-    const { data: currentApp, error: fetchError } = await supabase
-      .from('applications')
-      .select('details, applicationNumber')
-      .eq('id', appId)
-      .single();
+    return await db.transaction(async (tx) => {
+      const dbNow = sql`now()`;
 
-    if (fetchError || !currentApp) {
-      throw new Error("Could not find application to update.");
-    }
+      // 1. Fetch current application using Drizzle
+      const app = await tx.query.applications.findFirst({
+        where: eq(applications.id, appId),
+      });
 
-    // 2. Prepare the updated JSONB payload
-    // We spread the existing details and add our new Director data
-    const updatedDetails = {
-      ...(currentApp.details || {}),
-      director_final_notes: comments,
-      archived_path: storagePath, // The path in the 'documents' bucket
-      final_approval_date: new Date().toISOString(),
-      issuance_metadata: {
-        system_version: "2.0-OptionAB",
-        archived_by: "Director_Role"
-      }
-    };
+      if (!app) throw new Error("Application not found");
 
-    // 3. Update the Application record
-    // Status moves to CLEARED, Point moves to COMPLETED
-    const { error: updateError } = await supabase
-      .from('applications')
-      .update({
-        status: 'CLEARED',
-        currentPoint: 'COMPLETED',
-        details: updatedDetails,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', appId);
+      const oldDetails = (app.details as any) || {};
+      const oldComments = oldDetails.comments || [];
+      
+      // Determine the final round
+      const currentRound = oldComments[oldComments.length - 1]?.round || 1;
 
-    if (updateError) {
-      throw new Error(`Database Update Failed: ${updateError.message}`);
-    }
+      // 2. Create the Final Authorization Entry for the Unified Trail
+      const finalEntry = {
+        from: "Director General",
+        role: "Director",
+        text: remarks,
+        timestamp: new Date().toISOString(),
+        round: currentRound,
+        action: "FINAL_CLEARANCE_ISSUED",
+        archive_path: storagePath
+      };
 
-    // 4. Refresh the page data for the Director's dashboard
-    revalidatePath('/dashboard/director');
-    revalidatePath(`/dashboard/director/${appId}`);
+      const updatedDetails = {
+        ...oldDetails,
+        director_final_notes: remarks,
+        archived_path: storagePath,
+        final_approval_date: new Date().toISOString(),
+        comments: [...oldComments, finalEntry] 
+      };
 
-    return { 
-      success: true, 
-      message: "Application cleared and document archived." 
-    };
+      // 3. Update Application Table
+      await tx.update(applications)
+        .set({
+          status: 'CLEARED',
+          currentPoint: 'COMPLETED',
+          details: updatedDetails,
+          updatedAt: dbNow,
+        })
+        .where(eq(applications.id, appId));
 
+      // 4. QMS: Close the final Director Clock
+      await tx.update(qmsTimelines)
+        .set({ endTime: dbNow })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId),
+          eq(qmsTimelines.point, 'Director'),
+          isNull(qmsTimelines.endTime)
+        ));
+
+      // 5. Revalidate paths to refresh the UI
+      revalidatePath('/dashboard/director');
+      revalidatePath(`/dashboard/director/review/${appId}`);
+      
+      return { success: true };
+    });
   } catch (err: any) {
-    console.error("Critical Server Action Error:", err.message);
-    return { 
-      success: false, 
-      error: err.message 
-    };
+    console.error("DRIZZLE_CLEARANCE_ERROR:", err);
+    return { success: false, error: err.message };
   }
 }

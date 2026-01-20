@@ -10,32 +10,35 @@ export async function submitStaffReview(appId: number, division: string, finding
     return await db.transaction(async (tx) => {
       const dbNow = sql`now()`;
 
-      // 1. Fetch current application to get existing details
       const app = await tx.query.applications.findFirst({
         where: eq(applications.id, appId),
       });
 
       if (!app) throw new Error("Application not found");
 
-      const oldDetails = JSON.parse(JSON.stringify(app.details || {}));
+      const oldDetails = (app.details as any) || {};
+      const oldComments = oldDetails.comments || [];
+      
+      // Determine the current round (if last comment was a rejection in Rd 1, this submission is still Rd 1)
+      const currentRound = oldComments[oldComments.length - 1]?.round || 1;
 
-      // 2. CUMULATIVE LOGIC: Push findings into an array
-      const updatedDetails = {
-        ...oldDetails,
-        staff_reviewer_id: staffId, // <--- ADD THIS LINE to lock the ID in the JSON
-        staff_technical_findings: findings, // Latest for quick display
-        staff_submitted_at: new Date().toISOString(),
-        technical_history: [
-          ...(oldDetails.technical_history || []),
-          { 
-            findings, 
-            submitted_at: new Date().toISOString(),
-            round: (oldDetails.technical_history?.length || 0) + 1 
-          }
-        ]
+      // Create the Unified Entry
+      const newEntry = {
+        from: "Technical Reviewer", 
+        role: "Staff",
+        text: findings,
+        timestamp: new Date().toISOString(),
+        round: currentRound, // ✅ Persists the round set by the previous step
+        action: "SUBMITTED_TO_DDD",
+        staff_id: staffId
       };
 
-      // 3. Update Application Table
+      const updatedDetails = {
+        ...oldDetails,
+        staff_reviewer_id: staffId,
+        comments: [...oldComments, newEntry]
+      };
+
       await tx.update(applications)
         .set({
           currentPoint: 'Divisional Deputy Director',
@@ -45,7 +48,7 @@ export async function submitStaffReview(appId: number, division: string, finding
         })
         .where(eq(applications.id, appId));
 
-      // 4. Close the Time Clock for Staff
+      // Close Staff Clock
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
@@ -54,7 +57,7 @@ export async function submitStaffReview(appId: number, division: string, finding
           isNull(qmsTimelines.endTime)
         ));
 
-      // 5. Open the Time Clock for DDD
+      // Open DDD Clock
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: 'Divisional Deputy Director',
@@ -67,7 +70,7 @@ export async function submitStaffReview(appId: number, division: string, finding
       return { success: true };
     });
   } catch (error) {
-    console.error(error);
+    console.error("STAFF_SUBMIT_ERROR:", error);
     return { success: false };
   }
 }
