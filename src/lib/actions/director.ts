@@ -104,7 +104,7 @@ export async function issueFinalClearance(
     return await db.transaction(async (tx) => {
       const dbNow = sql`now()`;
 
-      // 1. Fetch current application using Drizzle
+      // 1. Fetch current application for trail merging
       const app = await tx.query.applications.findFirst({
         where: eq(applications.id, appId),
       });
@@ -113,11 +113,9 @@ export async function issueFinalClearance(
 
       const oldDetails = (app.details as any) || {};
       const oldComments = oldDetails.comments || [];
-      
-      // Determine the final round
       const currentRound = oldComments[oldComments.length - 1]?.round || 1;
 
-      // 2. Create the Final Authorization Entry for the Unified Trail
+      // 2. Add the Final Step to the Unified Trail
       const finalEntry = {
         from: "Director General",
         role: "Director",
@@ -130,13 +128,12 @@ export async function issueFinalClearance(
 
       const updatedDetails = {
         ...oldDetails,
-        director_final_notes: remarks,
         archived_path: storagePath,
         final_approval_date: new Date().toISOString(),
         comments: [...oldComments, finalEntry] 
       };
 
-      // 3. Update Application Table
+      // 3. Update Status and Move to COMPLETED
       await tx.update(applications)
         .set({
           status: 'CLEARED',
@@ -146,7 +143,7 @@ export async function issueFinalClearance(
         })
         .where(eq(applications.id, appId));
 
-      // 4. QMS: Close the final Director Clock
+      // 4. QMS: Stop the final Clock for the Director stage
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
@@ -155,14 +152,13 @@ export async function issueFinalClearance(
           isNull(qmsTimelines.endTime)
         ));
 
-      // 5. Revalidate paths to refresh the UI
       revalidatePath('/dashboard/director');
       revalidatePath(`/dashboard/director/review/${appId}`);
       
       return { success: true };
     });
   } catch (err: any) {
-    console.error("DRIZZLE_CLEARANCE_ERROR:", err);
+    console.error("CLEARANCE_ACTION_ERROR:", err);
     return { success: false, error: err.message };
   }
 }
