@@ -91,14 +91,19 @@ export async function approveToDirector(appId: number, recommendationNote: strin
       const oldDetails = (app.details as any) || {};
       const oldComments = oldDetails.comments || [];
 
-      // Build the Unified Entry for Approval
+      // 1. Determine if this is an Approval Recommendation or a CAPA Recommendation
+      const reviewerEntry = [...oldComments].reverse().find(c => c.action === "SUBMITTED_TO_DDD");
+      const hasDeficiencies = (reviewerEntry?.observations?.length > 0);
+
+      // 2. Build the Entry using your 'Divisional Deputy Director' naming convention
       const newEntry = {
         from: "Divisional Deputy Director",
         role: "Divisional Deputy Director",
         text: recommendationNote,
         timestamp: new Date().toISOString(),
-        round: oldComments[oldComments.length - 1]?.round || 1,
-        action: "RECOMMENDED_FOR_APPROVAL"
+        round: oldDetails.currentRound || 1,
+        // DYNAMIC ACTION: This tells the Director what to expect
+        action: hasDeficiencies ? "RECOMMENDED_FOR_CAPA" : "RECOMMENDED_FOR_APPROVAL"
       };
 
       const updatedDetails = {
@@ -106,15 +111,18 @@ export async function approveToDirector(appId: number, recommendationNote: strin
         comments: [...oldComments, newEntry]
       };
 
+      // 3. Update Application State
       await tx.update(applications)
         .set({
           currentPoint: 'Director',
-          details: updatedDetails
+          details: updatedDetails,
+          updatedAt: sql`now()`
         })
         .where(eq(applications.id, appId));
 
       const timestamp = sql`now()`;
       
+      // 4. QMS: Stop Divisional Deputy Director Clock
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
@@ -123,18 +131,19 @@ export async function approveToDirector(appId: number, recommendationNote: strin
           isNull(qmsTimelines.endTime)
         ));
 
+      // 5. QMS: Start Director Clock
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: 'Director',
         startTime: timestamp,
-        status: 'PENDING'
+        details: { status: "Awaiting Final Executive Decision" }
       });
 
       revalidatePath('/dashboard/ddd');
       return { success: true };
     });
   } catch (error) {
-    console.error(error);
+    console.error("DDD_SUBMIT_ERROR:", error);
     return { success: false };
   }
 }

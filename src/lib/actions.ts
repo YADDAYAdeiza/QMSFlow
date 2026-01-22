@@ -71,67 +71,77 @@ export async function submitLODApplication(data: any) {
   }
 }
 
-
 export async function returnToStaff(appId: number, rejectionReason: string, staffId: string) {
   try {
     return await db.transaction(async (tx) => {
       const dbNow = sql`now()`;
-      const app = await tx.query.applications.findFirst({ where: eq(applications.id, appId) });
+      
+      // 1. Fetch current application state
+      const app = await tx.query.applications.findFirst({ 
+        where: eq(applications.id, appId) 
+      });
       if (!app) throw new Error("App not found");
 
       const oldDetails = (app.details as any) || {};
       const oldComments = oldDetails.comments || [];
 
-      // 1. Determine Current Round (Stay in current round for a rework)
-      const currentRound = oldComments[oldComments.length - 1]?.round || 1;
-      const lastRound = oldComments[oldComments.length - 1]?.round || 1;
+      // 2. Logic for Round Progression
+      // We increment the round because this is a formal "Return" cycle.
+      const lastRound = oldDetails.currentRound || 1;
+      const nextRound = lastRound + 1;
       
-      // 2. Create the Unified Rejection Entry
+      // 3. Create the Unified Rejection Entry for the Audit Trail
       const rejectionEntry = {
         from: "Divisional Deputy Director",
         role: "Divisional Deputy Director",
         text: rejectionReason,
         timestamp: new Date().toISOString(),
-        round: lastRound + 1, // ✅ Correctly triggers the new round
+        round: nextRound, 
         action: "RETURNED_FOR_REWORK",
-        assigned_to_id: staffId 
+        assigned_to_id: staffId // ✅ Keeping your requirement to track the target staff
       };
 
+      // 4. Update the JSONB Details
       const updatedDetails = {
         ...oldDetails,
-        staff_reviewer_id: staffId, // Update the primary reviewer pointer
-        comments: [...oldComments, rejectionEntry] // Append to the Unified Trail
+        currentRound: nextRound,      // ✅ Explicitly updating the top-level round
+        staff_reviewer_id: staffId,   // ✅ Updating the pointer for the Technical Reviewer
+        comments: [...oldComments, rejectionEntry] 
       };
 
-      // 3. Update Application Table
+      // 5. Update Application Table (Point & Status)
       await tx.update(applications)
         .set({
           currentPoint: 'Technical Review',
           status: 'PENDING_REWORK',
           details: updatedDetails,
+          updatedAt: dbNow
         })
         .where(eq(applications.id, appId));
 
-      // 4. QMS: Close DDD Clock
+      // 6. QMS: Close Divisional Deputy Director Clock
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
           eq(qmsTimelines.applicationId, appId), 
-          eq(qmsTimelines.point, 'Divisional Deputy Director'), // Be specific
+          eq(qmsTimelines.point, 'Divisional Deputy Director'),
           isNull(qmsTimelines.endTime)
         ));
 
-      // 5. QMS: Open Staff Clock 
-      const targetDivision = (oldDetails.assignedDivisions?.[0]) || "VMD";
+      // 7. QMS: Open Staff Clock for the designated Reviewer
+      // We default to the first assigned division if not specified
+      const targetDivision = (oldDetails.divisions?.[0]) || "VMD"; 
 
       await tx.insert(qmsTimelines).values({ 
         applicationId: appId, 
         point: 'Technical Review', 
         staffId: staffId, 
         division: targetDivision.toUpperCase(), 
-        startTime: dbNow 
+        startTime: dbNow,
+        details: { status: `Rework initiated by Divisional Deputy Director (Round ${nextRound})` }
       });
 
+      // 8. Refresh the views
       revalidatePath(`/dashboard/ddd`);
       revalidatePath(`/dashboard/ddd/review/${appId}`);
       
