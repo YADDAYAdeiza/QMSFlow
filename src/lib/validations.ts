@@ -5,25 +5,27 @@ export const lodFormSchema = z.object({
   type: z.string().min(1, "Category is required"),
   companyName: z.string().min(1, "Company name is required"),
   companyAddress: z.string().min(1, "Address is required"),
-  notificationEmail: z.string().email("Invalid email address"), // NEW
+  notificationEmail: z.string().email("Invalid email address"),
   facilityName: z.string().min(1, "Facility name is required"),
   facilityAddress: z.string().min(1, "Facility address is required"),
   
-  // Product Lines must be an array with at least one item
   productLines: z.array(z.object({
     lineName: z.string().min(1, "Line name required"),
     products: z.string().min(1, "Products required"),
-  })).min(1),
+  })).min(1, "At least one product line is required"),
 
-  // Risk Fields
-  hasOAI: z.string(),
-  lastInspected: z.string(),
-  failedSystems: z.array(z.string()).optional(),
-
-  // Workflow
+  hasOAI: z.string().default("No"),
+  lastInspected: z.string().default("Recent"),
+  failedSystems: z.array(z.string()).optional().default([]),
   divisions: z.array(z.string()).min(1, "Select at least one division"),
   
-  // File URLs (Make one optional based on the 'type' logic)
-  poaUrl: z.string().optional(),
-  inspectionReportUrl: z.string().optional(),
+  // Storage URLs
+  poaUrl: z.string().optional().default(""),
+  inspectionReportUrl: z.string().optional().default(""),
+}).refine((data) => {
+  // Logic: Ensure at least one dossier URL exists before routing
+  return data.poaUrl || data.inspectionReportUrl;
+}, {
+  message: "Please upload the required dossier/report before submitting",
+  path: ["poaUrl"] // Points the error to the file upload area
 });

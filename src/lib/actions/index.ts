@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 
 export async function submitLODApplication(data: any) {
   try {
-    // 1. Get/Create Company
+    // 1. Company Logic: Get or Create
     let company = await db.query.companies.findFirst({
       where: eq(companies.name, data.companyName),
     });
@@ -20,49 +20,60 @@ export async function submitLODApplication(data: any) {
       company = newComp;
     }
 
-    // 2. We use sql`now()` for the QMS timing (The Source of Truth)
+    // 2. PRODUCT MAPPING: Fixes the App 80 "Product under review" bug
+    // Maps [{line: "Sterile", products: "Vax A"}] -> ["Sterile: Vax A"]
+    const flattenedProducts = data.productLines?.map((pl: any) => 
+      `${pl.lineName}${pl.products ? ': ' + pl.products : ''}`
+    ) || [];
+
     const dbNow = sql`now()`; 
 
-    // 3. Create Application (Standard JavaScript Style)
+    // 3. Create Application with Dynamic Status Routing
     const [newApp] = await db.insert(applications).values({
       applicationNumber: data.appNumber,
-      type: data.type,
+      type: data.type, 
       companyId: company.id,
       status: 'PENDING_DIRECTOR',
       currentPoint: 'Director',
       details: {
         factory_name: data.facilityName || data.companyName,
-        factory_address: data.companyAddress || "",
-        products: [data.productCategory || "Product under review"],
+        factory_address: data.facilityAddress || data.companyAddress,
+        products: flattenedProducts.length > 0 ? flattenedProducts : ["Product list not provided"],
         poaUrl: data.poaUrl || "",
         inspectionReportUrl: data.inspectionReportUrl || "",
-        assignedDivisions: data.divisions || [],
+        notificationEmail: data.notificationEmail,
+        assignedDivisions: data.divisions || ["VMD"], // Defaulting to VMD per instructions
+        riskProfile: {
+          hasOAI: data.hasOAI,
+          maturity: data.lastInspected,
+          failedSystems: data.failedSystems
+        },
         comments: [{
           from: "LOD",
           role: "LOD",
-          text: data.initialComment || "Application Received",
+          text: "Application logged and routed for review.",
           timestamp: new Date().toISOString(),
-          round: 1, // ✅ Added round 1 explicitly
-          action: "INITIAL_INTAKE" // ✅ Added action for easier filtering
+          round: 1,
+          action: "INITIAL_INTAKE"
         }]
       }
     }).returning();
 
-    // 4. START THE QMS CLOCK (This is what fixes the "Out of Order" bug)
-   await db.insert(qmsTimelines).values({
+    // 4. QMS Timing: Clock starts now
+    await db.insert(qmsTimelines).values({
       applicationId: newApp.id,
       staffId: "LOD_OFFICER",
       division: "LOD",
       point: 'Director',
-      startTime: dbNow, // ✅ Uses the DB clock (sql`now()`)
-    })
+      startTime: dbNow,
+    });
 
-    revalidatePath("/");
     revalidatePath("/dashboard/applications");
+    revalidatePath("/dashboard/director");
 
     return { success: true, id: newApp.id };
-  } catch (error) {
+  } catch (error: any) {
     console.error("QMS Submission Error:", error);
-    return { success: false, error: "Submission failed" };
+    return { success: false, error: error.message };
   }
 }

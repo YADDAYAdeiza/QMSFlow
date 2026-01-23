@@ -1,371 +1,99 @@
-// import { db } from "@/db";
-// import { qmsTimelines, applications, companies } from "@/db/schema";
-// import { eq, and, isNull, asc } from "drizzle-orm";
-// import { supabase } from "@/lib/supabase";
-// import QMSCountdown from "@/components/QMSCountdown";
-// import ReviewSubmissionForm from "@/components/ReviewSubmissionForm";
-// import AuditTrail from "@/components/AuditTrail"; 
-// import { notFound } from "next/navigation";
-// import { MessageSquare, History, ShieldCheck, FileWarning } from "lucide-react"; 
-
-// export default async function TechnicalReviewPage({ 
-//   params 
-// }: { 
-//   params: Promise<{ division: string; id: string }> 
-// }) {
-//   const { division, id } = await params;
-//   const applicationId = parseInt(id);
-
-//   // 1. Current Staff ID (Static for Vibe-Coding/Testing phase)
-//   const currentStaffId = "60691c7a-3b54-4231-944d-da95f114fa85"; 
-
-//   // 2. Fetch the Application with Company data
-//   const appData = await db
-//     .select({
-//       id: applications.id,
-//       applicationNumber: applications.applicationNumber,
-//       details: applications.details, 
-//       status: applications.status,
-//       currentPoint: applications.currentPoint,
-//       companyName: companies.name,
-//     })
-//     .from(applications)
-//     .leftJoin(companies, eq(applications.companyId, companies.id))
-//     .where(eq(applications.id, applicationId))
-//     .limit(1);
-
-//   const app = appData[0];
-//   if (!app) return notFound();
-
-//   // 3. Extract Unified Comments & Latest Directive
-//   const details = (app.details as any) || {};
-//   const commentsTrail = details.comments || [];
-
-//   // --- HYDRATION LOGIC FOR REWORK ---
-//   // We find the last time staff submitted findings to DDD so we can reload them
-//   const lastSubmission = [...commentsTrail]
-//     .reverse()
-//     .find((c: any) => c.action === "SUBMITTED_TO_DDD");
-  
-//   const initialObservations = lastSubmission?.observations || [];
-//   // ----------------------------------
-
-//   // Get the very last instruction (Assignment or Rework)
-//   const latestDirective = [...commentsTrail]
-//     .reverse()
-//     .find(c => c.action === "ASSIGNED_TO_STAFF" || c.action === "RETURNED_FOR_REWORK")?.text;
-
-//   // 4. QMS Clock Logic
-//   const allSegments = await db
-//     .select()
-//     .from(qmsTimelines)
-//     .where(eq(qmsTimelines.applicationId, applicationId))
-//     .orderBy(asc(qmsTimelines.startTime));
-
-//   const activeTask = allSegments.find(s => s.endTime === null && s.staffId === currentStaffId);
-
-//   // Safety Gate
-//   if (!activeTask) {
-//     return (
-//       <div className="flex items-center justify-center h-screen bg-slate-50 font-mono">
-//         <div className="text-center p-12 bg-white rounded-3xl border border-slate-200 shadow-xl">
-//           <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-//           <h2 className="text-xl font-black uppercase italic">Task Out of Scope</h2>
-//           <p className="text-slate-500 text-sm mt-2">This application is no longer at your desk.</p>
-//         </div>
-//       </div>
-//     );
-//   }
-
-//   const secondsAlreadyUsed = allSegments
-//     .filter(s => s.staffId === currentStaffId)
-//     .reduce((acc, segment) => {
-//       if (segment.startTime && segment.endTime) {
-//         return acc + Math.floor((segment.endTime.getTime() - segment.startTime.getTime()) / 1000);
-//       }
-//       return acc;
-//     }, 0);
-
-//   const QMS_LIMIT_SECONDS = 48 * 60 * 60; 
-//   const totalRemainingSeconds = QMS_LIMIT_SECONDS - secondsAlreadyUsed;
-
-//   // 5. Dossier Fetching
-//   const rawUrl = details.poaUrl || "";
-//   const dossierFilename = rawUrl.split('/').pop() || "";
-//   const { data: urlData } = supabase.storage.from('documents').getPublicUrl(dossierFilename);
-//   const finalPdfUrl = dossierFilename ? urlData.publicUrl : null;
-
-//   return (
-//     <div className="flex h-screen overflow-hidden bg-slate-50">
-      
-//       {/* LEFT: PDF VIEWER */}
-//       <div className="w-2/3 h-full border-r border-slate-200 bg-slate-100 relative">
-//         {finalPdfUrl ? (
-//           <iframe 
-//             src={`${finalPdfUrl}#view=FitH&toolbar=0`} 
-//             className="w-full h-full border-none"
-//             title="Dossier Viewer"
-//           />
-//         ) : (
-//           <div className="flex items-center justify-center h-full text-slate-400 font-black uppercase text-[10px] tracking-widest">
-//             Document Not Found
-//           </div>
-//         )}
-//       </div>
-
-//       {/* RIGHT: CONTROL PANEL */}
-//       <div className="w-1/3 h-full flex flex-col bg-white overflow-y-auto">
-        
-//         <div className="p-8 pb-32">
-          
-//           {/* HEADER SECTION */}
-//           <div className="mb-6 pb-6 border-b border-slate-100">
-//             <div className="flex items-center gap-2 mb-2">
-//               <span className="px-2 py-0.5 rounded text-[10px] font-black bg-slate-900 text-white uppercase tracking-widest">
-//                 {division.toUpperCase()} Division
-//               </span>
-//               {app.status === 'PENDING_REWORK' && (
-//                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-600 text-white uppercase tracking-widest flex items-center gap-1">
-//                   <FileWarning className="w-3 h-3" /> Rework Round
-//                 </span>
-//               )}
-//             </div>
-//             <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tighter italic">Technical Review</h1>
-//             <p className="text-xs font-mono text-blue-600 font-bold">{app.applicationNumber}</p>
-//             <p className="text-sm font-bold text-slate-500 mt-1">{app.companyName}</p>
-//           </div>
-
-//           {/* LATEST DIRECTIVE ALERT BOX */}
-//           {latestDirective && (
-//             <div className="mb-8 p-4 bg-blue-50 border-l-4 border-blue-600 rounded-r-xl shadow-sm">
-//               <div className="flex items-center gap-2 mb-1">
-//                 <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
-//                 <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Current Directive</span>
-//               </div>
-//               <p className="text-xs text-slate-700 font-medium italic leading-relaxed">"{latestDirective}"</p>
-//             </div>
-//           )}
-
-//           {/* THE SUBMISSION FORM - Now with Hydration Props */}
-//           <div className="mb-12">
-//             <ReviewSubmissionForm 
-//               appId={applicationId} 
-//               division={division} 
-//               staffId={currentStaffId} 
-//               comments={commentsTrail}
-//               initialObservations={initialObservations} 
-//             />
-//           </div>
-
-//           {/* AUDIT TRAIL SECTION */}
-//           <div className="mt-8 border-t border-slate-100 pt-8">
-//              <div className="flex items-center gap-2 mb-6">
-//                 <History className="w-4 h-4 text-slate-400" />
-//                 <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Full Lifecycle History</h2>
-//              </div>
-//              <AuditTrail segments={commentsTrail} />
-//           </div>
-//         </div>
-
-//         {/* QMS COUNTDOWN FOOTER */}
-//         <div className="mt-auto p-6 border-t border-slate-100 bg-white sticky bottom-0 z-20">
-//           <div className="flex items-center justify-between mb-2">
-//             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Net QMS Clock</p>
-//             <p className="text-[10px] font-bold text-blue-600 uppercase italic">48H Limit</p>
-//           </div>
-//           <QMSCountdown 
-//             startTime={activeTask.startTime!} 
-//             initialRemainingSeconds={totalRemainingSeconds} 
-//           />
-//         </div>
-
-//       </div>
-//     </div>
-//   );
-// }
-
 import { db } from "@/db";
-import { qmsTimelines, applications, companies } from "@/db/schema";
-import { eq, and, isNull, asc } from "drizzle-orm";
+import { qmsTimelines, applications } from "@/db/schema";
+import { eq, asc } from "drizzle-orm";
 import { supabase } from "@/lib/supabase";
 import QMSCountdown from "@/components/QMSCountdown";
 import ReviewSubmissionForm from "@/components/ReviewSubmissionForm";
-import AuditTrail from "@/components/AuditTrail"; 
 import { notFound } from "next/navigation";
-import { MessageSquare, History, ShieldCheck, FileWarning, ArrowDownCircle } from "lucide-react"; 
+import { ShieldCheck, FileWarning, Search } from "lucide-react"; 
 
-export default async function TechnicalReviewPage({ 
-  params 
-}: { 
-  params: Promise<{ division: string; id: string }> 
-}) {
+export default async function TechnicalReviewPage({ params }: { params: Promise<{ division: string; id: string }> }) {
   const { division, id } = await params;
   const applicationId = parseInt(id);
-
-  // 1. Current Staff ID (Static for Vibe-Coding/Testing phase)
   const currentStaffId = "60691c7a-3b54-4231-944d-da95f114fa85"; 
 
-  // 2. Fetch the Application with Company data
   const appData = await db
     .select({
       id: applications.id,
       applicationNumber: applications.applicationNumber,
       details: applications.details, 
-      status: applications.status,
       currentPoint: applications.currentPoint,
-      companyName: companies.name,
     })
     .from(applications)
-    .leftJoin(companies, eq(applications.companyId, companies.id))
     .where(eq(applications.id, applicationId))
     .limit(1);
 
   const app = appData[0];
   if (!app) return notFound();
 
-  // 3. Extract Comments Trail
   const details = (app.details as any) || {};
-  const commentsTrail = details.comments || [];
-
-  // --- HYDRATION LOGIC (For the Form) ---
-  const lastSubmission = [...commentsTrail]
-    .reverse()
-    .find((c: any) => c.action === "SUBMITTED_TO_DDD");
+  const commentsTrail = Array.isArray(details.comments) ? details.comments : [];
   
-  const initialObservations = lastSubmission?.observations || [];
+  // Find previous work to pre-fill the form
+  const lastSubmission = [...commentsTrail].reverse().find((c: any) => c.action === "SUBMITTED_TO_DDD");
+  const initialFindings = { capas: lastSubmission?.observations?.capas ?? [] };
 
-  // --- NARRATIVE TRAIL (For the UI) ---
-  // We filter for Assignments, Reworks, and Submissions to show the "Story"
-  const narrativeHistory = commentsTrail.filter((c: any) => 
-    ["ASSIGNED_TO_STAFF", "RETURNED_FOR_REWORK", "SUBMITTED_TO_DDD"].includes(c.action)
-  );
-
-  // 4. QMS Clock Logic
-  const allSegments = await db
-    .select()
-    .from(qmsTimelines)
-    .where(eq(qmsTimelines.applicationId, applicationId))
-    .orderBy(asc(qmsTimelines.startTime));
-
+  const allSegments = await db.select().from(qmsTimelines).where(eq(qmsTimelines.applicationId, applicationId)).orderBy(asc(qmsTimelines.startTime));
   const activeTask = allSegments.find(s => s.endTime === null && s.staffId === currentStaffId);
 
   if (!activeTask) {
     return (
-      <div className="flex items-center justify-center h-screen bg-slate-50 font-mono">
-        <div className="text-center p-12 bg-white rounded-3xl border border-slate-200 shadow-xl">
+      <div className="flex items-center justify-center h-screen bg-slate-50">
+        <div className="text-center p-12 bg-white rounded-[3rem] border border-slate-200 shadow-xl">
           <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-          <h2 className="text-xl font-black uppercase italic">Task Out of Scope</h2>
-          <p className="text-slate-500 text-sm mt-2">This application is no longer at your desk.</p>
+          <h2 className="text-xl font-black uppercase italic leading-none">Task Out of Scope</h2>
+          <p className="text-slate-500 text-sm mt-2 font-mono uppercase tracking-tighter">Current: {app.currentPoint}</p>
         </div>
       </div>
     );
   }
 
-  const secondsAlreadyUsed = allSegments
-    .filter(s => s.staffId === currentStaffId)
-    .reduce((acc, segment) => {
-      if (segment.startTime && segment.endTime) {
-        return acc + Math.floor((segment.endTime.getTime() - segment.startTime.getTime()) / 1000);
-      }
-      return acc;
-    }, 0);
+  const secondsUsed = allSegments.filter(s => s.staffId === currentStaffId).reduce((acc, s) => (s.startTime && s.endTime) ? acc + Math.floor((s.endTime.getTime() - s.startTime.getTime()) / 1000) : acc, 0);
+  const remaining = (48 * 60 * 60) - secondsUsed;
 
-  const QMS_LIMIT_SECONDS = 48 * 60 * 60; 
-  const totalRemainingSeconds = QMS_LIMIT_SECONDS - secondsAlreadyUsed;
-
-  // 5. Dossier Fetching
-  const rawUrl = details.poaUrl || "";
-  const dossierFilename = rawUrl.split('/').pop() || "";
-  const { data: urlData } = supabase.storage.from('documents').getPublicUrl(dossierFilename);
-  const finalPdfUrl = dossierFilename ? urlData.publicUrl : null;
+  const rawUrl = details.inspectionReportUrl || details.poaUrl || "";
+  const { data: urlData } = supabase.storage.from('documents').getPublicUrl(rawUrl.split('/').pop() || "");
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      
-      {/* LEFT: PDF VIEWER */}
-      <div className="w-2/3 h-full border-r border-slate-200 bg-slate-100 relative">
-        {finalPdfUrl ? (
-          <iframe 
-            src={`${finalPdfUrl}#view=FitH&toolbar=0`} 
-            className="w-full h-full border-none"
-            title="Dossier Viewer"
-          />
+      <div className="w-2/3 h-full border-r border-slate-200 bg-slate-100 relative shadow-inner">
+        {urlData.publicUrl ? (
+          <iframe src={`${urlData.publicUrl}#view=FitH&toolbar=0`} className="w-full h-full border-none" title="Dossier" />
         ) : (
-          <div className="flex items-center justify-center h-full text-slate-400 font-black uppercase text-[10px] tracking-widest">
-            Document Not Found
-          </div>
+          <div className="flex items-center justify-center h-full"><Search className="opacity-20" /></div>
         )}
       </div>
 
-      {/* RIGHT: CONTROL PANEL */}
       <div className="w-1/3 h-full flex flex-col bg-white overflow-y-auto">
-        
         <div className="p-8 pb-32">
-          
-          {/* HEADER */}
-          <div className="mb-6 pb-6 border-b border-slate-100">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="px-2 py-0.5 rounded text-[10px] font-black bg-slate-900 text-white uppercase tracking-widest">
-                {division.toUpperCase()} Division
-              </span>
-              {app.status === 'PENDING_REWORK' && (
-                 <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-600 text-white uppercase tracking-widest flex items-center gap-1 animate-pulse">
+          <div className="mb-8 pb-8 border-b border-slate-100">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="px-3 py-1 rounded-full text-[10px] font-black bg-slate-900 text-white uppercase tracking-widest">{division.toUpperCase()} Division</span>
+              {app.currentPoint !== 'Divisional Deputy Director' && (
+                <span className="px-3 py-1 rounded-full text-[10px] font-black bg-rose-600 text-white uppercase tracking-widest flex items-center gap-1">
                   <FileWarning className="w-3 h-3" /> Rework Mode
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tighter italic">Technical Review</h1>
-            <p className="text-xs font-mono text-blue-600 font-bold">{app.applicationNumber}</p>
+            <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter italic leading-none">Technical Review</h1>
+            <p className="text-sm font-mono text-blue-600 font-bold mt-2">{app.applicationNumber}</p>
           </div>
 
-          {/* NARRATIVE CONTEXT TRAIL (The "Story" of the Rework) */}
-          <div className="mb-8 space-y-4">
-            <div className="flex items-center gap-2 px-1">
-                <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Directive History</span>
-            </div>
-            
-            {narrativeHistory.map((log: any, idx: number) => (
-              <div key={idx} className={`p-4 rounded-2xl border ${
-                log.role === "Staff" ? "bg-white border-slate-100 ml-4" : "bg-blue-50 border-blue-100 mr-4"
-              }`}>
-                <div className="flex justify-between items-center mb-1">
-                    <span className="text-[8px] font-black uppercase text-slate-400">{log.from}</span>
-                    <span className="text-[8px] font-mono text-slate-300">{new Date(log.timestamp).toLocaleDateString()}</span>
-                </div>
-                <p className="text-xs text-slate-700 italic leading-relaxed">"{log.text}"</p>
-              </div>
-            ))}
-          </div>
-
-          {/* THE SUBMISSION FORM */}
           <div className="mb-12">
+            {/* ✅ Comments passed directly here to appear between Capas and Summary */}
             <ReviewSubmissionForm 
               appId={applicationId} 
               division={division} 
               staffId={currentStaffId} 
-              initialObservations={initialObservations} 
+              initialFindings={initialFindings} 
+              comments={commentsTrail}
             />
           </div>
-
-          {/* FULL AUDIT TRAIL */}
-          <div className="mt-8 border-t border-slate-100 pt-8">
-             <div className="flex items-center gap-2 mb-6">
-                <History className="w-4 h-4 text-slate-400" />
-                <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Full Lifecycle History</h2>
-             </div>
-             <AuditTrail segments={commentsTrail} />
-          </div>
         </div>
-
-        {/* QMS FOOTER */}
+        
         <div className="mt-auto p-6 border-t border-slate-100 bg-white sticky bottom-0 z-20">
-          <QMSCountdown 
-            startTime={activeTask.startTime!} 
-            initialRemainingSeconds={totalRemainingSeconds} 
-          />
+          <QMSCountdown startTime={activeTask.startTime!} initialRemainingSeconds={remaining} />
         </div>
-
       </div>
     </div>
   );

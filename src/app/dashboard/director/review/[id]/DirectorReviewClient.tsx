@@ -1,219 +1,283 @@
-"use client";
+"use client"
 
 import React, { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { pdf } from '@react-pdf/renderer';
-import { supabase } from '@/lib/supabase';
-import { finalizeApplication, returnToStaffFromDirector } from '@/lib/actions/director';
-import { CapaLetter } from '@/components/documents/CapaLetter';
-import CapaLetterView from '@/components/CapaLetterView';
 import { 
-  FileCheck, Loader2, ShieldCheck, FileText, History, 
-  MessageSquare, ClipboardCheck, RotateCcw, X, FileX 
+  ShieldCheck, FileText, CheckCircle2, XCircle, AlertTriangle, 
+  Loader2, MessageSquare, Award, ClipboardList, RotateCcw 
 } from 'lucide-react';
 
-export default function DirectorReviewClient({ app, pdfUrl }: any) {
-  const [decisionNote, setDecisionNote] = useState("");
-  const [reworkNote, setReworkNote] = useState("");
-  const [isReworkModalOpen, setIsReworkModalOpen] = useState(false);
-  const [showLetterPreview, setShowLetterPreview] = useState(false);
+// Actions
+import { issueFinalClearance, rejectAndIssueCAPA } from '@/lib/actions/director';
+import { returnToStaff } from '@/lib/actions'; 
+
+// Document Templates
+import { CapaLetter } from "@/components/documents/CapaLetter"; 
+import { GmpCertificate } from "@/components/documents/GmpCertificate";
+import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
+
+// Components
+import { supabase } from "@/lib/supabase";
+import AuditTrail from "@/components/AuditTrail";
+import RejectionModal from "@/components/RejectionModal"; // Assuming this is where you save it
+
+export default function DirectorReviewClient({ app, usersList }: { app: any, usersList: any[] }) {
+  const [remarks, setRemarks] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [processing, setProcessing] = useState(false);
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const router = useRouter();
 
-  const isCapa = app.isCapaOutcome;
-  const narrative = [...(app.narrativeHistory || [])].reverse();
+  // --- 1. DATA EXTRACTION ---
+  const fullTrail = Array.isArray(app.commentsTrail) ? app.commentsTrail : [];
+  
+  // Locate latest technical submission for CAPA table
+  const latestSubmission = [...fullTrail]
+    .reverse()
+    .find((c: any) => c.action === "SUBMITTED_TO_DDD");
 
-  const handleFinalize = async (isApproved: boolean) => {
-    if (!decisionNote.trim()) return alert("QMS Requirement: Final decision note is mandatory.");
-    
-    const actionLabel = isApproved ? (isCapa ? "Issue CAPA Letter" : "Issue Certificate") : "Reject Application";
-    if (!confirm(`Confirm ${actionLabel}? This will generate the physical PDF and archive it.`)) return;
+  const technicalCapas = latestSubmission?.observations?.capas || [];
+  const appType = app.type || "";
 
-    startTransition(async () => {
-      try {
-        let storagePath = "";
+  // Safety Logic
+  const hasCriticalFindings = technicalCapas.some((c: any) => 
+    ["Critical", "Major"].includes(c.classification)
+  );
 
-        if (isApproved) {
-          // 1. Generate the PDF Blob
-          const blob = await pdf(
-            <CapaLetter 
-              data={{
-                appNumber: app.application_number,
-                companyName: app.company?.name || "Company",
-                companyAddress: app.details?.factory_address || "Address",
-                facilityName: app.details?.factory_name || "Facility",
-                date: new Date().toLocaleDateString()
-              }} 
-              observations={app.latestObservations} 
-            />
-          ).toBlob();
+  const isFacilityVerification = appType.includes("Facility Verification");
+  const pdfUrl = app.details?.inspectionReportUrl || app.details?.poaUrl || "";
+  const sanitize = (str: string) => str?.replace(/[^a-z0-9]/gi, '_').toUpperCase() || "UNKNOWN";
 
-          // 2. Setup Hierarchical Path: Company/App/Type/File
-          const safeCo = (app.company?.name || "Unknown").replace(/[^a-z0-9]/gi, '_');
-          const safeApp = (app.application_number || "App").replace(/[^a-z0-9]/gi, '_');
-          const type = isCapa ? "CAPA" : "GMP_CERTIFICATE";
-          
-          storagePath = `${safeCo}/${safeApp}/${type}/Notification_${Date.now()}.pdf`;
+  // --- 2. HANDLERS ---
 
-          // 3. Upload to Supabase 'documents' bucket
-          const { error: uploadError } = await supabase.storage
-            .from('documents')
-            .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
+  const handleRejectWithCapa = async () => {
+    if (!remarks.trim()) return alert("Please enter Director remarks.");
+    setProcessing(true);
+    try {
+      const formattedObservations = technicalCapas.map((c: any) => ({
+        severity: c.classification,
+        finding: c.deficiency,
+      }));
 
-          if (uploadError) throw uploadError;
-        }
+      const blob = await pdf(
+        <CapaLetter 
+          data={{
+            appNumber: app.applicationNumber,
+            date: new Date().toLocaleDateString('en-GB'),
+            companyName: app.company?.name,
+            companyAddress: app.details?.factory_address || app.company?.address
+          }} 
+          observations={formattedObservations} 
+        />
+      ).toBlob();
 
-        // 4. Update Database
-        const result = await finalizeApplication(app.id, isApproved, decisionNote, storagePath);
-        if (result.success) {
-          router.push('/dashboard/director');
-          router.refresh();
-        }
-      } catch (err: any) {
-        alert("Process failed: " + err.message);
-      }
-    });
+      const path = `${sanitize(app.company?.name)}/${sanitize(app.applicationNumber)}/CAPA/CAPA_LETTER_${Date.now()}.pdf`;
+      const { error } = await supabase.storage.from('documents').upload(path, blob);
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
+
+      startTransition(async () => {
+        const res = await rejectAndIssueCAPA(app.id, remarks, publicUrl);
+        if (res.success) { router.push('/dashboard/director'); router.refresh(); }
+      });
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally { setProcessing(false); }
   };
 
-  const handleReturnToStaff = () => {
-    if (!reworkNote.trim()) return alert("Please provide instructions for the staff.");
-    startTransition(async () => {
-      const result = await returnToStaffFromDirector(app.id, reworkNote);
-      if (result.success) {
-        setIsReworkModalOpen(false);
-        router.push('/dashboard/director');
-        router.refresh();
+  const handleApprove = async () => {
+    if (!remarks.trim()) return alert("Executive remarks required.");
+    if (hasCriticalFindings) return alert("Blocked: Resolve Critical/Major deficiencies.");
+
+    setProcessing(true);
+    try {
+      let documentBlob;
+      let folderName = isFacilityVerification ? "CLEARANCE" : "CERTIFICATE";
+      let filePrefix = isFacilityVerification ? "GMP_CLEARANCE" : "GMP_CERT";
+
+      const templateData = {
+        appNumber: app.applicationNumber,
+        companyName: app.company?.name,
+        factoryName: app.details?.factory_name || app.company?.name,
+        factoryAddress: app.details?.factory_address || app.company?.address,
+        date: new Date().toLocaleDateString('en-GB'),
+        expiryDate: new Date(new Date().setFullYear(new Date().getFullYear() + 2)).toLocaleDateString('en-GB')
+      };
+
+      if (isFacilityVerification) {
+        documentBlob = await pdf(<ClearanceLetter data={templateData} />).toBlob();
+      } else {
+        documentBlob = await pdf(<GmpCertificate data={templateData} />).toBlob();
       }
-    });
+
+      const path = `${sanitize(app.company?.name)}/${sanitize(app.applicationNumber)}/${folderName}/${filePrefix}_${Date.now()}.pdf`;
+      const { error } = await supabase.storage.from('documents').upload(path, documentBlob);
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
+
+      startTransition(async () => {
+        const res = await issueFinalClearance(app.id, remarks, publicUrl);
+        if (res.success) { router.push('/dashboard/director'); router.refresh(); }
+      });
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally { setProcessing(false); }
   };
 
   return (
-    <div className="grid grid-cols-12 gap-8 p-8 bg-slate-50 min-h-screen">
-      
-      {/* LEFT: PREVIEW PANEL */}
-      <div className="col-span-7 h-[88vh] flex flex-col gap-4">
-        <div className="flex bg-slate-200 p-1 rounded-2xl w-fit gap-1">
-          <button onClick={() => setShowLetterPreview(false)} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${!showLetterPreview ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-            <ShieldCheck className="w-4 h-4" /> Dossier
-          </button>
-          <button onClick={() => setShowLetterPreview(true)} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${showLetterPreview ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-            <FileText className="w-4 h-4" /> {isCapa ? "CAPA Letter" : "Draft Certificate"}
-          </button>
-        </div>
-
-        <div className="flex-1 bg-white rounded-[3rem] shadow-2xl border border-slate-200 overflow-hidden">
-          {showLetterPreview ? (
-            <div className="bg-slate-400/20 p-12 min-h-full flex justify-center overflow-y-auto">
-              <CapaLetterView app={app} observations={app.latestObservations} />
-            </div>
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
+      {/* PREVIEW */}
+      <div className="w-1/2 h-full border-r border-slate-200 p-6">
+        <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-200 h-full overflow-hidden">
+          {pdfUrl ? (
+            <iframe src={`${pdfUrl}#toolbar=0`} className="w-full h-full border-none" />
           ) : (
-            <iframe src={`${pdfUrl}#toolbar=0`} className="w-full h-full" />
+            <div className="flex flex-col items-center justify-center h-full text-slate-300 italic text-xs">
+               <FileText className="w-12 h-12 opacity-10 mb-2" />
+               Technical Report Not Available
+            </div>
           )}
         </div>
       </div>
 
-      {/* RIGHT: ACTION PANEL & AUDIT TRAIL */}
-      <div className="col-span-5 flex flex-col gap-6 overflow-y-auto pr-2 max-h-[88vh]">
-        
-        {/* Recommendation Hero Box */}
-        <div className={`p-8 rounded-[2.5rem] text-white shadow-xl ${isCapa ? 'bg-amber-600' : 'bg-blue-600'}`}>
-          <h3 className="text-[11px] font-black uppercase mb-4 flex items-center gap-2 tracking-widest text-white/80">
-            <ClipboardCheck className="w-4 h-4" /> Divisional Deputy Director's Note
-          </h3>
-          <p className="text-sm font-medium italic border-l-4 border-white/20 pl-6 leading-relaxed">
-            "{app.dddRecommendation}"
-          </p>
-        </div>
-
-        {/* Narrative Lifecycle (Audit Trail) */}
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 flex items-center gap-2 tracking-widest">
-            <History className="w-4 h-4" /> Workflow Narrative
-          </h3>
-          <div className="space-y-4">
-            {narrative.map((note: any, idx: number) => (
-              <div key={idx} className="p-5 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] text-slate-600">
-                <div className="flex justify-between mb-2 opacity-50 font-black uppercase text-[8px]">
-                  <span>{note.from}</span>
-                  <span>{new Date(note.timestamp).toLocaleDateString()}</span>
-                </div>
-                <p className="italic font-medium leading-relaxed">"{note.text}"</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Final Actions */}
-        <div className="bg-slate-900 p-8 rounded-[3rem] text-white mt-auto shadow-2xl">
-          <h3 className="text-blue-400 text-[11px] font-black uppercase tracking-widest mb-6 flex items-center gap-2">
-            <MessageSquare className="w-4 h-4" /> Final Director's Minute
-          </h3>
+      {/* PANEL */}
+      <div className="w-1/2 h-full p-8 overflow-y-auto">
+        <div className="max-w-xl mx-auto space-y-8 pb-20">
           
-          <textarea 
-            value={decisionNote} 
-            onChange={(e) => setDecisionNote(e.target.value)}
-            disabled={isPending}
-            className="w-full h-28 bg-slate-800 rounded-[2rem] p-6 text-sm mb-6 outline-none border-none italic placeholder:text-slate-600 text-slate-200"
-            placeholder="Type final administrative decision for the permanent archive..."
-          />
-
-          <button 
-            onClick={() => handleFinalize(true)} 
-            disabled={isPending} 
-            className="w-full py-5 bg-emerald-600 hover:bg-emerald-500 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 transition-all mb-4"
-          >
-            {isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <><FileCheck className="w-4 h-4" /> Authorize & Issue</>}
-          </button>
-
-          <div className="grid grid-cols-2 gap-3">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase italic">{app.applicationNumber}</h1>
+              <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">{appType}</p>
+            </div>
             <button 
-              onClick={() => handleFinalize(false)} 
-              disabled={isPending} 
-              className="py-4 bg-rose-600/10 text-rose-500 hover:bg-rose-600 hover:text-white rounded-xl font-black uppercase text-[9px] transition-all"
+              onClick={() => setIsReturnModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase transition-all"
             >
-              <FileX className="w-3.5 h-3.5 inline mr-2" /> Deny
-            </button>
-            <button 
-              onClick={() => setIsReworkModalOpen(true)} 
-              disabled={isPending} 
-              className="py-4 bg-slate-800 text-slate-400 hover:text-white rounded-xl font-black uppercase text-[9px] transition-all"
-            >
-              <RotateCcw className="w-3.5 h-3.5 inline mr-2" /> Rework
+              <RotateCcw className="w-3 h-3" /> Return to DDD
             </button>
           </div>
+
+          {/* DDD RECOMMENDATION */}
+          <div className="bg-blue-600 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden">
+             <div className="relative z-10">
+               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-100 mb-3 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4" /> Divisional Deputy Director Minute
+               </h3>
+               <p className="text-lg font-bold italic leading-relaxed">"{app.dddInstruction}"</p>
+             </div>
+             <ShieldCheck className="absolute -bottom-6 -right-6 w-40 h-40 text-blue-500 opacity-20 rotate-12" />
+          </div>
+
+          {/* TECHNICAL FINDINGS */}
+          <div className="space-y-4">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-2 flex items-center gap-2">
+              <ClipboardList className="w-4 h-4" /> Technical Review Summary
+            </h3>
+            <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-sm">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="px-6 py-3 font-black uppercase text-[9px] text-slate-500 tracking-wider">Severity</th>
+                    <th className="px-6 py-3 font-black uppercase text-[9px] text-slate-500 tracking-wider">Finding</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {technicalCapas.length > 0 ? technicalCapas.map((c: any, i: number) => (
+                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-md text-[8px] font-black uppercase ${
+                          c.classification === 'Critical' ? 'bg-rose-100 text-rose-600' :
+                          c.classification === 'Major' ? 'bg-orange-100 text-orange-600' :
+                          'bg-blue-100 text-blue-600'
+                        }`}>
+                          {c.classification}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-slate-600 italic leading-relaxed">{c.deficiency}</td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={2} className="px-6 py-10 text-center text-slate-400 italic text-xs">No technical deficiencies found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* COMMENT TRAIL */}
+          <div className="space-y-4">
+             <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-2 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4" /> Internal Processing Trail
+             </h3>
+             <div className="space-y-3">
+               {fullTrail.map((c: any, i: number) => (
+                  <div key={i} className={`p-5 rounded-[2rem] border transition-all ${c.role === 'Divisional Deputy Director' ? 'bg-blue-50 border-blue-100' : 'bg-white border-slate-100'}`}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-500">{c.role || c.from}</span>
+                      <span className="text-[8px] text-slate-400 font-mono">{new Date(c.timestamp).toLocaleString()}</span>
+                    </div>
+                    <p className="text-xs text-slate-700 italic leading-relaxed">"{c.text}"</p>
+                  </div>
+               ))}
+             </div>
+          </div>
+
+          {/* FINAL VERDICT */}
+          <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-2xl">
+            <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-400 mb-6 flex items-center gap-2">
+              <Award className="w-4 h-4" /> Director's Verdict
+            </h3>
+            <textarea 
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              className="w-full h-32 bg-slate-800 border-none rounded-3xl p-6 text-sm italic text-slate-200 outline-none focus:ring-2 focus:ring-blue-500 mb-8 resize-none"
+              placeholder="Enter executive remarks..."
+            />
+            <div className="grid grid-cols-2 gap-4">
+              <button 
+                onClick={handleApprove} 
+                disabled={isPending || processing || hasCriticalFindings} 
+                className={`py-5 rounded-[2rem] font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 transition-all 
+                  ${hasCriticalFindings ? 'bg-slate-700 text-slate-500 cursor-not-allowed shadow-none' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg active:scale-95'}`}
+              >
+                {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : (
+                   <><CheckCircle2 className="w-4 h-4" /> Issue {isFacilityVerification ? 'Clearance' : 'Certificate'}</>
+                )}
+              </button>
+              <button 
+                onClick={handleRejectWithCapa} 
+                disabled={isPending || processing} 
+                className="py-5 bg-rose-600 hover:bg-rose-500 rounded-[2rem] font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-rose-900/20"
+              >
+                {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><XCircle className="w-4 h-4" /> Reject & CAPA</>}
+              </button>
+            </div>
+            {hasCriticalFindings && (
+              <p className="text-[9px] text-rose-400 mt-4 text-center font-bold uppercase tracking-widest italic animate-pulse">
+                * Approval Disabled: Major deficiencies found. Issue CAPA Letter or Return for Rework.
+              </p>
+            )}
+          </div>
+
+          <AuditTrail segments={fullTrail} />
         </div>
       </div>
 
-      {/* REWORK MODAL */}
-      {isReworkModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-lg rounded-[3rem] p-10 shadow-2xl animate-in zoom-in-95">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="font-black uppercase text-xs tracking-widest flex items-center gap-2">
-                <RotateCcw className="w-4 h-4 text-blue-600" /> Return for Rework
-              </h3>
-              <button onClick={() => setIsReworkModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                <X className="w-6 h-6 text-slate-400" />
-              </button>
-            </div>
-            
-            <textarea 
-              value={reworkNote}
-              onChange={(e) => setReworkNote(e.target.value)}
-              className="w-full h-44 bg-slate-50 border-none rounded-[2rem] p-8 text-sm italic outline-none resize-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Provide specific instructions for the Staff Reviewer..."
-            />
-
-            <button 
-              onClick={handleReturnToStaff}
-              disabled={isPending || !reworkNote.trim()}
-              className="w-full py-5 mt-8 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-[11px] tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Dispatch Rework Order"}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* RETURN MODAL */}
+      <RejectionModal 
+        isOpen={isReturnModalOpen}
+        onClose={() => setIsReturnModalOpen(false)}
+        appId={app.id}
+        currentStaffId={app.assignedToId} // Assumes this is the ID of the person who sent it (the DDD)
+        staffList={usersList}
+        onSuccess={() => {
+          setIsReturnModalOpen(false);
+          router.push('/dashboard/director');
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

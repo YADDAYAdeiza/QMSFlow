@@ -1,70 +1,64 @@
 import { db } from "@/db";
-import { applications } from "@/db/schema";
+import { applications, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import DirectorReviewClient from "./DirectorReviewClient"; 
 import { notFound } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import DirectorReviewClient from "./DirectorReviewClient";
 
-export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+export default async function DirectorReviewPage({ 
+  params 
+}: { 
+  params: Promise<{ id: string }> 
+}) {
   const { id } = await params;
-  const appId = parseInt(id);
 
-  // 1. Fetch application with company relation
+  // 1. Guard against 'undefined' or malformed IDs to prevent Postgres NaN errors
+  if (!id || id === "undefined") return notFound();
+  const appId = parseInt(id);
+  if (isNaN(appId)) return notFound();
+
+  // 2. Fetch Application with Company Details
   const app = await db.query.applications.findFirst({
     where: eq(applications.id, appId),
-    with: { company: true }
+    with: {
+      company: true,
+    }
   });
 
   if (!app) return notFound();
 
-  const appDetails = (app.details as Record<string, any>) || {};
-  const commentsTrail = appDetails.comments || [];
-
-  // 2. Identify if this is a CAPA workflow based on DDD recommendation
-  const isCapaOutcome = commentsTrail.some((c: any) => c.action === "RECOMMENDED_FOR_CAPA");
-
-  // 3. Extract the latest technical observations for the PDF/Letter template
+  // 3. Extract Observations and categorization of comments
+  const appDetails = (app.details as any) || {};
+  const commentsTrail = Array.isArray(appDetails.comments) ? appDetails.comments : [];
+  
+  // Find the Staff submission (for technical data like CAPAs)
   const latestStaffSubmission = [...commentsTrail]
     .reverse()
     .find((c: any) => c.action === "SUBMITTED_TO_DDD");
 
-  // 4. Extract the Divisional Deputy Director's recommendation note
-  // Instructions: Use 'Divisional Deputy Director' instead of 'DDD'
-  const dddEndorsement = [...commentsTrail]
+  // Find the specific minute from the Divisional Deputy Director
+  const dddRecommendation = [...commentsTrail]
     .reverse()
-    .find((c: any) => 
-      c.role === "Divisional Deputy Director" && 
-      ["RECOMMENDED_FOR_CAPA", "SUBMITTED_TO_DIRECTOR", "RECOMMENDED_FOR_APPROVAL"].includes(c.action)
-    );
+    .find((c: any) => c.role === "Divisional Deputy Director");
 
-  // 5. Generate a signed URL for the original technical dossier (POA/Inspection Report)
-  const rawUrl = appDetails.inspectionReportUrl || appDetails.poaUrl || "";
-  let dossierPublicUrl = null;
-  
-  if (rawUrl) {
-    // Extract filename from the Supabase URL or stored path
-    const filename = rawUrl.split('/').pop() || "";
-    const { data } = supabase.storage.from('documents').getPublicUrl(filename);
-    dossierPublicUrl = data.publicUrl;
-  }
-
-  // 6. Construct the clean application object for the Client Component
   const cleanApp = {
-    ...JSON.parse(JSON.stringify(app)),
-    isCapaOutcome,
-    // The Audit Trail: We pass the entire comments history
-    narrativeHistory: commentsTrail, 
-    latestObservations: latestStaffSubmission?.observations || [],
-    dddRecommendation: dddEndorsement?.text || "No formal recommendation note found.",
-    // Standard data for the letterhead
-    facilityName: appDetails.factory_name || "N/A",
-    facilityAddress: appDetails.factory_address || "N/A"
+    ...app,
+    details: appDetails,
+    latestObservations: latestStaffSubmission?.observations?.observations || [],
+    latestCapas: latestStaffSubmission?.observations?.capas || [],
+    commentsTrail: commentsTrail, // Full history for the internal feed
+    dddInstruction: dddRecommendation?.text || "No specific recommendation notes provided by the division."
   };
+
+  // 4. Fetch Users List (for context or routing)
+  const usersList = await db.select({ 
+    id: users.id, 
+    name: users.name 
+  }).from(users);
 
   return (
     <DirectorReviewClient 
       app={cleanApp} 
-      pdfUrl={dossierPublicUrl} 
+      usersList={usersList}
     />
   );
 }

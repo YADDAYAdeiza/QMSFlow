@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 // 1. Use the standard createClient from the main package
 import { createClient } from "@supabase/supabase-js";
 
+
 // "use server"
 
 // /**
@@ -240,32 +241,29 @@ export async function finalizeApplication(
   appId: number, 
   isApproved: boolean, 
   decisionNote: string,
-  storagePath?: string 
+  storagePath: string 
 ) {
   try {
     const now = new Date();
     const app = await db.query.applications.findFirst({
-      where: eq(applications.id, appId),
-      with: { company: true }
+      where: eq(applications.id, appId)
     });
 
     if (!app) throw new Error("Application not found");
 
     const details = (app.details as Record<string, any>) || {};
+    const appType = app.type?.toLowerCase() || "";
     const isCapaOutcome = details.comments?.some((c: any) => c.action === "RECOMMENDED_FOR_CAPA");
-    
-    let finalStatus = isApproved ? (isCapaOutcome ? "APPROVED_WITH_CAPA" : "APPROVED") : "REJECTED";
 
-    // Prepare observations snapshot
-    const latestStaffSub = [...details.comments].reverse().find((c: any) => c.action === "SUBMITTED_TO_DDD");
-    
-    const archiveRecord = {
-      remarks: decisionNote,
-      issuedAt: now.toISOString(),
-      authorizedBy: "Director/CEO",
-      documentType: isCapaOutcome ? "CAPA" : "GMP_CERTIFICATE",
-      findingsSnapshot: latestStaffSub?.observations || [],
-    };
+    // DETERMINE DB STATUS BASED ON YOUR RULES
+    let finalStatus = "COMPLETED";
+    if (appType.includes("facility verification")) {
+      finalStatus = "CLEARANCE_ISSUED";
+    } else if (isCapaOutcome) {
+      finalStatus = "CAPA_ISSUED";
+    } else {
+      finalStatus = "CERTIFICATE_ISSUED";
+    }
 
     await db.update(applications)
       .set({
@@ -273,21 +271,20 @@ export async function finalizeApplication(
         currentPoint: "Completed",
         details: {
           ...details,
+          archived_outcome_path: storagePath,
+          finalized_at: now.toISOString(),
           comments: [...details.comments, {
             from: "Director/CEO",
             role: "Director",
             text: decisionNote,
-            action: isApproved ? "FINAL_APPROVAL_ISSUED" : "FINAL_REJECTION",
+            action: "FINAL_OUTCOME_ISSUED",
             timestamp: now.toISOString(),
           }],
-          archived_outcome_path: storagePath || "", 
-          archived_capa_document: isCapaOutcome ? archiveRecord : null,
-          finalized_at: now.toISOString(),
         } as any,
       })
       .where(eq(applications.id, appId));
 
-    // Requirement: Time the staff as per QMS requirements
+    // QMS Timing Requirement: Close the clock
     await db.update(qmsTimelines)
       .set({ endTime: now })
       .where(eq(qmsTimelines.applicationId, appId));

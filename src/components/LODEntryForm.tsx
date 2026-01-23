@@ -1,28 +1,23 @@
 "use client"
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { useRouter } from "next/navigation";
 import { zodResolver } from '@hookform/resolvers/zod';
 import { lodFormSchema } from '@/lib/validations';
 import { submitLODApplication } from '@/lib/actions/index';
 import FileUpload from './FileUpload'; 
-import { Plus, Trash2, Globe, Building2, Mail, ShieldAlert, Bug } from 'lucide-react';
+import { Plus, Trash2, Globe, Building2, Save, Loader2, AlertCircle, FileCheck } from 'lucide-react';
 
 export default function LODEntryForm() {
   const { 
-    register, 
-    handleSubmit, 
-    watch, 
-    setValue, 
-    control,
-    reset, 
-    formState: { isValid, isSubmitting, isSubmitSuccessful, errors } 
+    register, handleSubmit, watch, setValue, control, reset, 
+    formState: { isSubmitting, isSubmitSuccessful, errors } 
   } = useForm({
     resolver: zodResolver(lodFormSchema),
     defaultValues: {
       appNumber: "",
-      type: "",
+      type: "Facility Verification",
       companyName: "",
       companyAddress: "",
       notificationEmail: "",
@@ -32,188 +27,161 @@ export default function LODEntryForm() {
       hasOAI: "No",
       lastInspected: "Recent",
       failedSystems: [],
-      divisions: []
+      divisions: ["VMD"],
+      poaUrl: "",
+      inspectionReportUrl: ""
     },
     mode: "onChange"
   });
 
   const { fields: lineFields, append: appendLine, remove: removeLine } = useFieldArray({
-    control,
-    name: "productLines"
+    control, name: "productLines"
   });
 
   const router = useRouter();
   const selectedType = watch("type");
+  const currentPoa = watch("poaUrl");
+  const currentReport = watch("inspectionReportUrl");
 
   const onSubmit = async (data: any) => {
     try {
-      await submitLODApplication(data);
-      router.refresh();
+      const result = await submitLODApplication(data);
+      if (result.success) {
+        router.refresh();
+      } else {
+        alert(`Server Error: ${result.error}`);
+      }
     } catch (error) {
       console.error("Submission failed", error);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto pb-20">
-      
-      {/* --- DEBUG TOOL: ERROR OVERLAY --- */}
-      {Object.keys(errors).length > 0 && (
-        <div className="mb-6 p-4 bg-rose-50 border-2 border-rose-200 rounded-3xl animate-in fade-in slide-in-from-top-4">
-          <div className="flex items-center gap-2 mb-2 text-rose-600">
-            <Bug className="w-4 h-4" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Validation Blockers</span>
-          </div>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-1">
-            {Object.entries(errors).map(([key, value]: [string, any]) => (
-              <li key={key} className="text-[10px] text-rose-500 font-bold flex items-center gap-1">
-                • <span className="uppercase">{key}:</span> {value.message || "Invalid Input"}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
+    <div className="max-w-4xl mx-auto pb-20">
       {isSubmitSuccessful ? (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-12 rounded-3xl text-center shadow-xl">
-            <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter">Application Logged</h3>
-            <p className="opacity-70 text-sm mb-6">File has been routed to the technical divisions.</p>
-            <button onClick={() => reset()} className="px-6 py-2 bg-emerald-600 text-white rounded-full font-bold text-xs uppercase tracking-widest">
-              Add Another File
-            </button>
+          <div className="bg-emerald-50 border border-emerald-200 p-12 rounded-[3rem] text-center shadow-xl animate-in zoom-in-95 duration-500">
+            <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-200">
+                <FileCheck className="text-white w-10 h-10" />
+            </div>
+            <h3 className="text-2xl font-black text-emerald-900 uppercase italic tracking-tighter">Application Logged</h3>
+            <p className="text-emerald-700/70 text-sm mb-8 font-medium">The dossier has been successfully routed to the Director.</p>
+            <button onClick={() => reset()} className="px-10 py-4 bg-emerald-600 text-white rounded-full font-black text-[11px] uppercase tracking-[0.2em] hover:bg-emerald-700 transition-colors">Route New File</button>
           </div>        
       ) : (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 p-8 bg-white rounded-[2.5rem] shadow-2xl border border-slate-100">
-          <header className="border-b border-slate-100 pb-6">
-            <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter leading-none">LOD Intake</h2>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Dossier Registration & Risk Profiling</p>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 p-10 bg-white rounded-[3rem] shadow-2xl border border-slate-100">
+          
+          {/* HIDDEN URL REGISTRATION FOR ZOD */}
+          <input type="hidden" {...register("poaUrl")} />
+          <input type="hidden" {...register("inspectionReportUrl")} />
+
+          <header className="border-b border-slate-100 pb-8">
+            <h2 className="text-4xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">LOD Intake</h2>
+            <div className="flex items-center gap-2 mt-2">
+                <span className="h-1 w-8 bg-blue-600 rounded-full"></span>
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em]">Dossier Registration & Routing</p>
+            </div>
           </header>
           
-          {/* SECTION: IDENTIFICATION */}
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Application No.</label>
-              <input {...register("appNumber")} placeholder="e.g. NAF/FAC/2026/001" className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm" />
+          {/* TOP SECTION: APP INFO */}
+          <div className="grid grid-cols-2 gap-8">
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Application No.</label>
+              <input {...register("appNumber")} placeholder="e.g. NAF 80" className={`bg-slate-50 border-none p-5 rounded-[1.5rem] text-sm font-bold outline-none focus:ring-2 transition-all ${errors.appNumber ? 'ring-rose-500/20 bg-rose-50' : 'ring-blue-500/20'}`} />
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Review Category</label>
-              <select {...register("type")} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm">
-                <option value="">Select Category...</option>
-                <option value="Facility Verification">Facility Verification (LOD)</option>
-                <option value="Inspection Report Review (local)">Inspection Review (Local)</option>
-                <option value="Inspection Report Review (foreign)">Inspection Review (Foreign)</option>
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Review Category</label>
+              <select {...register("type")} className="bg-slate-50 border-none p-5 rounded-[1.5rem] text-sm font-bold outline-none cursor-pointer hover:bg-slate-100 transition-colors">
+                <option value="Facility Verification">Facility Verification</option>
+                <option value="Inspection Report Review (Foreign)">Inspection Report Review (Foreign)</option>
+                <option value="Inspection Report Review (Local)">Inspection Report Review (Local)</option>
               </select>
             </div>
           </div>
 
-          {/* SECTION: ENTITY DETAILS */}
-          <div className="p-6 bg-slate-50 rounded-3xl space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Building2 className="w-4 h-4 text-blue-600" />
-              <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-600">Local Applicant / Rep</h3>
+          {/* SITES SECTION */}
+          <div className="grid grid-cols-2 gap-8">
+            {/* LOCAL APPLICANT */}
+            <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 border border-slate-100">
+              <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 mb-2"><Building2 className="w-4 h-4" /> Local Applicant</h3>
+              <input {...register("companyName")} placeholder="Company Name" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm outline-none font-medium" />
+              <input {...register("companyAddress")} placeholder="Address" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm outline-none font-medium" />
+              <input {...register("notificationEmail")} placeholder="Notification Email" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm outline-none text-blue-600 font-bold" />
             </div>
-            <input {...register("companyName")} placeholder="Registered Company Name" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm" />
-            <div className="grid grid-cols-2 gap-4">
-               <input {...register("companyAddress")} placeholder="Local Office Address" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm" />
-               <div className="relative">
-                 <Mail className="absolute left-4 top-4 w-4 h-4 text-slate-300" />
-                 <input {...register("notificationEmail")} type="email" placeholder="Regulatory Contact Email" className="w-full bg-white border-none p-4 pl-12 rounded-xl text-sm shadow-sm font-medium text-blue-600" />
-               </div>
+
+            {/* MANUFACTURING SITE (Fixed with Address) */}
+            <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4">
+              <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2 mb-2"><Globe className="w-4 h-4" /> Manufacturing Site</h3>
+              <input {...register("facilityName")} placeholder="Factory Name" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm outline-none font-medium" />
+              
+              {/* THE MISSING FIELD THAT WAS BLOCKING SUBMISSION */}
+              <input {...register("facilityAddress")} placeholder="Factory Physical Address" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm outline-none font-medium" />
+              
+              <FileUpload 
+                label={selectedType === "Facility Verification" ? "Letter of Authorization (PDF)" : "Inspection Report (PDF)"}
+                onUploadComplete={(url) => {
+                  const field: any = selectedType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl";
+                  const other: any = field === "poaUrl" ? "inspectionReportUrl" : "poaUrl";
+                  setValue(field, url, { shouldValidate: true });
+                  setValue(other, "", { shouldValidate: true });
+                }} 
+              />
+              
+              {(currentPoa || currentReport) && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500 rounded-xl text-[9px] font-black text-white uppercase tracking-widest animate-in fade-in">
+                    <FileCheck className="w-3 h-3" /> Dossier Attached
+                </div>
+              )}
             </div>
           </div>
 
-          {/* SECTION: FOREIGN FACTORY */}
-          <div className="p-6 bg-blue-50/50 rounded-3xl space-y-4 border border-blue-100">
-            <div className="flex items-center gap-2 mb-2">
-              <Globe className="w-4 h-4 text-blue-600" />
-              <h3 className="text-[11px] font-black uppercase tracking-widest text-blue-900">Manufacturing Site</h3>
-            </div>
-            <input {...register("facilityName")} placeholder="Factory Name (As per GMP)" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm" />
-            <input {...register("facilityAddress")} placeholder="Physical Site Address (Foreign/Local)" className="w-full bg-white border-none p-4 rounded-xl text-sm shadow-sm" />
-            
-            <FileUpload 
-              label="Primary Dossier/Report (PDF)" 
-              onUploadComplete={(url) => {
-                const field = selectedType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl";
-                setValue(field, url, { shouldValidate: true });
-              }} 
-            />
-          </div>
-
-          {/* SECTION: RISK PROFILING */}
-          <div className="p-6 bg-red-50 rounded-3xl border border-red-100 space-y-4">
-            <h3 className="text-[11px] font-black uppercase text-red-900 flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4" /> Risk Assessment Matrix
-            </h3>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-red-400 uppercase ml-1">Compliance History (OAI)</label>
-                <select {...register("hasOAI")} className="w-full p-3 rounded-xl border-none text-xs shadow-sm bg-white">
-                  <option value="No">No Recent OAI/Warning Letters</option>
-                  <option value="Yes">Official Action Indicated (OAI)</option>
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-red-400 uppercase ml-1">Site Maturity</label>
-                <select {...register("lastInspected")} className="w-full p-3 rounded-xl border-none text-xs shadow-sm bg-white">
-                  <option value="Recent">Inspected within 24 months</option>
-                  <option value="Lapsed">Last inspection &gt; 3 years</option>
-                  <option value="Never">De-novo / Never Inspected</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[9px] font-black text-red-400 uppercase tracking-widest ml-1">Legacy System Failures:</label>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {["Quality", "Facilities", "Materials", "Production", "Packaging", "Laboratory"].map(sys => (
-                  <label key={sys} className="flex items-center gap-2 px-3 py-1 bg-white rounded-full text-[10px] border border-red-100 cursor-pointer has-[:checked]:bg-red-600 has-[:checked]:text-white transition-all font-bold">
-                    <input type="checkbox" value={sys} {...register("failedSystems")} className="hidden" /> {sys}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION: PRODUCT SCOPE */}
+          {/* DYNAMIC PRODUCT LINES */}
           <div className="space-y-4">
-            <div className="flex justify-between items-center px-1">
-              <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-600 italic">Scope of Authorization</h3>
-              <button type="button" onClick={() => appendLine({ lineName: "", products: "" })} className="text-[10px] font-black text-blue-600 flex items-center gap-1 hover:underline">
-                <Plus className="w-3 h-3" /> New Line
+            <div className="flex justify-between items-center px-4">
+              <h3 className="text-[11px] font-black text-slate-400 uppercase italic">Scope of Authorization</h3>
+              <button type="button" onClick={() => appendLine({ lineName: "", products: "" })} className="text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-full hover:bg-blue-100 transition-colors">
+                <Plus className="w-3 h-3" /> ADD LINE
               </button>
             </div>
-
-            {lineFields.map((line, lineIndex) => (
-              <div key={line.id} className="p-6 border border-slate-100 rounded-3xl space-y-4 relative bg-white shadow-sm">
-                <button type="button" onClick={() => removeLine(lineIndex)} className="absolute top-4 right-4 text-slate-300 hover:text-red-500">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-                <input {...register(`productLines.${lineIndex}.lineName`)} placeholder="Product Line" className="w-full bg-slate-50 border-none p-3 rounded-xl text-sm font-black uppercase tracking-tight" />
-                <textarea {...register(`productLines.${lineIndex}.products`)} placeholder="Products..." className="w-full bg-slate-50 border-none p-3 rounded-xl text-xs" rows={2} />
+            {lineFields.map((line, index) => (
+              <div key={line.id} className="p-6 bg-white border border-slate-100 rounded-[2rem] shadow-sm relative group animate-in slide-in-from-right-4">
+                <button type="button" onClick={() => removeLine(index)} className="absolute top-6 right-6 text-slate-200 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                <div className="grid grid-cols-3 gap-4">
+                  <input {...register(`productLines.${index}.lineName`)} placeholder="e.g. Tablets" className="bg-slate-50 border-none p-4 rounded-xl text-xs font-black uppercase outline-none focus:bg-slate-100" />
+                  <textarea {...register(`productLines.${index}.products`)} placeholder="Products..." className="col-span-2 bg-slate-50 border-none p-4 rounded-xl text-xs outline-none focus:bg-slate-100" rows={1} />
+                </div>
               </div>
             ))}
           </div>
 
-          {/* WORKFLOW ASSIGNMENT */}
-          <div className="space-y-4 border-t border-slate-100 pt-6">
-            <label className="block text-[11px] font-black uppercase text-slate-500 tracking-widest">Routing Divisions</label>
-            <div className="flex gap-2">
-              {["VMD", "AFPD", "PAD", "IRSD"].map(div => (
-                <label key={div} className="flex-1 flex items-center justify-center p-3 rounded-xl border border-slate-100 text-[10px] font-black cursor-pointer has-[:checked]:bg-slate-900 has-[:checked]:text-white transition-all">
-                  <input type="checkbox" value={div} {...register("divisions")} className="hidden" /> {div}
-                </label>
-              ))}
-            </div>
+          {/* SCHEMA DIAGNOSTIC (Debug Box) */}
+          <div className="p-4 bg-slate-900 rounded-2xl mb-4 font-mono">
+            <p className="text-[10px] text-blue-400 uppercase font-black mb-2">Schema Diagnostic:</p>
+            {Object.keys(errors).length === 0 ? (
+                <p className="text-emerald-400 text-[10px]">✅ All fields valid</p>
+            ) : (
+                Object.keys(errors).map((key) => (
+                    <div key={key} className="text-rose-400 text-[10px]">
+                      ❌ <span className="uppercase">{key}</span>: {(errors as any)[key]?.message || "Invalid Field"}
+                    </div>
+                ))
+            )}
+            {errors.root && <div className="text-rose-400 text-[10px]">❌ DOSSIER: {errors.root.message}</div>}
           </div>
 
+          {/* SUBMIT BUTTON */}
           <button 
             type="submit" 
-            disabled={!isValid || isSubmitting} 
-            className="w-full py-5 rounded-3xl font-black uppercase text-xs tracking-[0.2em] bg-blue-600 text-white shadow-2xl shadow-blue-200 disabled:bg-slate-200 disabled:shadow-none transition-all active:scale-[0.98]"
+            disabled={isSubmitting} 
+            className="w-full py-7 bg-slate-900 text-white rounded-[2.2rem] font-black uppercase text-[11px] tracking-[0.25em] flex items-center justify-center gap-4 hover:bg-blue-600 transition-all shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed group"
           >
-            {isSubmitting ? "Generating Application Bundle..." : "Authorize and Route File"}
+            {isSubmitting ? (
+                <Loader2 className="animate-spin w-5 h-5" />
+            ) : (
+                <>
+                    <Save className="w-5 h-5 group-hover:scale-110 transition-transform" /> 
+                    Authorize & Route File
+                </>
+            )}
           </button>
         </form>
       )}
