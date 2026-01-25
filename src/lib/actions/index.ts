@@ -20,21 +20,21 @@ export async function submitLODApplication(data: any) {
       company = newComp;
     }
 
-    // 2. PRODUCT MAPPING: Fixes the App 80 "Product under review" bug
-    // Maps [{line: "Sterile", products: "Vax A"}] -> ["Sterile: Vax A"]
+    // 2. PRODUCT MAPPING: Resolves the App 80 "Product under review" bug
     const flattenedProducts = data.productLines?.map((pl: any) => 
       `${pl.lineName}${pl.products ? ': ' + pl.products : ''}`
     ) || [];
 
     const dbNow = sql`now()`; 
 
-    // 3. Create Application with Dynamic Status Routing
+    // 3. Create Application with Unique Point
     const [newApp] = await db.insert(applications).values({
       applicationNumber: data.appNumber,
       type: data.type, 
       companyId: company.id,
       status: 'PENDING_DIRECTOR',
-      currentPoint: 'Director',
+      // ✅ UPDATE: Use unique point name for initial assignment
+      currentPoint: 'Director Review', 
       details: {
         factory_name: data.facilityName || data.companyName,
         factory_address: data.facilityAddress || data.companyAddress,
@@ -42,7 +42,7 @@ export async function submitLODApplication(data: any) {
         poaUrl: data.poaUrl || "",
         inspectionReportUrl: data.inspectionReportUrl || "",
         notificationEmail: data.notificationEmail,
-        assignedDivisions: data.divisions || ["VMD"], // Defaulting to VMD per instructions
+        assignedDivisions: data.divisions || ["VMD"], 
         riskProfile: {
           hasOAI: data.hasOAI,
           maturity: data.lastInspected,
@@ -59,12 +59,13 @@ export async function submitLODApplication(data: any) {
       }
     }).returning();
 
-    // 4. QMS Timing: Clock starts now
+    // 4. QMS Timing: Clock starts for the "Director Review" phase
     await db.insert(qmsTimelines).values({
       applicationId: newApp.id,
       staffId: "LOD_OFFICER",
       division: "LOD",
-      point: 'Director',
+      // ✅ UPDATE: Aligned with Workflow State Map
+      point: 'Director Review', 
       startTime: dbNow,
     });
 

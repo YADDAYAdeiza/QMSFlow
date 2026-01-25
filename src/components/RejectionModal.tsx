@@ -1,139 +1,122 @@
 "use client"
 
-import React, { useState } from 'react';
-import { returnToStaff } from '@/lib/actions'; // Adjust path if needed
-import { RotateCcw, UserPlus, X, AlertTriangle } from 'lucide-react';
+import React, { useState, useTransition } from 'react';
+import { 
+  X, RotateCcw, AlertTriangle, Loader2, 
+  UserCircle2, MessageSquare 
+} from 'lucide-react';
+import { returnToStaff } from '@/lib/actions/ddd'; // Standardized action path
 
 interface RejectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   appId: number;
-  currentStaffId: string;
-  staffList: { id: string, name: string }[];
+  currentStaffId?: string; // The person who worked on it last
+  staffList: any[];
   onSuccess: () => void;
 }
 
 export default function RejectionModal({ 
-  isOpen, 
-  onClose, 
-  appId, 
-  currentStaffId, 
-  staffList, 
-  onSuccess 
+  isOpen, onClose, appId, currentStaffId, staffList, onSuccess 
 }: RejectionModalProps) {
-  const [reason, setReason] = useState("");
-  const [isReassigning, setIsReassigning] = useState(false);
-  const [newStaffId, setNewStaffId] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [remarks, setRemarks] = useState("");
+  const [targetStaffId, setTargetStaffId] = useState(currentStaffId || "");
+  const [isPending, startTransition] = useTransition();
 
   if (!isOpen) return null;
 
-  const handleReturn = async () => {
-    if (!reason.trim()) return alert("Please provide a reason for the rework.");
-    
-    // Decide who gets the application back
-    const targetStaffId = (isReassigning && newStaffId) ? newStaffId : currentStaffId;
+  const handleReturn = () => {
+    if (!remarks.trim()) return alert("QMS Requirement: Please provide specific reasons for return.");
+    if (!targetStaffId) return alert("Please select a recipient for the rework.");
 
-    if (!targetStaffId) {
-      return alert("No staff member identified for return.");
-    }
-
-    setLoading(true);
-    try {
-      const result = await returnToStaff(appId, reason, targetStaffId);
-      if (result.success) {
+    startTransition(async () => {
+      // This action handles Point 8: Director -> Return or DD -> Staff Return
+      const res = await returnToStaff(appId, targetStaffId, remarks);
+      if (res.success) {
+        setRemarks("");
         onSuccess();
       } else {
-        alert("Failed to process return.");
+        alert("Return action failed. Please verify the workflow state.");
       }
-    } catch (error) {
-      console.error(error);
-      alert("An error occurred.");
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+      <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200">
         
-        {/* Header */}
-        <div className="p-6 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
-          <div className="flex items-center gap-3 text-rose-600">
-            <RotateCcw className="w-5 h-5" />
-            <h2 className="text-sm font-black uppercase tracking-tighter">Return for Rework</h2>
+        {/* HEADER */}
+        <div className="bg-rose-600 p-6 text-white flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/20 p-2 rounded-xl">
+              <RotateCcw className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest">Return for Rework</h3>
+              <p className="text-[10px] text-rose-100 font-bold uppercase opacity-80">Divisional Deputy Director Action</p>
+            </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button onClick={onClose} className="hover:rotate-90 transition-transform">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Reason Section */}
+        <div className="p-8 space-y-6">
+          {/* RECIPIENT SELECTION */}
           <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
-              Instructions for Correction
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">
+              <UserCircle2 className="w-3 h-3" /> Assign To (For Correction)
+            </label>
+            <select 
+              value={targetStaffId}
+              onChange={(e) => setTargetStaffId(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-500 transition-all appearance-none"
+            >
+              <option value="">Select recipient...</option>
+              {staffList.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} — {s.role} ({s.division || 'Technical'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* REMARKS */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">
+              <MessageSquare className="w-3 h-3" /> Correction Instructions
             </label>
             <textarea 
-              className="w-full p-4 border-2 border-slate-100 rounded-2xl text-sm focus:border-rose-500 outline-none italic bg-slate-50/50 min-h-[120px]"
-              placeholder="e.g., Please verify the manufacturer's GMP certificate validity period..."
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              className="w-full h-32 bg-slate-50 border border-slate-200 p-5 rounded-[2rem] text-sm italic text-slate-600 outline-none focus:ring-2 focus:ring-rose-500 resize-none transition-all"
+              placeholder="Detail the specific corrections required before re-submission..."
             />
           </div>
 
-          {/* Reassignment Logic */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
-            <label className="flex items-center gap-3 cursor-pointer group">
-              <input 
-                type="checkbox" 
-                checked={isReassigning}
-                onChange={(e) => setIsReassigning(e.target.checked)}
-                className="w-4 h-4 accent-rose-600"
-              />
-              <span className="text-[10px] font-black uppercase text-slate-600 group-hover:text-rose-600 transition-colors">
-                Change assigned staff member?
-              </span>
-            </label>
-
-            {isReassigning && (
-              <div className="animate-in fade-in slide-in-from-top-2 duration-200">
-                <select 
-                  value={newStaffId}
-                  onChange={(e) => setNewStaffId(e.target.value)}
-                  className="w-full p-3 bg-white border-2 border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-rose-500 shadow-sm"
-                >
-                  <option value="">-- Select New Technical Reviewer --</option>
-                  {staffList.map((staff) => (
-                    <option key={staff.id} value={staff.id}>
-                      {staff.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="mt-2 flex items-center gap-2 text-amber-600">
-                  <AlertTriangle className="w-3 h-3" />
-                  <p className="text-[9px] font-bold uppercase italic">Will move to new reviewer's desk</p>
-                </div>
-              </div>
-            )}
+          <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+            <p className="text-[10px] text-amber-700 leading-relaxed italic">
+              <strong>Note:</strong> Returning this dossier will pause the current 
+              Divisional clock and re-open the clock for the selected staff member 
+              under <strong>Point 8: Return for Rework</strong>.
+            </p>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 pt-2">
+          {/* ACTIONS */}
+          <div className="grid grid-cols-2 gap-4 pt-2">
             <button 
-              type="button"
               onClick={onClose}
-              className="flex-1 py-4 text-[10px] font-black uppercase text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all"
+              className="py-4 rounded-2xl font-black uppercase text-[10px] text-slate-400 hover:bg-slate-100 transition-all"
             >
               Cancel
             </button>
             <button 
-              disabled={loading || !reason.trim() || (isReassigning && !newStaffId)}
               onClick={handleReturn}
-              className="flex-1 py-4 text-[10px] font-black uppercase bg-rose-600 text-white rounded-2xl shadow-lg shadow-rose-200 disabled:opacity-50 disabled:shadow-none hover:bg-rose-700 transition-all"
+              disabled={isPending}
+              className="py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-black uppercase text-[10px] shadow-lg shadow-rose-900/20 flex items-center justify-center gap-2 transition-all active:scale-95"
             >
-              {loading ? "PROCESSING..." : "CONFIRM RETURN"}
+              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm Return"}
             </button>
           </div>
         </div>

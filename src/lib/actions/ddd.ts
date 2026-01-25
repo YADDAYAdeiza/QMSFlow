@@ -1,10 +1,13 @@
 "use server"
 
 import { db } from "@/db";
-import { qmsTimelines, applications } from "@/db/schema";
+import { qmsTimelines, applications, users } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
+/**
+ * DD -> Staff: Moves the file to the staff's desk for technical work.
+ */
 export async function assignToStaff(
   applicationId: number, 
   staffId: string, 
@@ -22,14 +25,11 @@ export async function assignToStaff(
       const oldDetails = (app.details as any) || {};
       const oldComments = oldDetails.comments || [];
 
-      // 1. Calculate the current round
-      // If the last action was a "return", increment. Else stay same.
       const lastAction = oldComments[oldComments.length - 1]?.action;
-      const currentRound = lastAction === "RETURNED_TO_LOD" 
+      const currentRound = lastAction === "REWORK_REQUIRED" 
         ? (oldComments[oldComments.length - 1].round || 1) + 1 
         : (oldComments[oldComments.length - 1]?.round || 1);
 
-      // 2. Build the Unified Entry
       const newEntry = {
         from: "Divisional Deputy Director",
         role: "Divisional Deputy Director",
@@ -40,17 +40,17 @@ export async function assignToStaff(
         assigned_to_id: staffId
       };
 
-      const updatedDetails = {
-        ...oldDetails,
-        staff_reviewer_id: staffId, 
-        comments: [...oldComments, newEntry] // Appending to the unified array
-      };
-
-      // 3. Update Application Table
+      // 3. Update Application Table with NEW POINT
       await tx.update(applications)
         .set({ 
-          currentPoint: 'Technical Review',
-          details: updatedDetails 
+          // ✅ Matches Map Item 4
+          currentPoint: 'Staff Technical Review', 
+          details: {
+            ...oldDetails,
+            staff_reviewer_id: staffId, 
+            comments: [...oldComments, newEntry]
+          },
+          updatedAt: timestamp
         })
         .where(eq(applications.id, applicationId));
 
@@ -59,13 +59,13 @@ export async function assignToStaff(
         .set({ endTime: timestamp })
         .where(and(
           eq(qmsTimelines.applicationId, applicationId),
-          eq(qmsTimelines.point, 'Divisional Deputy Director'),
+          // We close whatever point the DD was working on (Technical or Hub)
           isNull(qmsTimelines.endTime)
         ));
 
       await tx.insert(qmsTimelines).values({
         applicationId,
-        point: 'Technical Review',
+        point: 'Staff Technical Review',
         division: oldDetails.assignedDivisions?.[0] || 'VMD', 
         staffId: staffId,
         startTime: timestamp,
@@ -80,70 +80,155 @@ export async function assignToStaff(
   }
 }
 
-export async function approveToDirector(appId: number, recommendationNote: string) {
+/**
+ * DD -> IRSD (Hub) or Director (Final)
+ */
+// ✅ Refined approveToDirector with robust QMS closing
+export async function approveToDirector(
+  appId: number, 
+  recommendationNote: string, 
+  loggedInUserId: string 
+) {
   try {
     return await db.transaction(async (tx) => {
+      const actingUser = await tx.query.users.findFirst({
+        where: eq(users.id, loggedInUserId),
+      });
+
+      if (!actingUser) throw new Error("Acting User not found");
+
+      // Logic Check: IRSD acts as the final gate (Point 7), others go to Hub (Point 6)
+      const isIRSD = actingUser.division === "IRSD";
+      const nextPoint = isIRSD ? "Director Final Review" : "IRSD Hub Clearance";
+
       const app = await tx.query.applications.findFirst({
         where: eq(applications.id, appId),
       });
+
       if (!app) throw new Error("App not found");
-
       const oldDetails = (app.details as any) || {};
-      const oldComments = oldDetails.comments || [];
 
-      // 1. Determine if this is an Approval Recommendation or a CAPA Recommendation
-      const reviewerEntry = [...oldComments].reverse().find(c => c.action === "SUBMITTED_TO_DDD");
-      const hasDeficiencies = (reviewerEntry?.observations?.length > 0);
-
-      // 2. Build the Entry using your 'Divisional Deputy Director' naming convention
       const newEntry = {
-        from: "Divisional Deputy Director",
+        from: actingUser.name,
         role: "Divisional Deputy Director",
+        division: actingUser.division,
         text: recommendationNote,
         timestamp: new Date().toISOString(),
-        round: oldDetails.currentRound || 1,
-        // DYNAMIC ACTION: This tells the Director what to expect
-        action: hasDeficiencies ? "RECOMMENDED_FOR_CAPA" : "RECOMMENDED_FOR_APPROVAL"
+        // Matches Point Map Actions
+        action: isIRSD ? "ENDORSED_FOR_DIRECTOR" : "SUBMITTED_FOR_IRSD_CLEARANCE"
       };
 
-      const updatedDetails = {
-        ...oldDetails,
-        comments: [...oldComments, newEntry]
-      };
-
-      // 3. Update Application State
       await tx.update(applications)
         .set({
-          currentPoint: 'Director',
-          details: updatedDetails,
+          currentPoint: nextPoint,
+          details: {
+            ...oldDetails,
+            comments: [...(oldDetails.comments || []), newEntry]
+          },
           updatedAt: sql`now()`
         })
         .where(eq(applications.id, appId));
 
       const timestamp = sql`now()`;
       
-      // 4. QMS: Stop Divisional Deputy Director Clock
+      // ✅ QMS FIX: Close the active clock regardless of who opened it
+      // This ensures Point 3 or Point 6 is officially stamped "Ended"
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
           eq(qmsTimelines.applicationId, appId),
-          eq(qmsTimelines.point, 'Divisional Deputy Director'),
           isNull(qmsTimelines.endTime)
         ));
 
-      // 5. QMS: Start Director Clock
+      // Open new clock for the Next Point (Point 6 or 7)
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
-        point: 'Director',
+        point: nextPoint,
+        division: isIRSD ? "DIRECTORATE" : "IRSD", 
         startTime: timestamp,
-        details: { status: "Awaiting Final Executive Decision" }
       });
 
       revalidatePath('/dashboard/ddd');
+      revalidatePath('/dashboard/director'); 
       return { success: true };
     });
-  } catch (error) {
-    console.error("DDD_SUBMIT_ERROR:", error);
-    return { success: false };
+  } catch (error: any) {
+    console.error("RELAY_ACTION_ERROR:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * DD -> Staff (Return for Rework)
+ */
+export async function returnToStaff(
+  appId: number, 
+  rejectionReason: string, 
+  targetStaffId: string, 
+  currentDDId: string 
+) {
+  const timestamp = sql`now()`;
+  try {
+    const ddUser = await db.query.users.findFirst({ where: eq(users.id, currentDDId) });
+    if (!ddUser) throw new Error("DD User not found");
+
+    return await db.transaction(async (tx) => {
+      const app = await tx.query.applications.findFirst({ 
+        where: eq(applications.id, appId) 
+      });
+      if (!app) throw new Error("Application not found");
+
+      const oldDetails = (app.details as any) || {};
+      const oldComments = oldDetails.comments || [];
+      const nextRound = (oldDetails.currentRound || 1) + 1;
+
+      const reworkEntry = {
+        from: ddUser.name,
+        role: "Divisional Deputy Director",
+        division: ddUser.division,
+        text: rejectionReason,
+        timestamp: new Date().toISOString(),
+        round: nextRound,
+        action: "REWORK_REQUIRED"
+      };
+
+      await tx.update(applications)
+        .set({
+          // ✅ Matches Map Item 4
+          currentPoint: 'Staff Technical Review', 
+          status: 'PENDING_REWORK',
+          details: {
+            ...oldDetails,
+            currentRound: nextRound,
+            staff_reviewer_id: targetStaffId,
+            comments: [...oldComments, reworkEntry]
+          } as any,
+          updatedAt: timestamp
+        })
+        .where(eq(applications.id, appId));
+
+      await tx.update(qmsTimelines)
+        .set({ endTime: timestamp })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId),
+          eq(qmsTimelines.staffId, currentDDId),
+          isNull(qmsTimelines.endTime)
+        ));
+
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
+        staffId: targetStaffId,
+        division: ddUser.division,
+        point: 'Staff Technical Review',
+        startTime: timestamp,
+      });
+
+      revalidatePath(`/dashboard/ddd`);
+      revalidatePath(`/dashboard/staff`);
+      return { success: true };
+    });
+  } catch (error: any) {
+    console.error("REWORK_ACTION_ERROR:", error);
+    return { success: false, error: error.message };
   }
 }
