@@ -9,69 +9,73 @@ import { revalidatePath } from "next/cache";
  * Director -> DD: Initial Assignment
  * Moves point to Technical DD Review
  */
-export async function assignToDDD(appId: number, divisions: string[], comment: string) {
+// @/lib/actions/director.ts
+
+export async function assignToDDD(
+  appId: number, 
+  divisions: string[], 
+  comment: string, 
+  headId?: string
+) {
   try {
-    await db.transaction(async (tx) => {
-      const app = await tx.query.applications.findFirst({
-        where: eq(applications.id, appId),
-      });
+    // 1. Prepare the Director's Minute object
+    const directorMinute = {
+      from: "Director",
+      role: "Director",
+      text: comment,
+      round: 1,
+      action: "TECHNICAL_DIRECTION",
+      timestamp: new Date().toISOString()
+    };
 
-      if (!app) throw new Error("Application not found");
-      const oldDetails = (app.details as any) || {};
-      const oldComments = oldDetails.comments || [];
-
-      const directorComment = {
-        from: "Director",
-        role: "Director",
-        text: comment,
-        timestamp: new Date().toISOString(),
-        round: 1, 
-        action: "ASSIGNED_TO_DDD"
-      };
-
-      await tx
-        .update(applications)
-        .set({ 
-          // ✅ Matches Map Item 3
-          currentPoint: 'Technical DD Review', 
-          details: {
-            ...oldDetails,
-            assignedDivisions: divisions,
-            comments: [...oldComments, directorComment]
-          }
-        })
-        .where(eq(applications.id, appId));
-
-      // Close Director's initial review clock
-      await tx
-        .update(qmsTimelines)
-        .set({ 
-          endTime: sql`now()`, 
-          status: 'Completed',
-          metadata: { instruction: comment, assignedTo: divisions } 
-        })
-        .where(
-          and(
-            eq(qmsTimelines.applicationId, appId),
-            eq(qmsTimelines.point, 'Director Review'), // Updated to match Map Item 2
-            isNull(qmsTimelines.endTime)
+    /**
+     * 2. Update Application State
+     * We perform two JSONB operations:
+     * - Update 'assignedDivisions' with the Director's choice (overwrite).
+     * - Append the new minute to the 'comments' array.
+     */
+    await db.update(applications)
+      .set({ 
+        currentPoint: 'Technical DD Review',
+        details: sql`
+          jsonb_set(
+            jsonb_set(
+              COALESCE(details, '{}'::jsonb), 
+              '{assignedDivisions}', 
+              ${JSON.stringify(divisions)}::jsonb
+            ),
+            '{comments}',
+            (COALESCE(details->'comments', '[]'::jsonb)) || ${JSON.stringify([directorMinute])}::jsonb
           )
-        );
+        `
+      })
+      .where(eq(applications.id, appId));
 
-      // Start Technical DD Clock
-      await tx.insert(qmsTimelines).values({
-        applicationId: appId,
-        point: 'Technical DD Review',
-        startTime: sql`now()`,
-        status: 'Pending'
-      });
+    // 3. Close Director's Timeline (Stop the clock on Sequence 2)
+    await db.update(qmsTimelines)
+      .set({ endTime: sql`now()` })
+      .where(and(
+        eq(qmsTimelines.applicationId, appId),
+        eq(qmsTimelines.point, 'Director Review'),
+        isNull(qmsTimelines.endTime)
+      ));
+
+    // 4. Start Divisional Deputy Director's Timeline (Sequence 3)
+    // We use the headId passed from the client dropdown to avoid NULL staff_id
+    await db.insert(qmsTimelines).values({
+      applicationId: appId,
+      staffId: headId || null, 
+      division: divisions[0],
+      point: 'Technical DD Review',
+      startTime: sql`now()`,
     });
 
+    // 5. Refresh the UI
     revalidatePath("/dashboard/director");
-    revalidatePath("/dashboard/ddd"); 
+    
     return { success: true };
   } catch (error) {
-    console.error("Handoff failed:", error);
+    console.error("QMS Assignment Error:", error);
     return { success: false };
   }
 }

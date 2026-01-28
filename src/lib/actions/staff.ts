@@ -1,3 +1,4 @@
+// @/lib/actions/staff.ts
 "use server";
 
 import { db } from "@/db";
@@ -5,104 +6,75 @@ import { applications, qmsTimelines, users } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from 'next/cache';
 
-export async function submitToDDD(
-  appId: number, 
-  observations: any[], 
-  justification: string,
-  userId: string 
-) {
+export async function submitToDDD(appId: number, observations: any[], justification: string, userId: string) {
   try {
     const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
-    const app = await db.query.applications.findFirst({ where: eq(applications.id, appId) });
+    if (!user) throw new Error("User not found");
 
-    if (!user || !app) throw new Error("Context missing");
+    // Find the DD for this specific staff's division
+    // const divisionalDD = await db.query.users.findFirst({
+    //   where: and(eq(users.division, user.division), eq(users.role, 'Divisional Deputy Director'))
+    // });
 
-    const details = (app.details as Record<string, any>) || {};
-    const currentComments = details.comments || [];
+    // Replace your divisionalDD fetch with this:
+    const divisionalDD = await db.query.users.findFirst({
+      where: (users, { and, eq }) => and(
+        eq(users.division, user.division as any), 
+        eq(users.role, 'Divisional Deputy Director')
+      ),
+    });
 
-    // 1. UNIQUE POINT LOGIC (The "Next Hop" refactor)
-    let nextPoint = "";
-    let nextStatus = "";
-    let actionTag = "";
-    let nextQMSDivision = "";
+    return await db.transaction(async (tx) => {
+      const timestamp = sql`now()`;
+      const app = await tx.query.applications.findFirst({ where: eq(applications.id, appId) });
+      const details = (app?.details as any) || {};
 
-    if (user.role === 'Staff') {
-      // Step 5: Staff Technical Review -> Technical DD Review
-      nextPoint = "Technical DD Review";
-      nextStatus = "PENDING_DDD_REVIEW";
-      actionTag = "SUBMITTED_TO_DDD"; // ✅ Standardized for Director's scannability
-      nextQMSDivision = user.division; // Stays in the same division, just goes up to DD
-    } 
-    else if (user.role === 'Divisional Deputy Director' && user.division !== 'IRSD') {
-      // Step 6: Technical DD -> IRSD Hub Clearance
-      nextPoint = "IRSD Hub Clearance"; 
-      nextStatus = "PENDING_IRSD_CLEARANCE";
-      actionTag = "SUBMITTED_FOR_IRSD_RECOMMENDATION";
-      nextQMSDivision = "IRSD"; // Moves to the Hub
-    } 
-    else if (user.role === 'Divisional Deputy Director' && user.division === 'IRSD') {
-      // Step 7: IRSD -> Director Final Review
-      nextPoint = "Director Final Review";
-      nextStatus = "PENDING_DIRECTOR_APPROVAL";
-      actionTag = "ENDORSED_FOR_DIRECTOR"; // ✅ Matches Director's "dddMinute" logic
-      nextQMSDivision = "DIRECTORATE"; // Moves to the Top
-    }
+      const newComment = {
+        from: user.name,
+        role: "Staff",
+        division: user.division,
+        text: justification,
+        action: "TECHNICAL_ASSESSMENT_SUBMITTED",
+        timestamp: new Date().toISOString(),
+        observations
+      };
 
-    // 2. Prepare Comment with Action Tags
-    const newComment = {
-      from: user.name,
-      role: user.role,
-      division: user.division,
-      text: justification,
-      action: actionTag, 
-      timestamp: new Date().toISOString(),
-      observations: observations, 
-    };
-
-    // --- QMS DATABASE TRANSACTION ---
-    await db.transaction(async (tx) => {
-      // A. Update Application State
+      // A. Update Application
       await tx.update(applications)
         .set({
-          status: nextStatus,
-          currentPoint: nextPoint, 
-          details: {
-            ...details,
-            comments: [...currentComments, newComment],
-            last_submission_date: new Date().toISOString(), 
-          } as any,
-          updatedAt: sql`now()`
+          currentPoint: "Technical DD Review Return",
+          status: "PENDING_DD_RECOMMENDATION",
+          details: { ...details, comments: [...(details.comments || []), newComment] },
+          updatedAt: timestamp
         })
         .where(eq(applications.id, appId));
 
-      // B. Close Current Segment (Stop Clock)
-      // We remove the staffId check to ensure the Divisional clock closes regardless of assignee
+      // B. Close Staff Clock
       await tx.update(qmsTimelines)
-        .set({ endTime: sql`now()` })
-        .where(
-          and(
-            eq(qmsTimelines.applicationId, appId),
-            isNull(qmsTimelines.endTime)
-          )
-        );
+        .set({ endTime: timestamp })
+        .where(and(eq(qmsTimelines.applicationId, appId), isNull(qmsTimelines.endTime)));
 
-      // C. Open Next Segment (Start Clock for the Point)
-      await tx.insert(qmsTimelines)
-        .values({
-          applicationId: appId,
-          point: nextPoint,
-          division: nextQMSDivision, // ✅ Uses our predicted division
-          startTime: sql`now()`,
-        });
+      // C. Open DD Return Clock (Assigned to Divisional DD)
+      // await tx.insert(qmsTimelines).values({
+      //   applicationId: appId,
+      //   point: "Technical DD Review Return",
+      //   division: user.division,
+      //   userId: divisionalDD?.id || null, 
+      //   startTime: timestamp,
+      // });
+
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
+        point: "Technical DD Review Return",
+        division: user.division,
+        staffId: divisionalDD?.id || null, // Match your schema!
+        startTime: timestamp,
+      });
+
+      revalidatePath('/dashboard/ddd');
+      return { success: true };
     });
-
-    revalidatePath(`/dashboard/${user.division.toLowerCase()}`);
-    revalidatePath(`/dashboard/ddd`);
-    revalidatePath(`/dashboard/director`);
-    
-    return { success: true, movedTo: nextPoint };
   } catch (error: any) {
-    console.error("QMS_SUBMISSION_ERROR:", error);
     return { success: false, error: error.message };
   }
 }
