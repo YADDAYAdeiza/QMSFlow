@@ -1,4 +1,3 @@
-// @/components/DeputyDirectorReviewClient.tsx
 "use client"
 
 import React, { useState, useTransition } from 'react';
@@ -30,9 +29,6 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
   const isReviewPhase = app.currentPoint === 'Technical DD Review Return' || app.currentPoint === 'IRSD Hub Clearance';
   const isHubStage = app.currentPoint === 'IRSD Hub Clearance';
 
-  console.log('isInitialAssignment:', isInitialAssignment)
-  console.log('isReviewPhase:', isInitialAssignment)
-
   // --- DATA EXTRACTION ---
   const technicalCapas = Array.isArray(app.latestCapas) ? app.latestCapas : [];
   const currentStaffId = app.details?.staff_reviewer_id || "";
@@ -40,12 +36,18 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
     ? [...app.details.comments].reverse() 
     : [];
 
+  // FIXED: Extract division from 'assignedDivisions' array found in your logs
+  const appDivision = Array.isArray(app.details?.assignedDivisions) 
+    ? app.details.assignedDivisions[0] 
+    : "";
+
   // --- HANDLERS ---
   const handleAssign = async () => {
     if (!selectedStaffId) return alert("Select a Technical Staff member.");
     if (!remarks.trim()) return alert("QMS: Provide instructions for the staff.");
     
     startTransition(async () => {
+      // Pass the division to the action to ensure it's tracked in the timeline
       const res = await assignToStaff(app.id, selectedStaffId, remarks);
       if (res.success) {
         router.push('/dashboard/ddd');
@@ -91,7 +93,7 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
       {/* RIGHT: ACTION PANEL */}
       <div className="col-span-5 space-y-6 overflow-y-auto max-h-[90vh] pr-2 custom-scrollbar">
         
-        {/* 1. HISTORY (Always Top) */}
+        {/* 1. HISTORY */}
         <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
            <div className="flex items-center gap-2 mb-6">
              <div className="bg-slate-100 p-2 rounded-lg">
@@ -115,12 +117,12 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
            </div>
         </div>
 
-        {/* 2. ASSIGNMENT BOX (Sequence 3) */}
+        {/* 2. ASSIGNMENT BOX */}
         {isInitialAssignment && (
           <div className="bg-blue-600 p-8 rounded-[2.5rem] shadow-xl text-white relative overflow-hidden">
             <div className="relative z-10">
                 <h3 className="text-[11px] font-black uppercase tracking-widest mb-6 flex items-center gap-2">
-                  <UserPlus className="w-4 h-4" /> Dispatch to Technical Officer
+                  <UserPlus className="w-4 h-4" /> Dispatch to {appDivision || 'Technical'} Officer
                 </h3>
                 <div className="space-y-4">
                     <select 
@@ -128,16 +130,18 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
                       onChange={(e) => setSelectedStaffId(e.target.value)}
                       className="w-full bg-blue-700/50 border border-blue-400/30 text-white p-5 rounded-3xl text-xs font-bold outline-none focus:ring-2 focus:ring-white/50 appearance-none"
                     >
-                      <option value="" className="text-slate-900">Select Technical Reviewer...</option>
-                      {staffList.filter(s => s.role === 'Staff').map(s => (
-                        <option key={s.id} value={s.id} className="text-slate-900">{s.name} ({s.division})</option>
-                      ))}
+                      <option value="" className="text-slate-900">Select Reviewer from {appDivision}...</option>
+                      {staffList
+                        .filter(s => s.role === 'Staff' && s.division === appDivision)
+                        .map(s => (
+                          <option key={s.id} value={s.id} className="text-slate-900">{s.name}</option>
+                        ))}
                     </select>
 
                     <textarea 
                       value={remarks}
                       onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="Enter processing instructions..."
+                      placeholder="Enter processing instructions for staff..."
                       className="w-full h-24 bg-blue-700/30 border border-blue-400/20 rounded-2xl p-4 text-xs text-white outline-none focus:ring-2 focus:ring-white/50"
                     />
 
@@ -150,9 +154,10 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
           </div>
         )}
 
-        {/* 3. REVIEW BOX (Sequence 5 & 6) */}
+        {/* 3. REVIEW BOX */}
         {isReviewPhase && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* ... Review Phase content remains same ... */}
             <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-blue-50 space-y-4">
               <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                 <ClipboardList className="w-4 h-4" /> Staff Assessment Findings
@@ -187,7 +192,6 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
                 <button onClick={handleEndorse} disabled={isPending} className={`w-full py-5 rounded-[2rem] font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 transition-all ${technicalCapas.length > 0 ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
                   {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : (
                     <>{isHubStage ? "Endorse to Director" : "Forward to Hub"} <ArrowRight className="w-4 h-4" /></>
-                    // <>Forward to Hub<ArrowRight className="w-4 h-4" /></>
                   )}
                 </button>
                 <button type="button" onClick={() => setIsReworkModalOpen(true)} className="w-full py-5 rounded-[2rem] font-black uppercase text-[10px] border-2 border-slate-800 text-slate-500 hover:text-white hover:border-slate-600 flex items-center justify-center gap-2">

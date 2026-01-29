@@ -15,14 +15,12 @@ import { getDirectorId } from "./utils";
 export async function assignToStaff(appId: number, staffId: string, remarks: string) {
   try {
     return await db.transaction(async (tx) => {
-      // 1. Fetch the staff member to get their division for the QMS record
       const staffMember = await tx.query.users.findFirst({
         where: eq(users.id, staffId)
       });
 
       if (!staffMember) throw new Error("Staff member not found");
 
-      // 2. Fetch current application to preserve existing details and comments
       const app = await tx.query.applications.findFirst({ 
         where: eq(applications.id, appId) 
       });
@@ -31,17 +29,29 @@ export async function assignToStaff(appId: number, staffId: string, remarks: str
       const oldDetails = (app.details as any) || {};
       const timestamp = sql`now()`;
 
-      // 3. Create the New Comment Entry for the Dossier Thread
+      // LOGIC CHECK: Is this the first time or a change?
+      const isReassignment = !!oldDetails.staff_reviewer_id;
+      const displayAction = isReassignment ? "REASSIGNED_STAFF" : "ASSIGNED_TO_STAFF";
+      const displayText = isReassignment ? `REASSIGNED: ${remarks}` : remarks;
+
+      // 1. CLOSE ANY EXISTING OPEN CLOCKS
+      await tx.update(qmsTimelines)
+        .set({ endTime: timestamp })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId), 
+          isNull(qmsTimelines.endTime)
+        ));
+
+      // 2. LOG IN COMMENTS (Using the new logic)
       const assignmentComment = {
         from: "Divisional Deputy Director",
         role: "Divisional Deputy Director",
-        division: staffMember.division, // The DD's division (same as staff)
-        text: remarks,
-        action: "ASSIGNED_TO_STAFF",
+        text: displayText,
+        action: displayAction,
         timestamp: new Date().toISOString()
       };
 
-      // A. Update Application: Merge the remark into the comments array
+      // 3. UPDATE APPLICATION
       await tx.update(applications)
         .set({
           currentPoint: "Staff Technical Review",
@@ -50,26 +60,17 @@ export async function assignToStaff(appId: number, staffId: string, remarks: str
           details: { 
             ...oldDetails, 
             staff_reviewer_id: staffId,
-            // We append the new remark to the existing list of comments
             comments: [...(oldDetails.comments || []), assignmentComment] 
           }
         })
         .where(eq(applications.id, appId));
 
-      // B. Close Divisional Deputy Director's Clock
-      await tx.update(qmsTimelines)
-        .set({ endTime: timestamp })
-        .where(and(
-          eq(qmsTimelines.applicationId, appId), 
-          isNull(qmsTimelines.endTime)
-        ));
-
-      // C. Open Staff Clock (Now including the Division)
+      // 4. START NEW CLOCK
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: "Staff Technical Review",
         staffId: staffId, 
-        division: staffMember.division, // This satisfies the division insert
+        division: staffMember.division,
         startTime: timestamp,
       });
 
@@ -77,7 +78,6 @@ export async function assignToStaff(appId: number, staffId: string, remarks: str
       return { success: true };
     });
   } catch (error: any) {
-    console.error("Assignment Error:", error);
     return { success: false, error: error.message };
   }
 }
