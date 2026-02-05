@@ -5,7 +5,6 @@ import { qmsTimelines, applications, users } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDirectorId } from "./utils";
-
 /**
  * DD -> Staff: Moves the file to the staff's desk for technical work.
  */
@@ -166,16 +165,20 @@ export async function approveToDirector(appId: number, recommendationNote: strin
 /**
  * DD -> Staff (Return for Rework)
  */
+
 export async function returnToStaff(
   appId: number, 
+  targetStaffId: string,
   rejectionReason: string, 
-  targetStaffId: string, 
   currentDDId: string 
 ) {
   const timestamp = sql`now()`;
   try {
-    const ddUser = await db.query.users.findFirst({ where: eq(users.id, currentDDId) });
-    if (!ddUser) throw new Error("DD User not found");
+    const ddUser = await db.query.users.findFirst({ 
+      where: eq(users.id, currentDDId) 
+    });
+    
+    if (!ddUser) throw new Error("Divisional Deputy Director user not found");
 
     return await db.transaction(async (tx) => {
       const app = await tx.query.applications.findFirst({ 
@@ -197,9 +200,9 @@ export async function returnToStaff(
         action: "REWORK_REQUIRED"
       };
 
+      // 1. Update Application State
       await tx.update(applications)
         .set({
-          // ✅ Matches Map Item 4
           currentPoint: 'Staff Technical Review', 
           status: 'PENDING_REWORK',
           details: {
@@ -212,6 +215,7 @@ export async function returnToStaff(
         })
         .where(eq(applications.id, appId));
 
+      // 2. QMS Timing: End current Divisional Deputy Director clock
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
@@ -220,6 +224,7 @@ export async function returnToStaff(
           isNull(qmsTimelines.endTime)
         ));
 
+      // 3. QMS Timing: Start new Staff Technical Review clock
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         staffId: targetStaffId,

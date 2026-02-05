@@ -5,19 +5,20 @@ import {
   X, RotateCcw, AlertTriangle, Loader2, 
   UserCircle2, MessageSquare 
 } from 'lucide-react';
-import { returnToStaff } from '@/lib/actions/ddd'; // Standardized action path
+import { returnToStaff } from '@/lib/actions/ddd';
 
 interface RejectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   appId: number;
-  currentStaffId?: string; // The person who worked on it last
+  currentDDId: string; // Added to identify the acting Divisional Deputy Director
+  currentStaffId?: string; 
   staffList: any[];
   onSuccess: () => void;
 }
 
 export default function RejectionModal({ 
-  isOpen, onClose, appId, currentStaffId, staffList, onSuccess 
+  isOpen, onClose, appId, currentDDId, currentStaffId, staffList, onSuccess 
 }: RejectionModalProps) {
   const [remarks, setRemarks] = useState("");
   const [targetStaffId, setTargetStaffId] = useState(currentStaffId || "");
@@ -30,13 +31,14 @@ export default function RejectionModal({
     if (!targetStaffId) return alert("Please select a recipient for the rework.");
 
     startTransition(async () => {
-      // This action handles Point 8: Director -> Return or DD -> Staff Return
-      const res = await returnToStaff(appId, targetStaffId, remarks);
+      // Logic: App ID, Target Recipient, The Remarks, and current DD ID
+      const res = await returnToStaff(appId, targetStaffId, remarks, currentDDId);
+      
       if (res.success) {
         setRemarks("");
         onSuccess();
       } else {
-        alert("Return action failed. Please verify the workflow state.");
+        alert(res.error || "Return action failed. Please verify the workflow state.");
       }
     });
   };
@@ -94,6 +96,7 @@ export default function RejectionModal({
             />
           </div>
 
+          {/* QMS NOTE */}
           <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
             <p className="text-[10px] text-amber-700 leading-relaxed italic">
