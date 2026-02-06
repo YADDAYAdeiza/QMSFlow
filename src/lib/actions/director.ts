@@ -4,11 +4,81 @@ import { db } from "@/db";
 import { applications, companies, qmsTimelines, users } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-
 /**
  * Director -> DD: Initial Assignment
  * Moves point to Technical DD Review
  */
+// @/lib/actions/director.ts
+
+// export async function assignToDDD(
+//   appId: number, 
+//   divisions: string[], 
+//   comment: string, 
+//   headId?: string
+// ) {
+//   try {
+//     // 1. Prepare the Director's Minute object
+//     const directorMinute = {
+//       from: "Director",
+//       role: "Director",
+//       text: comment,
+//       round: 1,
+//       action: "TECHNICAL_DIRECTION",
+//       timestamp: new Date().toISOString()
+//     };
+
+//     /**
+//      * 2. Update Application State
+//      * We perform two JSONB operations:
+//      * - Update 'assignedDivisions' with the Director's choice (overwrite).
+//      * - Append the new minute to the 'comments' array.
+//      */
+//     await db.update(applications)
+//       .set({ 
+//         currentPoint: 'Technical DD Review',
+//         details: sql`
+//           jsonb_set(
+//             jsonb_set(
+//               COALESCE(details, '{}'::jsonb), 
+//               '{assignedDivisions}', 
+//               ${JSON.stringify(divisions)}::jsonb
+//             ),
+//             '{comments}',
+//             (COALESCE(details->'comments', '[]'::jsonb)) || ${JSON.stringify([directorMinute])}::jsonb
+//           )
+//         `
+//       })
+//       .where(eq(applications.id, appId));
+
+//     // 3. Close Director's Timeline (Stop the clock on Sequence 2)
+//     await db.update(qmsTimelines)
+//       .set({ endTime: sql`now()` })
+//       .where(and(
+//         eq(qmsTimelines.applicationId, appId),
+//         eq(qmsTimelines.point, 'Director Review'),
+//         isNull(qmsTimelines.endTime)
+//       ));
+
+//     // 4. Start Divisional Deputy Director's Timeline (Sequence 3)
+//     // We use the headId passed from the client dropdown to avoid NULL staff_id
+//     await db.insert(qmsTimelines).values({
+//       applicationId: appId,
+//       staffId: headId || null, 
+//       division: divisions[0],
+//       point: 'Technical DD Review',
+//       startTime: sql`now()`,
+//     });
+
+//     // 5. Refresh the UI
+//     revalidatePath("/dashboard/director");
+    
+//     return { success: true };
+//   } catch (error) {
+//     console.error("QMS Assignment Error:", error);
+//     return { success: false };
+//   }
+// }
+
 // @/lib/actions/director.ts
 
 export async function assignToDDD(
@@ -18,21 +88,20 @@ export async function assignToDDD(
   headId?: string
 ) {
   try {
-    // 1. Prepare the Director's Minute object
     const directorMinute = {
       from: "Director",
       role: "Director",
       text: comment,
       round: 1,
       action: "TECHNICAL_DIRECTION",
+      division: divisions[0],
       timestamp: new Date().toISOString()
     };
 
     /**
-     * 2. Update Application State
-     * We perform two JSONB operations:
-     * - Update 'assignedDivisions' with the Director's choice (overwrite).
-     * - Append the new minute to the 'comments' array.
+     * ✅ QMS JSONB UPDATE:
+     * We explicitly set 'division' at the top level of details.
+     * This ensures 'appDetails.division' is no longer undefined.
      */
     await db.update(applications)
       .set({ 
@@ -40,9 +109,13 @@ export async function assignToDDD(
         details: sql`
           jsonb_set(
             jsonb_set(
-              COALESCE(details, '{}'::jsonb), 
-              '{assignedDivisions}', 
-              ${JSON.stringify(divisions)}::jsonb
+              jsonb_set(
+                COALESCE(details, '{}'::jsonb), 
+                '{assignedDivisions}', 
+                ${JSON.stringify(divisions)}::jsonb
+              ),
+              '{division}', 
+              ${JSON.stringify(divisions[0])}::jsonb
             ),
             '{comments}',
             (COALESCE(details->'comments', '[]'::jsonb)) || ${JSON.stringify([directorMinute])}::jsonb
@@ -51,7 +124,7 @@ export async function assignToDDD(
       })
       .where(eq(applications.id, appId));
 
-    // 3. Close Director's Timeline (Stop the clock on Sequence 2)
+    // Stop Director's initial clock
     await db.update(qmsTimelines)
       .set({ endTime: sql`now()` })
       .where(and(
@@ -60,8 +133,7 @@ export async function assignToDDD(
         isNull(qmsTimelines.endTime)
       ));
 
-    // 4. Start Divisional Deputy Director's Timeline (Sequence 3)
-    // We use the headId passed from the client dropdown to avoid NULL staff_id
+    // Start Technical DD clock
     await db.insert(qmsTimelines).values({
       applicationId: appId,
       staffId: headId || null, 
@@ -70,9 +142,7 @@ export async function assignToDDD(
       startTime: sql`now()`,
     });
 
-    // 5. Refresh the UI
     revalidatePath("/dashboard/director");
-    
     return { success: true };
   } catch (error) {
     console.error("QMS Assignment Error:", error);
