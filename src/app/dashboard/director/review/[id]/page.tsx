@@ -122,7 +122,7 @@ export default async function DirectorReviewPage({
     );
 
   // 3. Resolve the PDF URL from 'inspectionReportUrl' (targeting the Supabase bucket)
-  let finalPdfUrl = appDetails.inspectionReportUrl || appDetails.reportUrl || "";
+  let finalPdfUrl = appDetails.poaUrl || appDetails.inspectionReportUrl || appDetails.reportUrl || "";
   
   if (finalPdfUrl && !finalPdfUrl.startsWith('http')) {
     const { data } = supabase.storage
