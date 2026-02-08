@@ -1,4 +1,3 @@
-// @/app/dashboard/director/page.tsx
 export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
@@ -16,12 +15,12 @@ export default async function DirectorPage({
   searchParams: Promise<{ view?: string }> 
 }) {
   const { view } = await searchParams;
-  const currentView = view === "final" ? "Director Final Review" : "Director Review";
+  const currentView = (await view) === "final" ? "Director Final Review" : "Director Review";
 
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
-  // 1. Fetch Divisional Deputy Directors (Accountability Check)
+  // 1. Fetch Divisional Deputy Directors for accountability
   const availableHeads = await db
     .select({
       id: users.id,
@@ -31,7 +30,7 @@ export default async function DirectorPage({
     .from(users)
     .where(eq(users.role, 'Divisional Deputy Director'));
 
-  // 2. Fetch applications for the Directorate Workspace
+  // 2. Fetch applications assigned to Director
   const inbox = await db
     .select({
       id: applications.id,
@@ -66,13 +65,13 @@ export default async function DirectorPage({
           <div className="flex gap-4 mt-6">
             <Link 
               href="?view=review" 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Review' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Review' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
               <ClipboardList className="w-3 h-3" /> New Reviews ({currentView === 'Director Review' ? inbox.length : '0'})
             </Link>
             <Link 
               href="?view=final" 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Final Review' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Final Review' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
               <CheckCircle2 className="w-3 h-3" /> Final Approvals ({currentView === 'Director Final Review' ? inbox.length : '0'})
             </Link>
@@ -88,7 +87,9 @@ export default async function DirectorPage({
 
           const details = app.details as any;
           const savedUrl = details?.poaUrl || details?.inspectionReportUrl;
-          const defaultDiv = details?.assignedDivisions?.[0] || "VMD";
+          
+          // ✅ LOGIC: Prioritize LOD Intake's suggested division
+          const lodSuggestedDiv = details?.assignedDivisions?.[0] || "VMD";
           const productName = details?.products?.[0] || "Dossier under review";
 
           return (
@@ -107,7 +108,7 @@ export default async function DirectorPage({
                 <div className="flex flex-col">
                    <span className="text-[11px] text-slate-700 font-bold uppercase tracking-tight italic">{productName}</span>
                    <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">
-                    Manufacturer: {details?.factory_name || "N/A"}
+                    LOD Route: {lodSuggestedDiv} | Manufacturer: {details?.factory_name || "N/A"}
                    </span>
                 </div>
               </div>
@@ -122,7 +123,7 @@ export default async function DirectorPage({
                   {currentView === "Director Review" ? (
                     <AssignToDDDButton 
                       appId={app.id} 
-                      defaultDivision={defaultDiv} 
+                      defaultDivision={lodSuggestedDiv} // ✅ Pass LOD suggestion
                       availableHeads={availableHeads as any}
                     />
                   ) : (
@@ -139,7 +140,6 @@ export default async function DirectorPage({
           );
         })}
 
-        {/* EMPTY STATE - Corrected logic */}
         {inbox.length === 0 && (
           <div className="p-32 text-center bg-slate-100/30 rounded-[3rem] border-2 border-dashed border-slate-200">
             <p className="text-slate-400 font-bold italic uppercase text-xs tracking-[0.3em]">

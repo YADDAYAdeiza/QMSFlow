@@ -55,17 +55,6 @@ export const users = pgTable("users", {
 });
 
 
-// QMS TIMING TABLE
-// export const qmsTimelines = pgTable("qms_timelines", {
-//   id: serial("id").primaryKey(),
-//   applicationId: integer("application_id").references(() => applications.id),
-//   staffId: uuid("staff_id").references(() => users.id), // Linked to the specific person
-//   point: varchar("point", { length: 100 }).notNull(),
-//   division: varchar("division", { length: 255 }),
-//   startTime: timestamp("start_time").defaultNow(),
-//   endTime: timestamp("end_time"),
-// });
-
 export const qmsTimelines = pgTable("qms_timelines", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").references(() => applications.id),
@@ -85,4 +74,11 @@ export const companiesRelations = relations(companies, ({ many }) => ({
 export const applicationsRelations = relations(applications, ({ one, many }) => ({
   company: one(companies, { fields: [applications.companyId], references: [companies.id] }),
   timelines: many(qmsTimelines),
+}));
+
+export const qmsTimelinesRelations = relations(qmsTimelines, ({ one }) => ({
+  application: one(applications, {
+    fields: [qmsTimelines.applicationId],
+    references: [applications.id],
+  }),
 }));

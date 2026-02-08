@@ -201,7 +201,7 @@ export async function issueFinalClearance(
           isNull(qmsTimelines.endTime)
         ));
 
-      revalidatePath('/dashboard/director');
+      revalidatePath('/director');
       return { success: true };
     });
   } catch (err: any) {

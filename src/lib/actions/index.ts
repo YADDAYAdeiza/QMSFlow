@@ -7,7 +7,6 @@ import { revalidatePath } from "next/cache";
 
 export async function submitLODApplication(data: any) {
   try {
-    // 1. Company Logic: Get or Create
     let company = await db.query.companies.findFirst({
       where: eq(companies.name, data.companyName),
     });
@@ -20,20 +19,15 @@ export async function submitLODApplication(data: any) {
       company = newComp;
     }
 
-    // 2. PRODUCT MAPPING: Resolves the App 80 "Product under review" bug
     const flattenedProducts = data.productLines?.map((pl: any) => 
       `${pl.lineName}${pl.products ? ': ' + pl.products : ''}`
     ) || [];
 
-    const dbNow = sql`now()`; 
-
-    // 3. Create Application with Unique Point
     const [newApp] = await db.insert(applications).values({
       applicationNumber: data.appNumber,
       type: data.type, 
       companyId: company.id,
       status: 'PENDING_DIRECTOR',
-      // ✅ UPDATE: Use unique point name for initial assignment
       currentPoint: 'Director Review', 
       details: {
         factory_name: data.facilityName || data.companyName,
@@ -42,7 +36,10 @@ export async function submitLODApplication(data: any) {
         poaUrl: data.poaUrl || "",
         inspectionReportUrl: data.inspectionReportUrl || "",
         notificationEmail: data.notificationEmail,
-        assignedDivisions: data.divisions || ["VMD"], 
+        // The divisions suggested by LOD
+        assignedDivisions: data.divisions, 
+        // We set the first one as the primary 'division' key for the review page
+        division: data.divisions[0],
         riskProfile: {
           hasOAI: data.hasOAI,
           maturity: data.lastInspected,
@@ -51,27 +48,24 @@ export async function submitLODApplication(data: any) {
         comments: [{
           from: "LOD",
           role: "LOD",
-          text: "Application logged and routed for review.",
+          text: data.lodRemarks || "Application logged and routed for review.",
           timestamp: new Date().toISOString(),
           round: 1,
-          action: "INITIAL_INTAKE"
+          action: "INITIAL_INTAKE",
+          division: "LOD"
         }]
       }
     }).returning();
 
-    // 4. QMS Timing: Clock starts for the "Director Review" phase
     await db.insert(qmsTimelines).values({
       applicationId: newApp.id,
       staffId: "LOD_OFFICER",
       division: "LOD",
-      // ✅ UPDATE: Aligned with Workflow State Map
       point: 'Director Review', 
-      startTime: dbNow,
+      startTime: sql`now()`,
     });
 
-    revalidatePath("/dashboard/applications");
     revalidatePath("/dashboard/director");
-
     return { success: true, id: newApp.id };
   } catch (error: any) {
     console.error("QMS Submission Error:", error);

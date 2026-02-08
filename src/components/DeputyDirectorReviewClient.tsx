@@ -32,14 +32,20 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
   // --- DATA EXTRACTION ---
   const technicalCapas = Array.isArray(app.latestCapas) ? app.latestCapas : [];
   const currentStaffId = app.details?.staff_reviewer_id || "";
+  
+  /**
+   * ✅ FIXED HISTORY TRAIL: 
+   * Starts from LOD Intake at the bottom and builds up. 
+   * We reverse it so the newest actions are at the top.
+   */
   const trail = Array.isArray(app.details?.comments) 
     ? [...app.details.comments].reverse() 
     : [];
 
-  // FIXED: Extract division from 'assignedDivisions' array found in your logs
+  // Extract division for filtering staff
   const appDivision = Array.isArray(app.details?.assignedDivisions) 
     ? app.details.assignedDivisions[0] 
-    : "";
+    : (app.details?.division || "VMD");
 
   // --- HANDLERS ---
   const handleAssign = async () => {
@@ -47,7 +53,6 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
     if (!remarks.trim()) return alert("QMS: Provide instructions for the staff.");
     
     startTransition(async () => {
-      // Pass the division to the action to ensure it's tracked in the timeline
       const res = await assignToStaff(app.id, selectedStaffId, remarks);
       if (res.success) {
         router.push('/dashboard/ddd');
@@ -55,6 +60,26 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
       }
     });
   };
+
+  // --- HANDLERS ---
+// const handleAssign = async () => {
+//   if (!selectedStaffId) return alert("Select a Technical Staff member.");
+//   if (!remarks.trim()) return alert("QMS: Provide instructions for the staff.");
+  
+//   startTransition(async () => {
+//     const res = await assignToStaff(app.id, selectedStaffId, remarks);
+//     if (res.success) {
+//       /**
+//        * ✅ FIXED: Pass division and staffId to the workspace
+//        * This ensures the StaffWorkspacePage can 'find' the record in the DB
+//        */
+//       const targetUrl = `/dashboard/staff?division=${appDivision.toLowerCase()}&staffId=${selectedStaffId}`;
+      
+//       router.push(targetUrl);
+//       router.refresh();
+//     }
+//   });
+// };
 
   const handleEndorse = async () => {
     if (!remarks.trim()) return alert("QMS: Provide concurrence notes.");
@@ -93,7 +118,7 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
       {/* RIGHT: ACTION PANEL */}
       <div className="col-span-5 space-y-6 overflow-y-auto max-h-[90vh] pr-2 custom-scrollbar">
         
-        {/* 1. HISTORY */}
+        {/* 1. HISTORY (Updated for Divisional Deputy Director & LOD Intake) */}
         <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
            <div className="flex items-center gap-2 mb-6">
              <div className="bg-slate-100 p-2 rounded-lg">
@@ -104,12 +129,24 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
            <div className="space-y-4">
              {trail.map((note: any, idx: number) => (
                <div key={idx} className="group relative pl-6 border-l-2 border-slate-100 hover:border-blue-500 pb-2">
-                  <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-4 border-slate-100 group-hover:border-blue-500" />
+                  <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-4 border-slate-100 group-hover:border-blue-500 transition-colors" />
                   <div className="flex justify-between items-center mb-1">
-                    <span className="font-black uppercase text-[9px] text-blue-600">{note.role}</span>
-                    <span className="text-[8px] text-slate-400 font-mono">{new Date(note.timestamp).toLocaleString()}</span>
+                    {/* ✅ CONFORMED LOGIC: Using full role name + Division for Deputy Directors */}
+                    <span className="font-black uppercase text-[9px] text-blue-600">
+                      {note.role === 'Divisional Deputy Director' 
+                        ? `Divisional Deputy Director (${note.division || 'Technical'})` 
+                        : note.from}
+                    </span>
+                    <span className="text-[8px] text-slate-400 font-mono">
+                        {note.timestamp ? new Date(note.timestamp).toLocaleString() : 'Pending'}
+                    </span>
                   </div>
-                  <div className="p-4 rounded-2xl bg-slate-50 group-hover:bg-blue-50/50">
+                  <div className="p-4 rounded-2xl bg-slate-50 group-hover:bg-blue-50/50 transition-colors">
+                    {note.action && (
+                      <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                        Action: {note.action.replace(/_/g, ' ')}
+                      </span>
+                    )}
                     <p className="text-[11px] text-slate-600 italic leading-relaxed">"{note.text}"</p>
                   </div>
                </div>
@@ -117,12 +154,12 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
            </div>
         </div>
 
-        {/* 2. ASSIGNMENT BOX */}
+        {/* 2. ASSIGNMENT BOX (LOD Officer routes here first) */}
         {isInitialAssignment && (
           <div className="bg-blue-600 p-8 rounded-[2.5rem] shadow-xl text-white relative overflow-hidden">
             <div className="relative z-10">
                 <h3 className="text-[11px] font-black uppercase tracking-widest mb-6 flex items-center gap-2">
-                  <UserPlus className="w-4 h-4" /> Dispatch to {appDivision || 'Technical'} Officer
+                  <UserPlus className="w-4 h-4" /> Dispatch to {appDivision} Officer
                 </h3>
                 <div className="space-y-4">
                     <select 
@@ -154,10 +191,9 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
           </div>
         )}
 
-        {/* 3. REVIEW BOX */}
+        {/* 3. REVIEW & ENDORSEMENT BOX */}
         {isReviewPhase && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* ... Review Phase content remains same ... */}
             <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-blue-50 space-y-4">
               <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                 <ClipboardList className="w-4 h-4" /> Staff Assessment Findings
@@ -180,13 +216,13 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
 
             <div className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl">
               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-4 block ml-2">
-                Divisional Deputy Director's Minute
+                {appDivision} Divisional Deputy Director's Minute
               </label>
               <textarea 
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
                 className="w-full h-32 bg-slate-800 border-none rounded-[2rem] p-6 text-sm mb-6 italic outline-none focus:ring-2 focus:ring-blue-500 text-slate-200"
-                placeholder={"Enter concurrence notes..."}
+                placeholder={"Enter concurrence notes for the Director..."}
               />
               <div className="space-y-3">
                 <button onClick={handleEndorse} disabled={isPending} className={`w-full py-5 rounded-[2rem] font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 transition-all ${technicalCapas.length > 0 ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
