@@ -4,10 +4,15 @@ import React, { useState, useTransition, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { pdf } from '@react-pdf/renderer';
 import { 
-  ShieldCheck, Loader2, MessageSquare, Award, RotateCcw, FileWarning, XCircle
+  ShieldCheck, Loader2, MessageSquare, Award, RotateCcw, FileWarning
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
+
+// Document Templates
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
+import { CapaLetter } from "@/components/documents/CapaLetter";
+import { GmpCertificate } from "@/components/documents/GmpCertificate";
+
 import { supabase } from "@/lib/supabase";
 import RejectionModal from "@/components/RejectionModal";
 
@@ -20,12 +25,6 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
 
   const activeStream = stream || "VMD";
 
-  /**
-   * ✅ UPDATED TRAIL LOGIC:
-   * 1. Includes LOD (The beginning of the history).
-   * 2. Includes the specific technical stream (VMD/PAD/AFPD).
-   * 3. Reverses to show chronologically (Newest at top, LOD at bottom).
-   */
   const trail = useMemo(() => {
     const comments = app.commentsTrail || app.details?.comments || [];
     return [...comments]
@@ -41,22 +40,51 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
   const handleApprove = async () => {
     if (!remarks.trim()) return alert("Executive remarks required.");
     setProcessing(true);
+
     try {
+      const details = app.details || {};
+      // Check for CAPAs in the details or as a passed prop
+      const hasCapas = Array.isArray(details.capas) && details.capas.length > 0;
+      const isInspectionReview = !!details.inspectionReportUrl; 
+
       const templateData = { 
         appNumber: app.applicationNumber, 
-        companyName: app.company?.name, 
-        date: new Date().toLocaleDateString('en-GB') 
+        companyName: app.company?.name || details.factory_name, 
+        address: details.factory_address,
+        date: new Date().toLocaleDateString('en-GB'),
+        products: details.products || []
       };
-      const blob = await pdf(<ClearanceLetter data={templateData} />).toBlob();
-      const path = `${app.applicationNumber}/${activeStream}/CERT_${Date.now()}.pdf`;
+
+      // 1. Determine Template based on your requirements
+      let DocumentTemplate;
+      let filePrefix = "CERT";
+
+      if (hasCapas) {
+        DocumentTemplate = <CapaLetter data={{ ...templateData, capas: details.capas }} />;
+        filePrefix = "CAPA";
+      } else if (isInspectionReview) {
+        DocumentTemplate = <GmpCertificate data={templateData} />;
+        filePrefix = "GMP";
+      } else {
+        DocumentTemplate = <ClearanceLetter data={templateData} />;
+        filePrefix = "CLEARANCE";
+      }
+
+      // 2. Generate PDF Blob
+      const blob = await pdf(DocumentTemplate).toBlob();
+      const path = `${app.applicationNumber}/${activeStream}/${filePrefix}_${Date.now()}.pdf`;
       
-      await supabase.storage.from('documents').upload(path, blob);
+      // 3. Upload to 'Documents' bucket (as per saved info)
+      const { error: uploadError } = await supabase.storage.from('documents').upload(path, blob);
+      if (uploadError) throw uploadError;
+
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
 
+      // 4. Update Database
       startTransition(async () => {
         const res = await issueFinalClearance(app.id, remarks, publicUrl, activeStream);
         if (res.success) { 
-            router.push('/director?view=final'); 
+            router.push('/dashboard/director?view=final'); 
             router.refresh(); 
         } else { 
             alert(res.error); 
@@ -122,7 +150,7 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
               placeholder="Provide final sign-off remarks..." 
             />
             <button onClick={handleApprove} disabled={processing || isPending} className="w-full py-5 bg-emerald-500 hover:bg-emerald-600 rounded-3xl font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 disabled:opacity-50 transition-all">
-              {(processing || isPending) ? <Loader2 className="animate-spin w-5 h-5" /> : "Sign & Finalize Certificate"}
+              {(processing || isPending) ? <Loader2 className="animate-spin w-5 h-5" /> : "Sign & Finalize Document"}
             </button>
           </div>
 
@@ -137,7 +165,6 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
                     <div key={idx} className="relative pl-10">
                         <div className="absolute left-1.5 top-1 w-3 h-3 bg-white border-2 border-blue-500 rounded-full z-10" />
                         
-                        {/* ✅ CONFORMED ROLE LOGIC: Using Divisional Deputy Director title */}
                         <span className={`font-black text-[10px] uppercase tracking-tight ${note.role === 'Director' ? 'text-emerald-600' : 'text-blue-600'}`}>
                           {note.role === 'Director' 
                             ? '✦ Executive Director' 

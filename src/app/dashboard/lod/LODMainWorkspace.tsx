@@ -33,7 +33,7 @@ export default function LODMainWorkspace({ completedApps }: { completedApps: any
             }`}
           >
             <History className="w-3.5 h-3.5" />
-            Clearance Archive ({completedApps.length})
+            Clearance/Certificate Archive ({completedApps.length})
           </button>
         </div>
       </div>

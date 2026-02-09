@@ -6,7 +6,8 @@ import { eq, and, isNull, sql } from "drizzle-orm";
 import QMSCountdown from "@/components/QMSCountdown";
 import AssignToDDDButton from "@/components/AssignToDDDButton"; 
 import DossierLink from "@/components/DossierLink"; 
-import { Inbox, ShieldAlert, CheckCircle2, ClipboardList } from "lucide-react";
+// Added Factory and Landmark for icons
+import { Inbox, ShieldAlert, CheckCircle2, ClipboardList, Factory, Landmark } from "lucide-react";
 import Link from "next/link";
 
 export default async function DirectorPage({ 
@@ -20,7 +21,6 @@ export default async function DirectorPage({
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
-  // 1. Fetch Divisional Deputy Directors for accountability
   const availableHeads = await db
     .select({
       id: users.id,
@@ -30,7 +30,6 @@ export default async function DirectorPage({
     .from(users)
     .where(eq(users.role, 'Divisional Deputy Director'));
 
-  // 2. Fetch applications assigned to Director
   const inbox = await db
     .select({
       id: applications.id,
@@ -88,7 +87,13 @@ export default async function DirectorPage({
           const details = app.details as any;
           const savedUrl = details?.poaUrl || details?.inspectionReportUrl;
           
-          // ✅ LOGIC: Prioritize LOD Intake's suggested division
+          /**
+           * ✅ TYPE CAPTURE LOGIC
+           * Determines if it is a Foreign Inspection Review or a Local Facility Verification
+           */
+          const isInspectionReview = !!details?.inspectionReportUrl;
+          const appTypeLabel = isInspectionReview ? "Inspection Report Review (Foreign)" : "Facility Verification";
+
           const lodSuggestedDiv = details?.assignedDivisions?.[0] || "VMD";
           const productName = details?.products?.[0] || "Dossier under review";
 
@@ -99,16 +104,25 @@ export default async function DirectorPage({
                     <p className={`font-mono font-bold text-xl ${currentView === 'Director Final Review' ? 'text-emerald-600' : 'text-blue-600'}`}>
                       #{app.nr}
                     </p>
+                    
+                    {/* ✅ TYPE BADGE: Visual indicator for the Director */}
+                    <span className={`flex items-center gap-1.5 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-tighter ${
+                      isInspectionReview ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-700'
+                    }`}>
+                      {isInspectionReview ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
+                      {appTypeLabel}
+                    </span>
+
                     {remaining < 14400 && ( 
                         <span className="flex items-center gap-1 text-[9px] font-black bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full uppercase italic">
-                            <ShieldAlert className="w-3 h-3" /> Priority Review
+                            <ShieldAlert className="w-3 h-3" /> Priority
                         </span>
                     )}
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col mt-1">
                    <span className="text-[11px] text-slate-700 font-bold uppercase tracking-tight italic">{productName}</span>
-                   <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">
-                    LOD Route: {lodSuggestedDiv} | Manufacturer: {details?.factory_name || "N/A"}
+                   <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest mt-0.5">
+                     LOD Route: {lodSuggestedDiv} | Manufacturer: {details?.factory_name || "N/A"}
                    </span>
                 </div>
               </div>
@@ -123,7 +137,7 @@ export default async function DirectorPage({
                   {currentView === "Director Review" ? (
                     <AssignToDDDButton 
                       appId={app.id} 
-                      defaultDivision={lodSuggestedDiv} // ✅ Pass LOD suggestion
+                      defaultDivision={lodSuggestedDiv} 
                       availableHeads={availableHeads as any}
                     />
                   ) : (
