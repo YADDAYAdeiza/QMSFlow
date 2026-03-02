@@ -242,3 +242,72 @@ export async function returnToStaff(
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * DD IRSD -> IRSD Staff (Internal Hub Vetting)
+ */
+export async function assignToIRSDStaff(appId: number, irsdStaffId: string, instruction: string) {
+  try {
+    return await db.transaction(async (tx) => {
+      // 1. Verify the IRSD Staff exists
+      const irsdStaff = await tx.query.users.findFirst({
+        where: and(eq(users.id, irsdStaffId), eq(users.division, 'IRSD'))
+      });
+      if (!irsdStaff) throw new Error("IRSD Staff member not found");
+
+      const app = await tx.query.applications.findFirst({ 
+        where: eq(applications.id, appId) 
+      });
+      if (!app) throw new Error("Application not found");
+
+      const oldDetails = (app.details as any) || {};
+      const timestamp = sql`now()`;
+
+      // 2. Log the Vetting Instruction in comments
+      const vettingComment = {
+        from: "IRSD Deputy Director",
+        role: "Divisional Deputy Director",
+        division: "IRSD",
+        text: instruction,
+        action: "ASSIGNED_FOR_HUB_VETTING",
+        timestamp: new Date().toISOString()
+      };
+
+      // 3. Update Point to 'IRSD Staff Vetting'
+      await tx.update(applications)
+        .set({
+          currentPoint: "IRSD Staff Vetting",
+          status: "UNDER_HUB_VETTING",
+          updatedAt: timestamp,
+          details: { 
+            ...oldDetails, 
+            irsd_reviewer_id: irsdStaffId, // Separate key for tracking IRSD reviewer
+            comments: [...(oldDetails.comments || []), vettingComment] 
+          }
+        })
+        .where(eq(applications.id, appId));
+
+      // 4. Close DD IRSD's current clock
+      await tx.update(qmsTimelines)
+        .set({ endTime: timestamp })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId), 
+          isNull(qmsTimelines.endTime)
+        ));
+
+      // 5. Open the IRSD Staff Vetting clock
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
+        point: "IRSD Staff Vetting",
+        staffId: irsdStaffId, 
+        division: "IRSD",
+        startTime: timestamp,
+      });
+
+      revalidatePath('/dashboard/ddd');
+      return { success: true };
+    });
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
