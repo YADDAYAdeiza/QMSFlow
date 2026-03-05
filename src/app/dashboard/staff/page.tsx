@@ -2,8 +2,8 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, qmsTimelines } from "@/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
-import { Briefcase, ChevronRight, Search, UserCheck, ShieldAlert, Layers } from "lucide-react";
+import { eq, and, isNull, or } from "drizzle-orm";
+import { Briefcase, ChevronRight, Search, UserCheck, ShieldAlert, Layers, Gavel } from "lucide-react";
 import Link from "next/link";
 import QMSCountdown from "@/components/QMSCountdown";
 
@@ -16,25 +16,30 @@ export default async function StaffWorkspacePage({
   
   // Normalize division (Defaults to VMD)
   const upperDiv = division?.toUpperCase() || "VMD";
+  const isIRSD = upperDiv === "IRSD";
 
-  // Fetch applications at Technical Review stage for the entire division
+  /**
+   * ✅ DYNAMIC POINT FILTERING
+   * IRSD desk looks for 'IRSD Staff Vetting'
+   * Others look for 'Staff Technical Review'
+   */
+  const targetPoint = isIRSD ? "IRSD Staff Vetting" : "Staff Technical Review";
+
+  // Fetch applications based on the active point for the division
   const inbox = await db.query.applications.findMany({
-    where: (apps, { eq, and }) => and(
-      eq(apps.currentPoint, 'Staff Technical Review'),
-    ),
+    where: (apps, { eq }) => eq(apps.currentPoint, targetPoint),
     with: {
       company: true,
       timelines: {
         where: (tm, { eq, and, isNull }) => and(
           eq(tm.division, upperDiv),
           isNull(tm.endTime)
-          // ✅ staffId filter removed to make it agnostic
         ),
       }
     }
   });
 
-  // Filter for records that have an active timeline for this specific desk
+  // Filter for records that have an active timeline for this specific desk/division
   const activeInbox = inbox.filter(app => app.timelines.length > 0);
 
   const QMS_MAX_SECONDS = 48 * 3600; 
@@ -62,15 +67,15 @@ export default async function StaffWorkspacePage({
       <header className="mb-10 flex justify-between items-end">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div className="bg-blue-600 p-2 rounded-xl shadow-lg">
-              <Briefcase className="w-5 h-5 text-white" />
+            <div className={`p-2 rounded-xl shadow-lg ${isIRSD ? 'bg-emerald-600' : 'bg-blue-600'}`}>
+              {isIRSD ? <Gavel className="w-5 h-5 text-white" /> : <Briefcase className="w-5 h-5 text-white" />}
             </div>
             <h1 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">
-              {upperDiv} Technical Desk
+              {upperDiv} {isIRSD ? 'Hub Vetting' : 'Technical Desk'}
             </h1>
           </div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
-              QMS Monitoring • Global Division View
+              QMS Monitoring • Quality Control Management
           </p>
         </div>
       </header>
@@ -82,18 +87,22 @@ export default async function StaffWorkspacePage({
           const elapsed = Math.floor((nowMs - startMs) / 1000);
           const remaining = Math.max(0, QMS_MAX_SECONDS - elapsed);
           
+          // Construct the dynamic URL for the review page
           const dossierUrl = `/dashboard/${upperDiv.toLowerCase()}/review/${app.id}`;
 
           return (
             <div key={app.id} className="group bg-white rounded-[2rem] p-6 border-2 border-slate-100 hover:border-blue-400 transition-all flex items-center justify-between shadow-sm hover:shadow-xl">
               <div className="flex items-center gap-6">
-                <div className="h-14 w-14 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100 group-hover:bg-blue-600 transition-colors">
+                <div className={`h-14 w-14 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100 transition-colors ${isIRSD ? 'group-hover:bg-emerald-600' : 'group-hover:bg-blue-600'}`}>
                   <Search className="w-6 h-6 text-slate-300 group-hover:text-white" />
                 </div>
                 
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono font-bold text-blue-600">#{app.applicationNumber}</span>
+                    {isIRSD && (
+                      <span className="text-[8px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-black uppercase">Hub Verification</span>
+                    )}
                   </div>
                   <h3 className="text-sm font-black uppercase text-slate-800 mt-1">
                     {app.company?.name || "Unspecified Company"}
@@ -101,7 +110,7 @@ export default async function StaffWorkspacePage({
                   <div className="flex items-center gap-2 mt-2 text-slate-400">
                     <UserCheck className="w-3 h-3" />
                     <span className="text-[10px] font-bold uppercase italic">
-                      Current Reviewer: {activeTimeline.staffId ? "Assigned" : "Unassigned"}
+                      Officer: {activeTimeline.staffId ? "Assigned" : "Awaiting Selection"}
                     </span>
                   </div>
                 </div>
@@ -119,7 +128,7 @@ export default async function StaffWorkspacePage({
 
                 <Link 
                   href={dossierUrl}
-                  className="bg-slate-100 hover:bg-blue-600 hover:text-white p-5 rounded-[1.5rem] transition-all transform hover:scale-105 active:scale-95 shadow-sm flex items-center justify-center group/btn"
+                  className={`p-5 rounded-[1.5rem] transition-all transform hover:scale-105 active:scale-95 shadow-sm flex items-center justify-center group/btn ${isIRSD ? 'bg-emerald-50 hover:bg-emerald-600 hover:text-white' : 'bg-slate-100 hover:bg-blue-600 hover:text-white'}`}
                 >
                   <ChevronRight className="w-6 h-6 group-hover/btn:translate-x-1 transition-transform" />
                 </Link>
@@ -132,7 +141,7 @@ export default async function StaffWorkspacePage({
           <div className="p-24 text-center border-2 border-dashed border-slate-200 rounded-[3rem] bg-white/40">
              <ShieldAlert className="w-12 h-12 text-slate-200 mx-auto mb-4" />
              <p className="text-slate-400 font-black uppercase italic text-[10px] tracking-[0.3em]">
-                No active dossiers in {upperDiv}
+                Inbox Clear for {upperDiv}
              </p>
           </div>
         )}
