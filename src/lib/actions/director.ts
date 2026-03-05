@@ -170,7 +170,7 @@ export async function issueFinalClearance(
       const oldDetails = (app.details as any) || {};
 
       const finalEntry = {
-        from: "Director General",
+        from: "Director General", // or 'Executive Director'
         role: "Director",
         text: remarks,
         timestamp: new Date().toISOString(),
@@ -178,10 +178,12 @@ export async function issueFinalClearance(
         archive_path: storagePath
       };
 
+      // 1. Move to Registry Archival instead of COMPLETED immediately
+      // This allows Registry to perform the final "Release" action.
       await tx.update(applications)
         .set({
           status: 'CLEARED',
-          currentPoint: 'COMPLETED', // Final terminal state
+          currentPoint: 'Registry Archival', 
           details: {
             ...oldDetails,
             archived_path: storagePath,
@@ -192,16 +194,27 @@ export async function issueFinalClearance(
         })
         .where(eq(applications.id, appId));
 
-      // Stop Director's FINAL clock
+      // 2. Stop Director's FINAL clock
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
           eq(qmsTimelines.applicationId, appId),
-          eq(qmsTimelines.point, 'Director Final Review'), // Updated to match Map Item 7
+          eq(qmsTimelines.point, 'Director Final Review'),
           isNull(qmsTimelines.endTime)
         ));
 
-      revalidatePath('/director');
+      // 3. Open Registry Archival Clock
+      // This tracks the final "Dispatch" lead time
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
+        point: 'Registry Archival',
+        division: 'REGISTRY',
+        startTime: dbNow,
+      });
+
+      revalidatePath('/dashboard/director');
+      revalidatePath('/dashboard/registry'); // Notify Registry
+      
       return { success: true };
     });
   } catch (err: any) {

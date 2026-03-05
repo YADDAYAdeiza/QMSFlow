@@ -2,8 +2,11 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, qmsTimelines } from "@/db/schema";
-import { eq, and, isNull, or } from "drizzle-orm";
-import { Briefcase, ChevronRight, Search, UserCheck, ShieldAlert, Layers, Gavel } from "lucide-react";
+import { eq, and, isNull } from "drizzle-orm";
+import { 
+  Briefcase, ChevronRight, Search, UserCheck, 
+  ShieldAlert, Layers, Gavel, FileCheck, Clock 
+} from "lucide-react";
 import Link from "next/link";
 import QMSCountdown from "@/components/QMSCountdown";
 
@@ -14,14 +17,14 @@ export default async function StaffWorkspacePage({
 }) {
   const { division } = await searchParams;
   
-  // Normalize division (Defaults to VMD)
+  // Normalize division (Defaults to VMD for technical desk)
   const upperDiv = division?.toUpperCase() || "VMD";
   const isIRSD = upperDiv === "IRSD";
 
   /**
-   * ✅ DYNAMIC POINT FILTERING
-   * IRSD desk looks for 'IRSD Staff Vetting'
-   * Others look for 'Staff Technical Review'
+   * ✅ QMS DYNAMIC POINT FILTERING
+   * IRSD desk looks for 'IRSD Staff Vetting' (Stage 5b)
+   * Technical desks look for 'Staff Technical Review' (Stage 4)
    */
   const targetPoint = isIRSD ? "IRSD Staff Vetting" : "Staff Technical Review";
 
@@ -42,13 +45,13 @@ export default async function StaffWorkspacePage({
   // Filter for records that have an active timeline for this specific desk/division
   const activeInbox = inbox.filter(app => app.timelines.length > 0);
 
-  const QMS_MAX_SECONDS = 48 * 3600; 
+  const QMS_MAX_SECONDS = 48 * 3600; // 48-hour QMS window
   const nowMs = Date.now();
 
   return (
     <div className="p-10 bg-slate-50 min-h-screen font-sans pb-32">
       
-      {/* --- DIVISION SWITCHER --- */}
+      {/* --- DIVISION SWITCHER (Bottom Navigation) --- */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-slate-700 backdrop-blur-md bg-opacity-90">
         <span className="text-[9px] font-black uppercase tracking-widest text-blue-400 flex items-center gap-2">
           <Layers className="w-3 h-3" /> Technical Desk:
@@ -67,7 +70,7 @@ export default async function StaffWorkspacePage({
       <header className="mb-10 flex justify-between items-end">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div className={`p-2 rounded-xl shadow-lg ${isIRSD ? 'bg-emerald-600' : 'bg-blue-600'}`}>
+            <div className={`p-2 rounded-xl shadow-lg transition-colors duration-500 ${isIRSD ? 'bg-emerald-600' : 'bg-blue-600'}`}>
               {isIRSD ? <Gavel className="w-5 h-5 text-white" /> : <Briefcase className="w-5 h-5 text-white" />}
             </div>
             <h1 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">
@@ -75,7 +78,7 @@ export default async function StaffWorkspacePage({
             </h1>
           </div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
-              QMS Monitoring • Quality Control Management
+              QMS Monitoring • {isIRSD ? 'Post-Registration Verification' : 'Technical Assessment Phase'}
           </p>
         </div>
       </header>
@@ -87,36 +90,58 @@ export default async function StaffWorkspacePage({
           const elapsed = Math.floor((nowMs - startMs) / 1000);
           const remaining = Math.max(0, QMS_MAX_SECONDS - elapsed);
           
-          // Construct the dynamic URL for the review page
-          const dossierUrl = `/dashboard/${upperDiv.toLowerCase()}/review/${app.id}`;
+          const appDetails = (app.details as any) || {};
+          // Check if the IRSD officer has already uploaded a verification document
+          const hasVerification = !!appDetails.verificationReportUrl;
+
+          // Standardized Review Route
+          const dossierUrl = `/dashboard/staff/review/${app.id}?division=${upperDiv.toLowerCase()}`;
 
           return (
-            <div key={app.id} className="group bg-white rounded-[2rem] p-6 border-2 border-slate-100 hover:border-blue-400 transition-all flex items-center justify-between shadow-sm hover:shadow-xl">
+            <div key={app.id} className={`group bg-white rounded-[2rem] p-6 border-2 transition-all flex items-center justify-between shadow-sm hover:shadow-xl ${isIRSD ? 'hover:border-emerald-400' : 'hover:border-blue-400'} border-slate-100`}>
               <div className="flex items-center gap-6">
-                <div className={`h-14 w-14 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100 transition-colors ${isIRSD ? 'group-hover:bg-emerald-600' : 'group-hover:bg-blue-600'}`}>
-                  <Search className="w-6 h-6 text-slate-300 group-hover:text-white" />
+                <div className={`h-14 w-14 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100 transition-all duration-300 ${isIRSD ? 'group-hover:bg-emerald-600' : 'group-hover:bg-blue-600'}`}>
+                  {isIRSD ? (
+                    <Gavel className="w-6 h-6 text-slate-300 group-hover:text-white" />
+                  ) : (
+                    <Search className="w-6 h-6 text-slate-300 group-hover:text-white" />
+                  )}
                 </div>
                 
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono font-bold text-blue-600">#{app.applicationNumber}</span>
                     {isIRSD && (
-                      <span className="text-[8px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-black uppercase">Hub Verification</span>
+                      <span className="text-[8px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-black uppercase">IRSD Hub</span>
+                    )}
+                    {hasVerification && (
+                      <span className="text-[8px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-black uppercase flex items-center gap-1">
+                        <FileCheck className="w-2.5 h-2.5" /> Verification Loaded
+                      </span>
                     )}
                   </div>
                   <h3 className="text-sm font-black uppercase text-slate-800 mt-1">
                     {app.company?.name || "Unspecified Company"}
                   </h3>
-                  <div className="flex items-center gap-2 mt-2 text-slate-400">
-                    <UserCheck className="w-3 h-3" />
-                    <span className="text-[10px] font-bold uppercase italic">
-                      Officer: {activeTimeline.staffId ? "Assigned" : "Awaiting Selection"}
-                    </span>
+                  <div className="flex items-center gap-3 mt-2">
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <UserCheck className="w-3 h-3" />
+                      <span className="text-[9px] font-bold uppercase tracking-tighter">
+                        {activeTimeline.staffId ? "Officer Assigned" : "Direct Queue"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-slate-400 border-l pl-3 border-slate-200">
+                      <Clock className="w-3 h-3" />
+                      <span className="text-[9px] font-bold uppercase tracking-tighter">
+                        Started: {new Date(startMs).toLocaleTimeString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-8">
+                {/* QMS TIMER COMPONENT */}
                 <div className={`rounded-xl px-4 py-2 border transition-colors ${
                     remaining < 3600 ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-slate-900 border-slate-800 text-white'
                 }`}>
@@ -137,11 +162,12 @@ export default async function StaffWorkspacePage({
           );
         })}
 
+        {/* --- EMPTY STATE --- */}
         {activeInbox.length === 0 && (
           <div className="p-24 text-center border-2 border-dashed border-slate-200 rounded-[3rem] bg-white/40">
              <ShieldAlert className="w-12 h-12 text-slate-200 mx-auto mb-4" />
              <p className="text-slate-400 font-black uppercase italic text-[10px] tracking-[0.3em]">
-                Inbox Clear for {upperDiv}
+                Desk is Clear: No Pending Dossiers for {upperDiv}
              </p>
           </div>
         )}

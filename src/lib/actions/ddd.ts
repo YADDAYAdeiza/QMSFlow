@@ -4,7 +4,8 @@ import { db } from "@/db";
 import { qmsTimelines, applications, users } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDirectorId } from "./utils";
+// import { getDirectorId } from "./utils";
+
 /**
  * DD -> Staff: Moves the file to the staff's desk for technical work.
  */
@@ -118,6 +119,18 @@ export async function assignToStaff(appId: number, staffId: string, remarks: str
  * DD -> IRSD (Hub) OR DD IRSD -> Director (Final)
  * Handles the high-level movement of the dossier between leadership desks.
  */
+
+// Helper to find the Director (VMAP)
+async function getDirectorId() {
+  const director = await db.query.users.findFirst({
+    where: (u, { and, eq }) => and(
+      eq(u.role, 'Director'),
+      eq(u.division, 'DIRECTORATE') // Assuming Director is under VMAP
+    )
+  });
+  return director?.id || null;
+}
+
 export async function approveToDirector(
   appId: number, 
   recommendationNote: string, 
@@ -132,26 +145,22 @@ export async function approveToDirector(
       
       if (!actingUser) throw new Error("Acting User not found");
 
-      // 2. Determine Workflow Direction
+      // 2. QMS Workflow Routing
       const isIRSD = actingUser.division === "IRSD";
       
-      /**
-       * Mapping the "Next Point" and "Action Label"
-       * Stage 5 -> 6: SUBMITTED_FOR_IRSD_CLEARANCE
-       * Stage 6 -> 7: ENDORSED_FOR_DIRECTOR
-       */
+      // Technical DD -> IRSD Hub Clearance
+      // IRSD DD -> Director Final Review
       const nextPoint = isIRSD ? "Director Final Review" : "IRSD Hub Clearance";
-      const actionLabel = isIRSD ? "ENDORSED_FOR_DIRECTOR" : "SUBMITTED_FOR_IRSD_CLEARANCE";
+      const actionLabel = isIRSD ? "ENDORSED_FOR_DIRECTOR_SIGN_OFF" : "TECHNICAL_CONCURRENCE_FORWARDED_TO_HUB";
       const nextStatus = isIRSD ? "PENDING_DIRECTOR_APPROVAL" : "UNDER_HUB_CLEARANCE";
       
       let nextOwnerId: string | null = null;
 
       if (isIRSD) {
-        // We are at the Hub; move to the Director
         nextOwnerId = await getDirectorId();
-        if (!nextOwnerId) throw new Error("Director (VMAP) not found in system. Please contact Admin.");
+        if (!nextOwnerId) throw new Error("Director not found in system. Please check Registry.");
       } else {
-        // We are at a Technical Division; move to the DD IRSD
+        // Find the specific DD in the IRSD division
         const irsdDD = await tx.query.users.findFirst({
           where: (u, { and, eq }) => and(
             eq(u.division, 'IRSD'), 
@@ -159,60 +168,66 @@ export async function approveToDirector(
           )
         });
         nextOwnerId = irsdDD?.id || null;
-        if (!nextOwnerId) throw new Error("DD IRSD not found. Ensure the Hub Deputy Director is registered.");
       }
 
-      // 3. Fetch current application state
+      // 3. Application State Retrieval
       const app = await tx.query.applications.findFirst({ 
         where: (a, { eq }) => eq(a.id, appId) 
       });
-      const oldDetails = (app?.details as any) || {};
+      if (!app) throw new Error("Application record missing");
+      
+      const oldDetails = (app.details as any) || {};
 
-      // 4. Construct the Comment Entry
+      // 4. Construct Audit Trail Entry
       const newEntry = {
         from: actingUser.name,
         role: "Divisional Deputy Director",
         division: actingUser.division,
         text: recommendationNote,
         timestamp: new Date().toISOString(),
-        action: actionLabel
+        action: actionLabel,
+        // We preserve the staff report link in the DD's note for the Director's convenience
+        referenceReport: isIRSD ? oldDetails.verificationReportUrl : oldDetails.technicalAssessmentUrl
       };
 
-      // A. Update Application
+      const dbTimestamp = sql`now()`;
+
+      // A. Update Application Data
       await tx.update(applications)
         .set({
           currentPoint: nextPoint,
           status: nextStatus,
           details: { 
             ...oldDetails, 
-            comments: [...(oldDetails.comments || []), newEntry] 
+            comments: [...(oldDetails.comments || []), newEntry],
+            // Track the last DD who endorsed it
+            lastEndorsedBy: actingUser.id 
           },
-          updatedAt: new Date()
+          updatedAt: dbTimestamp
         })
         .where(eq(applications.id, appId));
 
-      const timestamp = new Date(); // Standardizing JS Date for QMS
-      
-      // B. Close Current DD Clock (End of current stage)
+      // B. Close the current DD's QMS Clock
       await tx.update(qmsTimelines)
-        .set({ endTime: timestamp })
+        .set({ endTime: dbTimestamp })
         .where(and(
           eq(qmsTimelines.applicationId, appId), 
           isNull(qmsTimelines.endTime)
         ));
 
-      // C. Open New Clock (Start of next stage)
+      // C. Open the Next Stage Clock
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: nextPoint,
         division: isIRSD ? "DIRECTORATE" : "IRSD", 
         staffId: nextOwnerId, 
-        startTime: timestamp,
+        startTime: dbTimestamp,
       });
 
-      // D. Refresh views
+      // D. Refresh Cache for all relevant dashboards
       revalidatePath('/dashboard/ddd');
       revalidatePath('/dashboard/director'); 
+      revalidatePath('/dashboard/registry');
       
       return { success: true };
     });

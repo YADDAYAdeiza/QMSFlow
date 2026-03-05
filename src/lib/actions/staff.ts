@@ -9,7 +9,8 @@ export async function submitToDDD(
   appId: number, 
   userId: string, 
   justification: string, 
-  isHubVetting: boolean // From our form's prop
+  isHubVetting: boolean,
+  reportUrl?: string // ✅ NEW: Accepting the Supabase URL from the client
 ) {
   try {
     const user = await db.query.users.findFirst({ 
@@ -17,7 +18,7 @@ export async function submitToDDD(
     });
     if (!user) throw new Error("User not found");
 
-    // 1. Find the specific DD for this staff's division (PAD, VMD, or IRSD)
+    // 1. Find the specific DD for this staff's division
     const divisionalDD = await db.query.users.findFirst({
       where: (u, { and, eq }) => and(
         eq(u.division, user.division as any), 
@@ -26,7 +27,7 @@ export async function submitToDDD(
     });
 
     /**
-     * ✅ DYNAMIC LABELLING
+     * ✅ QMS DYNAMIC ROUTING
      * Ensures IRSD actions are logged differently than Technical actions
      */
     const nextPoint = isHubVetting ? "IRSD Hub Clearance" : "Technical DD Review Return";
@@ -37,7 +38,9 @@ export async function submitToDDD(
       const app = await tx.query.applications.findFirst({ 
         where: eq(applications.id, appId) 
       });
-      const details = (app?.details as any) || {};
+      if (!app) throw new Error("Application not found");
+
+      const details = (app.details as any) || {};
 
       const newComment = {
         from: user.name,
@@ -45,23 +48,34 @@ export async function submitToDDD(
         division: user.division,
         text: justification,
         action: actionLabel,
+        attachmentUrl: reportUrl, // ✅ Audit Trail: Link the file directly to the comment
         timestamp: new Date().toISOString(),
       };
+
+      // 2. BUILD UPDATED DETAILS
+      // We save the URL to specific keys so they don't overwrite each other
+      const updatedDetails = { 
+        ...details, 
+        comments: [...(details.comments || []), newComment] 
+      };
+
+      if (isHubVetting && reportUrl) {
+        updatedDetails.verificationReportUrl = reportUrl; // Saved for DD IRSD
+      } else if (reportUrl) {
+        updatedDetails.technicalAssessmentUrl = reportUrl; // Saved for Technical DD
+      }
 
       // A. Update Application
       await tx.update(applications)
         .set({
           currentPoint: nextPoint,
           status: isHubVetting ? "AWAITING_HUB_ENDORSEMENT" : "PENDING_DD_RECOMMENDATION",
-          details: { 
-            ...details, 
-            comments: [...(details.comments || []), newComment] 
-          },
+          details: updatedDetails,
           updatedAt: timestamp
         })
         .where(eq(applications.id, appId));
 
-      // B. Close Staff Clock (The current desk clock)
+      // B. Close Staff Clock (QMS Timing requirement)
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
