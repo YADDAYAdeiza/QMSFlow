@@ -2,18 +2,18 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import LODMainWorkspace from "./LODMainWorkspace";
 
 export default async function LODPage() {
   // Fetch COMPLETED dossiers (those finalize by Director)
   const completed = await db.query.applications.findMany({
-    where: eq(applications.currentPoint, "COMPLETED"),
+    where: inArray(applications.currentPoint, ["COMPLETED", "Registry Archival"]),
     with: {
       company: true,
     },
     orderBy: [desc(applications.updatedAt)],
-  });
+});
 
   // Map the DB data to match the LODArchive requirements
   const formattedApps = completed.map(app => {
