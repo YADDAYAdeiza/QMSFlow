@@ -1,7 +1,7 @@
 "use client"
 
 import React from 'react';
-import { ExternalLink, Building2, Calendar, FileCheck, Search, Clock, History } from 'lucide-react';
+import { ExternalLink, Building2, Globe, FileCheck, Clock, History } from 'lucide-react';
 
 export default function LODArchive({ applications }: { applications: any[] }) {
   return (
@@ -11,7 +11,8 @@ export default function LODArchive({ applications }: { applications: any[] }) {
           <thead className="bg-slate-900 text-white">
             <tr>
               <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Dossier Detail</th>
-              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Manufacturer</th>
+              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Local Applicant</th>
+              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Foreign Manufacturer</th>
               <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Workflow Status</th>
               <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-right text-slate-400">Action</th>
             </tr>
@@ -25,17 +26,30 @@ export default function LODArchive({ applications }: { applications: any[] }) {
                   <td className="p-8">
                     <p className="font-mono text-sm font-black text-blue-600">#{app.applicationNumber}</p>
                     <p className="text-[9px] font-black text-slate-400 uppercase mt-1 tracking-tighter">
-                      {app.details?.type || "General Application"}
+                      {app.type || "General Application"}
                     </p>
                   </td>
                   
+                  {/* Local Applicant Column */}
                   <td className="p-8">
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 bg-slate-100 rounded-xl flex items-center justify-center group-hover:bg-white transition-colors border border-transparent group-hover:border-blue-100">
-                        <Building2 className="w-5 h-5 text-slate-400 group-hover:text-blue-600" />
+                      <div className="h-9 w-9 bg-slate-100 rounded-xl flex items-center justify-center border border-slate-200">
+                        <Building2 className="w-4 h-4 text-slate-500" />
                       </div>
-                      <span className="text-xs font-black uppercase text-slate-800 leading-tight">
-                        {app.companyName || app.details?.factory_name || "Unknown mfg"}
+                      <span className="text-[11px] font-black uppercase text-slate-800 leading-tight max-w-[150px]">
+                        {app.companyName}
+                      </span>
+                    </div>
+                  </td>
+
+                  {/* Foreign Manufacturer Column */}
+                  <td className="p-8">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 bg-blue-50 rounded-xl flex items-center justify-center border border-blue-100">
+                        <Globe className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <span className="text-[11px] font-black uppercase text-slate-600 leading-tight max-w-[150px]">
+                        {app.foreignFactoryName || "Site Details Pending"}
                       </span>
                     </div>
                   </td>
@@ -53,7 +67,7 @@ export default function LODArchive({ applications }: { applications: any[] }) {
                           <span className="text-[10px] font-black uppercase tracking-widest">In Progress</span>
                         </div>
                         <p className="text-[9px] font-bold text-slate-400 italic">
-                          Currently at: {app.currentPoint || "Intake"}
+                          At: {app.currentPoint || "Intake"}
                         </p>
                       </div>
                     )}
@@ -61,7 +75,6 @@ export default function LODArchive({ applications }: { applications: any[] }) {
 
                   <td className="p-8 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      {/* Placeholder for History - Logic to be implemented later */}
                       <button 
                         className="p-3 bg-slate-100 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm"
                         title="View Workflow History"
@@ -80,7 +93,7 @@ export default function LODArchive({ applications }: { applications: any[] }) {
                         </a>
                       ) : (
                         <div className="px-6 py-3 bg-slate-50 text-slate-300 rounded-xl text-[9px] font-black uppercase tracking-widest border border-dashed border-slate-200 cursor-not-allowed">
-                          Document Pending
+                          Pending
                         </div>
                       )}
                     </div>
@@ -94,7 +107,7 @@ export default function LODArchive({ applications }: { applications: any[] }) {
         {applications.length === 0 && (
           <div className="p-32 text-center bg-slate-50/50">
             <FileCheck className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-            <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">No records found in this view</p>
+            <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">No cleared dossiers found</p>
           </div>
         )}
       </div>

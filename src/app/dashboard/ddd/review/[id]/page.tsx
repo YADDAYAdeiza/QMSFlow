@@ -17,14 +17,17 @@ export default async function Page({
   const { as } = await searchParams;
   const appId = parseInt(id);
 
-  // Simulation IDs for testing
   const DD_VMD = "9215bf99-489e-4468-b9aa-bcd926d11c08"; 
   const DD_IRSD = "cfb8ccbd-7753-43f0-aa51-a9c449a52de6"; 
   const loggedInUserId = as === "irsd" ? DD_IRSD : DD_VMD;
 
+  // ✅ FIX: Changed 'company' to 'localApplicant' to match schema.ts
   const app = await db.query.applications.findFirst({
     where: eq(applications.id, appId),
-    with: { company: true }
+    with: { 
+      localApplicant: true,
+      foreignFactory: true 
+    }
   });
 
   if (!app) return <div className="p-20 text-center font-bold font-sans">Application Not Found</div>;
@@ -44,13 +47,6 @@ export default async function Page({
   const appDetails = (app.details as Record<string, any>) || {};
   const history = Array.isArray(appDetails.comments) ? appDetails.comments : [];
 
-  /**
-   * ✅ UPDATED RESOLUTION LOGIC (Director-Level Consistency):
-   * 1. Check for verificationReportUrl (Formal Hub evidence).
-   * 2. Check latest comment for attachmentUrl (Staff upload evidence).
-   * 3. Check technicalAssessmentUrl (VMD staff review).
-   * 4. Fallback to inspectionReportUrl or poaUrl (Original Dossier).
-   */
   const latestAttachment = [...history].reverse().find((c: any) => c.attachmentUrl)?.attachmentUrl;
   
   const activePdfUrl = 
@@ -63,16 +59,17 @@ export default async function Page({
 
   const cleanApp = {
     ...app,
+    // ✅ Re-mapping localApplicant back to 'company' so the Client Component 
+    // doesn't break if it's expecting 'app.company'
+    company: app.localApplicant, 
     details: appDetails,
     narrativeHistory: history,
-    // Store evidence flags explicitly for the client
     hasEvidence: !!(appDetails.verificationReportUrl || latestAttachment || appDetails.technicalAssessmentUrl),
     latestCapas: ([...history].reverse().find((c: any) => c.observations?.capas)?.observations?.capas) || [],
   };
 
   return (
     <div className="relative">
-      {/* TESTING SWITCHER */}
       <div className="fixed top-4 right-8 z-[200] flex items-center gap-2 bg-white/90 backdrop-blur p-2 rounded-full border border-slate-200 shadow-2xl">
         <span className="text-[9px] font-black uppercase px-3 text-slate-400">Reviewing as:</span>
         <Link 

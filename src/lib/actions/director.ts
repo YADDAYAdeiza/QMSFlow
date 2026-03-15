@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { applications, companies, qmsTimelines, users } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+
 /**
  * Director -> DD: Initial Assignment
  * Moves point to Technical DD Review
@@ -81,6 +82,10 @@ import { revalidatePath } from "next/cache";
 
 // @/lib/actions/director.ts
 
+/**
+ * Moves application from Director to the Technical DD
+ * Handles the QMS Handover Clock and updates JSONB details.
+ */
 export async function assignToDDD(
   appId: number, 
   divisions: string[], 
@@ -88,67 +93,77 @@ export async function assignToDDD(
   headId?: string
 ) {
   try {
-    const directorMinute = {
-      from: "Director",
-      role: "Director",
-      text: comment,
-      round: 1,
-      action: "TECHNICAL_DIRECTION",
-      division: divisions[0],
-      timestamp: new Date().toISOString()
-    };
+    return await db.transaction(async (tx) => {
+      
+      const directorMinute = {
+        from: "Director",
+        role: "Director",
+        text: comment,
+        round: 1,
+        action: "TECHNICAL_DIRECTION",
+        division: divisions[0],
+        timestamp: new Date().toISOString()
+      };
 
-    /**
-     * ✅ QMS JSONB UPDATE:
-     * We explicitly set 'division' at the top level of details.
-     * This ensures 'appDetails.division' is no longer undefined.
-     */
-    await db.update(applications)
-      .set({ 
-        currentPoint: 'Technical DD Review',
-        details: sql`
-          jsonb_set(
+      // 1. Update Application Status and Metadata
+      // Restored point name to 'Technical DD Review'
+      await tx.update(applications)
+        .set({ 
+          currentPoint: 'Technical DD Review',
+          details: sql`
             jsonb_set(
               jsonb_set(
-                COALESCE(details, '{}'::jsonb), 
-                '{assignedDivisions}', 
-                ${JSON.stringify(divisions)}::jsonb
+                jsonb_set(
+                  COALESCE(details, '{}'::jsonb), 
+                  '{assignedDivisions}', 
+                  ${JSON.stringify(divisions)}::jsonb
+                ),
+                '{division}', 
+                ${JSON.stringify(divisions[0])}::jsonb
               ),
-              '{division}', 
-              ${JSON.stringify(divisions[0])}::jsonb
-            ),
-            '{comments}',
-            (COALESCE(details->'comments', '[]'::jsonb)) || ${JSON.stringify([directorMinute])}::jsonb
-          )
-        `
-      })
-      .where(eq(applications.id, appId));
+              '{comments}',
+              (COALESCE(details->'comments', '[]'::jsonb)) || ${JSON.stringify([directorMinute])}::jsonb
+            )
+          `
+        })
+        .where(eq(applications.id, appId));
 
-    // Stop Director's initial clock
-    await db.update(qmsTimelines)
-      .set({ endTime: sql`now()` })
-      .where(and(
-        eq(qmsTimelines.applicationId, appId),
-        eq(qmsTimelines.point, 'Director Review'),
-        isNull(qmsTimelines.endTime)
-      ));
+      // 2. STOP Director's Clock
+      // Targets the active 'Director Review' entry
+      await tx.update(qmsTimelines)
+        .set({ endTime: sql`now()` })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId),
+          eq(qmsTimelines.point, 'Director Review'),
+          isNull(qmsTimelines.endTime)
+        ));
 
-    // Start Technical DD clock
-    await db.insert(qmsTimelines).values({
-      applicationId: appId,
-      staffId: headId || null, 
-      division: divisions[0],
-      point: 'Technical DD Review',
-      startTime: sql`now()`,
+      // 3. START Technical DD Review Clock
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
+        staffId: headId || null, 
+        division: divisions[0],
+        point: 'Technical DD Review',
+        startTime: sql`now()`,
+        details: {
+          previousStep: 'Director Review',
+          actionRequested: 'Technical Review',
+          handoverBy: 'Director'
+        }
+      });
+
+      // 4. Refresh Cache
+      revalidatePath("/dashboard/director");
+      revalidatePath("/dashboard/ddd"); 
+      
+      return { success: true };
     });
-
-    revalidatePath("/dashboard/director");
-    return { success: true };
-  } catch (error) {
-    console.error("QMS Assignment Error:", error);
-    return { success: false };
+  } catch (error: any) {
+    console.error("QMS Handover Error:", error);
+    return { success: false, error: error.message };
   }
 }
+
 
 /**
  * Final Clearance

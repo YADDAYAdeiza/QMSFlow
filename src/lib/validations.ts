@@ -8,27 +8,24 @@ export const lodFormSchema = z.object({
   notificationEmail: z.string().email("Invalid email address"),
   facilityName: z.string().min(1, "Facility name is required"),
   facilityAddress: z.string().min(1, "Facility address is required"),
-  
-  // LOD's specific intake notes
   lodRemarks: z.string().min(5, "Please provide brief intake remarks"),
 
+  // Updated to validate the nested array structure
   productLines: z.array(z.object({
     lineName: z.string().min(1, "Line name required"),
-    products: z.string().min(1, "Products required"),
+    products: z.array(z.object({
+      name: z.string().min(1, "Product name required"),
+    })).min(1, "At least one product is required per line"),
   })).min(1, "At least one product line is required"),
 
-  hasOAI: z.string().default("No"),
-  lastInspected: z.string().default("Recent"),
-  failedSystems: z.array(z.string()).optional().default([]),
-  
-  // Divisional routing (VMD, AFPD, PAD, IRSD)
   divisions: z.array(z.string()).min(1, "Select at least one division for routing"),
-  
   poaUrl: z.string().optional().default(""),
   inspectionReportUrl: z.string().optional().default(""),
 }).refine((data) => {
-  return data.poaUrl || data.inspectionReportUrl;
+  // Ensure the correct file is uploaded based on application type
+  if (data.type === "Facility Verification") return !!data.poaUrl;
+  return !!data.inspectionReportUrl;
 }, {
-  message: "Please upload the required dossier/report before submitting",
+  message: "Please upload the required document for this category",
   path: ["poaUrl"] 
 });

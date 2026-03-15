@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { db } from "@/db";
 import { applications, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -16,9 +18,10 @@ export default async function DirectorReviewPage({
   const appId = parseInt(id);
   if (isNaN(appId)) return notFound();
 
+  // ✅ FIX: Changed 'company' to 'localApplicant' to match Named Relations in schema.ts
   const app = await db.query.applications.findFirst({
     where: eq(applications.id, appId),
-    with: { company: true }
+    with: { localApplicant: true }
   });
 
   if (!app) return notFound();
@@ -48,13 +51,15 @@ export default async function DirectorReviewPage({
   
   if (finalPdfUrl && !finalPdfUrl.startsWith('http')) {
     const { data } = supabase.storage
-      .from('Documents') // Using the standardized bucket name
+      .from('documents') // Standardized bucket name
       .getPublicUrl(finalPdfUrl);
     finalPdfUrl = data.publicUrl;
   }
 
   const cleanApp = {
     ...app,
+    // ✅ Re-map to 'company' so the Client Component logic remains stable
+    company: app.localApplicant, 
     details: appDetails,
     commentsTrail: commentsTrail,
     staffReports,
