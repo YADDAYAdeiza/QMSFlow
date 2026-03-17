@@ -24,11 +24,24 @@ export async function submitLODApplication(rawData: any) {
   }
 
   const data = validated.data;
+  const normalizedAppNumber = normalize(data.appNumber);
 
   try {
+    // 1. PRE-CHECK: Prevent Unique Constraint Violation (APP 159 error)
+    const existingApp = await db.query.applications.findFirst({
+      where: eq(applications.applicationNumber, normalizedAppNumber)
+    });
+
+    if (existingApp) {
+      return { 
+        success: false, 
+        error: `Application Number "${normalizedAppNumber}" already exists in the registry.` 
+      };
+    }
+
     return await db.transaction(async (tx) => {
       
-      // 1. NORMALIZATION HELPER FOR COMPANIES
+      // 2. NORMALIZATION HELPER FOR COMPANIES
       const upsertCompany = async (name: string, address: string, category: 'LOCAL' | 'FOREIGN') => {
         const cleanName = normalize(name);
         const cleanAddress = address?.trim() || "";
@@ -41,6 +54,7 @@ export async function submitLODApplication(rawData: any) {
         });
 
         if (existing) {
+          // Update address if it was missing but is now provided
           if (!existing.address && cleanAddress) {
             await tx.update(companies)
               .set({ address: cleanAddress })
@@ -61,13 +75,13 @@ export async function submitLODApplication(rawData: any) {
       const localComp = await upsertCompany(data.companyName, data.companyAddress, 'LOCAL');
       const foreignFact = await upsertCompany(data.facilityName, data.facilityAddress, 'FOREIGN');
 
-      // 2. AFFILIATION LINK
+      // 3. AFFILIATION LINK
       await tx.insert(companyAffiliations).values({
         localCompanyId: localComp.id,
         foreignFactoryId: foreignFact.id,
       }).onConflictDoNothing();
 
-      // 3. NORMALIZED PRODUCT LINES & PRODUCTS
+      // 4. NORMALIZED PRODUCT LINES & PRODUCTS
       if (data.productLines && data.productLines.length > 0) {
         for (const lineEntry of data.productLines) {
           const cleanLineName = normalize(lineEntry.lineName);
@@ -101,16 +115,15 @@ export async function submitLODApplication(rawData: any) {
         }
       }
 
-      // 4. CREATE APPLICATION (The Dossier) - UPDATED TO SAVE DATA FOR PDF
+      // 5. CREATE APPLICATION (The Dossier)
       const [newApp] = await tx.insert(applications).values({
-        applicationNumber: normalize(data.appNumber),
+        applicationNumber: normalizedAppNumber,
         type: data.type,
         companyId: localComp.id,
         foreignFactoryId: foreignFact.id,
         status: 'PENDING_DIRECTOR',
         currentPoint: 'Director Review',
         details: {
-          // Flattening company/facility info into details for easy PDF access
           companyName: normalize(data.companyName),
           companyAddress: data.companyAddress?.trim() || "",
           facilityName: normalize(data.facilityName),
@@ -131,7 +144,7 @@ export async function submitLODApplication(rawData: any) {
         }
       }).returning();
 
-      // 5. QMS TIMELINE
+      // 6. QMS TIMELINE (Timing staff as per QMS requirements)
       await tx.insert(qmsTimelines).values({
         applicationId: newApp.id,
         staffId: "LOD_INTAKE_OFFICER", 
@@ -141,6 +154,8 @@ export async function submitLODApplication(rawData: any) {
       });
 
       revalidatePath("/dashboard/director");
+      revalidatePath("/dashboard/lod");
+      
       return { success: true, id: newApp.id };
     });
   } catch (error: any) {
