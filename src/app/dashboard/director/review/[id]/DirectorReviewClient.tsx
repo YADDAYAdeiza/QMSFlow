@@ -3,7 +3,7 @@
 import React, { useState, useTransition, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
-import { ShieldCheck, Loader2, MessageSquare, Award, RotateCcw, LayoutDashboard, FileText, FileWarning } from 'lucide-react';
+import { Loader2, RotateCcw } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
 import { supabase } from "@/lib/supabase";
@@ -28,10 +28,10 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
 
     const templateData = { 
       appNumber: app.applicationNumber, 
-      localApplicantName: app.localApplicant?.name || details.companyName || "Unspecified Entity", 
-      localApplicantAddress: app.localApplicant?.address || details.companyAddress,
-      factoryName: details.facilityName || details.factory_name,
-      factoryAddress: details.facilityAddress || details.factory_address,
+      localApplicantName: details.companyName || app.localApplicant?.name || "Unspecified Entity", 
+      localApplicantAddress: details.companyAddress || app.localApplicant?.address,
+      factoryName: details.facilityName, // Now pulled directly from Step 4 fix
+      factoryAddress: details.facilityAddress, // Now pulled directly from Step 4 fix
       date: new Date().toLocaleDateString('en-GB'),
       products: mappedProducts
     };
@@ -75,7 +75,6 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
 
   return (
     <div className="fixed inset-0 flex bg-slate-100 overflow-hidden">
-      {/* PDF VIEWER */}
       <div className="w-1/2 p-6 h-full">
         <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-200 w-full h-full overflow-hidden relative">
           <div className="absolute top-6 left-6 right-6 z-20 flex justify-center">
@@ -94,7 +93,6 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
         </div>
       </div>
 
-      {/* ACTION PANEL */}
       <div className="w-1/2 p-10 overflow-y-auto">
         <div className="max-w-xl mx-auto space-y-8 pb-20">
           <header className="flex justify-between items-end">
@@ -113,7 +111,7 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
           <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-2xl">
             <textarea 
               value={remarks} onChange={(e) => setRemarks(e.target.value)} 
-              className="w-full h-40 bg-slate-800 border-none rounded-[2rem] p-6 text-sm mb-6 outline-none" 
+              className="w-full h-40 bg-slate-800 border-none rounded-[2rem] p-6 text-sm mb-6 outline-none text-white" 
               placeholder="Final executive remarks..." 
             />
             <button onClick={handleApprove} disabled={processing || isPending} className="w-full py-5 bg-emerald-500 rounded-3xl font-black uppercase text-[11px] flex items-center justify-center gap-3">
@@ -126,7 +124,7 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
             {trail.map((note: any, idx: number) => (
               <div key={idx} className="pl-6 border-l-2 border-slate-200">
                 <span className="text-[10px] font-black uppercase text-blue-600">
-                  {/* Replaces abbreviation with full title */}
+                  {/* Applied global instruction for 'Divisional Deputy Director' title */}
                   {note.from?.replace('DDD', 'Divisional Deputy Director') || (note.role === 'Director' ? 'Executive Director' : 'Officer')}
                 </span>
                 <div className="p-4 mt-2 bg-white rounded-2xl border text-[12px] italic">"{note.text}"</div>

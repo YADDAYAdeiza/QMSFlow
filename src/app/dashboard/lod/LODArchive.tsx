@@ -1,116 +1,103 @@
 "use client"
 
-import React from 'react';
-import { ExternalLink, Building2, Globe, FileCheck, Clock, History } from 'lucide-react';
+import React, { useState } from 'react';
+import { ExternalLink, FileCheck, Building2, Calendar, Search, ArrowRight } from 'lucide-react';
 
-export default function LODArchive({ applications }: { applications: any[] }) {
+interface CompletedApp {
+  id: number;
+  applicationNumber: string;
+  companyName: string;
+  type: string;
+  updatedAt: Date | string | null;
+  certificateUrl: string | null;
+}
+
+export default function LODArchive({ applications }: { applications: CompletedApp[] }) {
+  const [filter, setFilter] = useState("");
+
+  const filteredApps = applications.filter(app => 
+    app.applicationNumber.toLowerCase().includes(filter.toLowerCase()) ||
+    app.companyName.toLowerCase().includes(filter.toLowerCase())
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-slate-900 text-white">
-            <tr>
-              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Dossier Detail</th>
-              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Local Applicant</th>
-              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Foreign Manufacturer</th>
-              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Workflow Status</th>
-              <th className="p-8 text-[10px] font-black uppercase tracking-[0.2em] text-right text-slate-400">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {applications.map((app) => {
-              const isComplete = app.status === 'CLEARED' || !!app.certificateUrl;
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* Search Header */}
+      <div className="relative max-w-md group">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+        <input 
+          type="text"
+          placeholder="Filter by App # or Company..."
+          className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border-none shadow-sm text-sm font-medium focus:ring-2 focus:ring-blue-500/20 transition-all"
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      </div>
 
-              return (
-                <tr key={app.id} className="hover:bg-blue-50/50 transition-colors group">
+      {filteredApps.length === 0 ? (
+        <div className="p-32 text-center bg-white rounded-[4rem] border-2 border-dashed border-slate-100 shadow-inner">
+          <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+             <FileCheck className="w-10 h-10 text-slate-200" />
+          </div>
+          <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.4em]">
+            {filter ? "No matching records found" : "Archive Empty: No Issued Certificates"}
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-slate-900 text-white">
+              <tr>
+                <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-400">Dossier / Type</th>
+                <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-400">Applicant Info</th>
+                <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-400">Date Issued</th>
+                <th className="p-8 text-[10px] font-black uppercase tracking-widest text-right text-slate-400">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filteredApps.map((app) => (
+                <tr key={app.id} className="hover:bg-blue-50/30 transition-colors group">
                   <td className="p-8">
-                    <p className="font-mono text-sm font-black text-blue-600">#{app.applicationNumber}</p>
-                    <p className="text-[9px] font-black text-slate-400 uppercase mt-1 tracking-tighter">
-                      {app.type || "General Application"}
-                    </p>
+                    <div className="flex flex-col">
+                      <span className="font-mono text-sm font-black text-blue-600 tracking-tighter italic">#{app.applicationNumber}</span>
+                      <span className="text-[9px] font-black text-slate-400 uppercase mt-1 tracking-tight">{app.type}</span>
+                    </div>
                   </td>
-                  
-                  {/* Local Applicant Column */}
                   <td className="p-8">
                     <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 bg-slate-100 rounded-xl flex items-center justify-center border border-slate-200">
-                        <Building2 className="w-4 h-4 text-slate-500" />
+                      <div className="h-10 w-10 bg-slate-100 rounded-xl flex items-center justify-center group-hover:bg-white transition-colors">
+                        <Building2 className="w-5 h-5 text-slate-400" />
                       </div>
-                      <span className="text-[11px] font-black uppercase text-slate-800 leading-tight max-w-[150px]">
-                        {app.companyName}
+                      <p className="text-xs font-black uppercase text-slate-800 leading-tight max-w-[250px]">{app.companyName}</p>
+                    </div>
+                  </td>
+                  <td className="p-8">
+                    <div className="flex items-center gap-2 text-slate-500">
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-bold">
+                        {app.updatedAt ? new Date(app.updatedAt).toLocaleDateString('en-GB') : 'N/A'}
                       </span>
                     </div>
                   </td>
-
-                  {/* Foreign Manufacturer Column */}
-                  <td className="p-8">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 bg-blue-50 rounded-xl flex items-center justify-center border border-blue-100">
-                        <Globe className="w-4 h-4 text-blue-600" />
-                      </div>
-                      <span className="text-[11px] font-black uppercase text-slate-600 leading-tight max-w-[150px]">
-                        {app.foreignFactoryName || "Site Details Pending"}
-                      </span>
-                    </div>
-                  </td>
-
-                  <td className="p-8">
-                    {isComplete ? (
-                      <div className="flex items-center gap-2 text-emerald-600">
-                        <FileCheck className="w-3.5 h-3.5" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Cleared</span>
-                      </div>
+                  <td className="p-8 text-right">
+                    {app.certificateUrl ? (
+                      <a 
+                        href={app.certificateUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg hover:scale-105 active:scale-95"
+                      >
+                        <ExternalLink className="w-3 h-3" /> View & Print
+                      </a>
                     ) : (
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2 text-orange-500">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span className="text-[10px] font-black uppercase tracking-widest">In Progress</span>
-                        </div>
-                        <p className="text-[9px] font-bold text-slate-400 italic">
-                          At: {app.currentPoint || "Intake"}
-                        </p>
-                      </div>
+                      <span className="text-[9px] font-black text-rose-400 uppercase italic">Doc Not Found</span>
                     )}
                   </td>
-
-                  <td className="p-8 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        className="p-3 bg-slate-100 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm"
-                        title="View Workflow History"
-                      >
-                        <History className="w-4 h-4" />
-                      </button>
-
-                      {isComplete ? (
-                        <a 
-                          href={app.certificateUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all shadow-lg active:scale-95"
-                        >
-                          <ExternalLink className="w-3 h-3" /> View Clearance
-                        </a>
-                      ) : (
-                        <div className="px-6 py-3 bg-slate-50 text-slate-300 rounded-xl text-[9px] font-black uppercase tracking-widest border border-dashed border-slate-200 cursor-not-allowed">
-                          Pending
-                        </div>
-                      )}
-                    </div>
-                  </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {applications.length === 0 && (
-          <div className="p-32 text-center bg-slate-50/50">
-            <FileCheck className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-            <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">No cleared dossiers found</p>
-          </div>
-        )}
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

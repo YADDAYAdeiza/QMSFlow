@@ -1,7 +1,7 @@
 "use client"
 
-import React from 'react';
-import { ExternalLink, FileCheck, Building2, Calendar, Search } from 'lucide-react';
+import React, { useState } from 'react';
+import { ExternalLink, FileCheck, Building2, Calendar, Search, ArrowRight } from 'lucide-react';
 
 interface CompletedApp {
   id: number;
@@ -9,22 +9,42 @@ interface CompletedApp {
   companyName: string;
   type: string;
   updatedAt: Date | string | null;
-  certificateUrl: string | null; // This comes from app.details.archived_path
+  certificateUrl: string | null;
 }
 
 export default function LODArchive({ applications }: { applications: CompletedApp[] }) {
+  const [filter, setFilter] = useState("");
+
+  const filteredApps = applications.filter(app => 
+    app.applicationNumber.toLowerCase().includes(filter.toLowerCase()) ||
+    app.companyName.toLowerCase().includes(filter.toLowerCase())
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {applications.length === 0 ? (
+      {/* Search Header */}
+      <div className="relative max-w-md group">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+        <input 
+          type="text"
+          placeholder="Filter by App # or Company..."
+          className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border-none shadow-sm text-sm font-medium focus:ring-2 focus:ring-blue-500/20 transition-all"
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      </div>
+
+      {filteredApps.length === 0 ? (
         <div className="p-32 text-center bg-white rounded-[4rem] border-2 border-dashed border-slate-100 shadow-inner">
           <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
              <FileCheck className="w-10 h-10 text-slate-200" />
           </div>
-          <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.4em]">Archive Empty: No Issued Certificates</p>
+          <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.4em]">
+            {filter ? "No matching records found" : "Archive Empty: No Issued Certificates"}
+          </p>
         </div>
       ) : (
         <div className="bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden">
-          <table className="w-full text-left">
+          <table className="w-full text-left border-collapse">
             <thead className="bg-slate-900 text-white">
               <tr>
                 <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-400">Dossier / Type</th>
@@ -34,11 +54,11 @@ export default function LODArchive({ applications }: { applications: CompletedAp
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {applications.map((app) => (
+              {filteredApps.map((app) => (
                 <tr key={app.id} className="hover:bg-blue-50/30 transition-colors group">
                   <td className="p-8">
                     <div className="flex flex-col">
-                      <span className="font-mono text-sm font-black text-blue-600">#{app.applicationNumber}</span>
+                      <span className="font-mono text-sm font-black text-blue-600 tracking-tighter italic">#{app.applicationNumber}</span>
                       <span className="text-[9px] font-black text-slate-400 uppercase mt-1 tracking-tight">{app.type}</span>
                     </div>
                   </td>
@@ -47,7 +67,7 @@ export default function LODArchive({ applications }: { applications: CompletedAp
                       <div className="h-10 w-10 bg-slate-100 rounded-xl flex items-center justify-center group-hover:bg-white transition-colors">
                         <Building2 className="w-5 h-5 text-slate-400" />
                       </div>
-                      <p className="text-xs font-black uppercase text-slate-800 leading-tight max-w-[200px]">{app.companyName}</p>
+                      <p className="text-xs font-black uppercase text-slate-800 leading-tight max-w-[250px]">{app.companyName}</p>
                     </div>
                   </td>
                   <td className="p-8">
@@ -66,10 +86,10 @@ export default function LODArchive({ applications }: { applications: CompletedAp
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg hover:scale-105 active:scale-95"
                       >
-                        <ExternalLink className="w-3 h-3" /> View & Print Certificate
+                        <ExternalLink className="w-3 h-3" /> View & Print
                       </a>
                     ) : (
-                      <span className="text-[9px] font-black text-rose-400 uppercase italic">Doc Missing</span>
+                      <span className="text-[9px] font-black text-rose-400 uppercase italic">Doc Not Found</span>
                     )}
                   </td>
                 </tr>

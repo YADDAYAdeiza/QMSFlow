@@ -7,11 +7,12 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { lodFormSchema } from '@/lib/validations';
 import { submitLODApplication } from '@/lib/actions/index';
 import FileUpload from './FileUpload'; 
+import { CompanySearch } from './CompanySearch';
 import { Plus, Trash2, Globe, Building2, Save, Loader2, MessageSquare, Share2, X } from 'lucide-react';
 
 const DIVISION_OPTIONS = ["VMD", "AFPD", "PAD", "IRSD"];
 
-function NestedProductArray({ nestIndex, control, register, errors }: any) {
+function NestedProductArray({ nestIndex, control, register }: any) {
   const { fields, append, remove } = useFieldArray({
     control,
     name: `productLines.${nestIndex}.products`
@@ -108,7 +109,7 @@ export default function LODEntryForm() {
             <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-2">Dossier Receipt & Initial Routing</p>
           </header>
 
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="flex flex-col gap-2">
               <label className="text-[10px] font-black uppercase text-slate-400 ml-2">App Number</label>
               <input {...register("appNumber")} className="bg-slate-50 p-5 rounded-[1.5rem] text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20 transition-all" />
@@ -122,17 +123,43 @@ export default function LODEntryForm() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Local Company Section */}
             <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
               <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><Building2 className="w-4 h-4" /> Local Company</h3>
-              <input {...register("companyName")} placeholder="Name" className="w-full p-4 rounded-xl text-sm border-none shadow-sm" />
+              
+              <CompanySearch 
+                category="LOCAL" 
+                placeholder="Search local agent registry..." 
+                onSelect={(company) => {
+                  setValue("companyName", company.name);
+                  setValue("companyAddress", company.address);
+                  // Assuming email is in your DB even if not in Drizzle schema snippet
+                  if (company.email) setValue("notificationEmail", company.email);
+                }}
+              />
+              
+              <input {...register("companyName")} placeholder="Company Name" className="w-full p-4 rounded-xl text-sm border-none shadow-sm" />
               <input {...register("companyAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm border-none shadow-sm" />
-              <input {...register("notificationEmail")} placeholder="Email" className="w-full p-4 rounded-xl text-sm border-none shadow-sm font-bold text-blue-600" />
+              <input {...register("notificationEmail")} placeholder="Notification Email" className="w-full p-4 rounded-xl text-sm border-none shadow-sm font-bold text-blue-600" />
             </div>
+
+            {/* Foreign Manufacturer Section */}
             <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4">
               <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2"><Globe className="w-4 h-4" /> Foreign Manufacturer</h3>
+              
+              <CompanySearch 
+                category="FOREIGN" 
+                placeholder="Search factory registry..." 
+                onSelect={(factory) => {
+                  setValue("facilityName", factory.name);
+                  setValue("facilityAddress", factory.address);
+                }}
+              />
+
               <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm border-none shadow-sm" />
               <input {...register("facilityAddress")} placeholder="Physical Address" className="w-full p-4 rounded-xl text-sm border-none shadow-sm" />
+              
               <FileUpload 
                 label={selectedType === "Facility Verification" ? "POA / Letter of Authorization" : "Inspection Report"}
                 onUploadComplete={(url) => {
@@ -182,7 +209,7 @@ export default function LODEntryForm() {
                     <span className="bg-slate-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold">{index + 1}</span>
                     <input {...register(`productLines.${index}.lineName`)} placeholder="e.g. Tablets (Beta-Lactams)" className="flex-1 bg-slate-50 p-4 rounded-xl text-xs font-black uppercase outline-none" />
                   </div>
-                  <NestedProductArray nestIndex={index} control={control} register={register} errors={errors} />
+                  <NestedProductArray nestIndex={index} control={control} register={register} />
                 </div>
               </div>
             ))}
@@ -193,7 +220,6 @@ export default function LODEntryForm() {
             <textarea {...register("lodRemarks")} className="w-full p-6 bg-slate-50 rounded-[2rem] text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" rows={3} placeholder="Add any specific observations for the Director..." />
           </div>
 
-          {/* Validation Diagnostics */}
           {Object.keys(errors).length > 0 && (
             <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 font-mono text-[10px] text-rose-600">
               {Object.entries(errors).map(([key, err]: any) => (

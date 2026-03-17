@@ -63,8 +63,8 @@ export const ClearanceLetter = ({ data }: { data: any }) => (
         <Text>Thank you.</Text>
         <View style={styles.signatureBlock}>
           <Image src="/Signature-removebg-preview.png" style={{ width: 100, height: 80 }} />
-          <Text style={styles.signatureName}>Temitayo Stephanie Adeoye</Text>
-          <Text>Director, Veterinary Medicine & Allied Products</Text>
+          <Text style={styles.signatureName}>Dr. Idayat Mudashir</Text>
+          <Text>Deputy Director in-charge, Veterinary Medicine & Allied Products</Text>
         </View>
       </View>
 

@@ -1,25 +1,30 @@
 "use server"
 
 import { db } from "@/db";
-import { 
-  applications, companies, companyAffiliations, 
-  productLines, products, qmsTimelines 
-} from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { companies, companyAffiliations, productLines, products, applications, qmsTimelines } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { lodFormSchema } from "@/lib/validations";
 
 /**
- * Normalizes strings for database consistency:
- * 1. Trims whitespace
- * 2. Converts to Uppercase (Standard for Regulatory records)
- * 3. Collapses multiple spaces into one
+ * HELPER: Standardizes strings for database consistency
  */
-const normalize = (text: string) => {
-  if (!text) return "";
-  return text.trim().replace(/\s+/g, ' ').toUpperCase();
-};
+const normalize = (str: string) => str?.trim().toUpperCase() || "";
 
-export async function submitLODApplication(data: any) {
+export async function submitLODApplication(rawData: any) {
+  // 0. VALIDATE INPUT
+  const validated = lodFormSchema.safeParse(rawData);
+  
+  if (!validated.success) {
+    return { 
+      success: false, 
+      error: "Validation Failed", 
+      details: validated.error.flatten().fieldErrors 
+    };
+  }
+
+  const data = validated.data;
+
   try {
     return await db.transaction(async (tx) => {
       
@@ -28,7 +33,6 @@ export async function submitLODApplication(data: any) {
         const cleanName = normalize(name);
         const cleanAddress = address?.trim() || "";
 
-        // Check for existing company using the normalized name
         const existing = await tx.query.companies.findFirst({
           where: and(
             eq(companies.name, cleanName), 
@@ -36,7 +40,14 @@ export async function submitLODApplication(data: any) {
           )
         });
 
-        if (existing) return existing;
+        if (existing) {
+          if (!existing.address && cleanAddress) {
+            await tx.update(companies)
+              .set({ address: cleanAddress })
+              .where(eq(companies.id, existing.id));
+          }
+          return existing;
+        }
 
         const [inserted] = await tx.insert(companies).values({ 
           name: cleanName, 
@@ -90,7 +101,7 @@ export async function submitLODApplication(data: any) {
         }
       }
 
-      // 4. CREATE DOSSIER (With Snapshot)
+      // 4. CREATE APPLICATION (The Dossier) - UPDATED TO SAVE DATA FOR PDF
       const [newApp] = await tx.insert(applications).values({
         applicationNumber: normalize(data.appNumber),
         type: data.type,
@@ -99,8 +110,13 @@ export async function submitLODApplication(data: any) {
         status: 'PENDING_DIRECTOR',
         currentPoint: 'Director Review',
         details: {
+          // Flattening company/facility info into details for easy PDF access
+          companyName: normalize(data.companyName),
+          companyAddress: data.companyAddress?.trim() || "",
+          facilityName: normalize(data.facilityName),
+          facilityAddress: data.facilityAddress?.trim() || "",
+          
           assignedDivisions: data.divisions,
-          // We store the user's raw input in the snapshot for the audit trail
           productLines: data.productLines, 
           lodRemarks: data.lodRemarks,
           notificationEmail: data.notificationEmail?.toLowerCase().trim(),
@@ -108,8 +124,8 @@ export async function submitLODApplication(data: any) {
           inspectionReportUrl: data.inspectionReportUrl || "",
           comments: [{
             from: "LOD",
-            role: "LOD",
-            text: data.lodRemarks || "Application logged.",
+            role: "LOD Officer",
+            text: data.lodRemarks || "Application logged and routed for Director Review.",
             timestamp: new Date().toISOString()
           }]
         }
@@ -118,17 +134,17 @@ export async function submitLODApplication(data: any) {
       // 5. QMS TIMELINE
       await tx.insert(qmsTimelines).values({
         applicationId: newApp.id,
-        staffId: "LOD_OFFICER", // Replace with auth session in production
+        staffId: "LOD_INTAKE_OFFICER", 
         division: "LOD",
         point: 'Director Review',
-        startTime: sql`now()`,
+        startTime: new Date(),
       });
 
       revalidatePath("/dashboard/director");
       return { success: true, id: newApp.id };
     });
   } catch (error: any) {
-    console.error("Submission Error:", error);
-    return { success: false, error: error.message };
+    console.error("Critical Submission Error:", error);
+    return { success: false, error: error.message || "An internal server error occurred" };
   }
 }
