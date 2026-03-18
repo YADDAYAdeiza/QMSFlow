@@ -127,3 +127,45 @@ export const qmsTimelinesRelations = relations(qmsTimelines, ({ one }) => ({
     references: [applications.id],
   }),
 }));
+
+// 8. Risk Reference Lookup (Seed with your table data)
+export const productLineRisks = pgTable("product_line_risks", {
+  id: serial("id").primaryKey(),
+  lineName: varchar("line_name", { length: 255 }).notNull().unique(),
+  complexityScore: integer("complexity_score").notNull(),
+  criticalityScore: integer("criticality_score").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// 9. The Risk Assessment "Engine" Table
+export const riskAssessments = pgTable("risk_assessments", {
+  id: serial("id").primaryKey(),
+  // Foreign Keys (Integer to match your serial IDs)
+  facilityId: integer("facility_id").references(() => companies.id, { onDelete: 'cascade' }),
+  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }),
+  
+  // Pass 1: Intrinsic (LOD Stage)
+  complexityScore: integer("complexity_score"),
+  criticalityScore: integer("criticality_score"),
+  intrinsicLevel: varchar("intrinsic_level", { length: 10 }), // 'Low', 'Medium', 'High'
+  
+  // Pass 2: Compliance (Staff Stage)
+  sraStatus: text("sra_status").default('FALSE'), // Using text or boolean based on your preference
+  majorDeficiencies: integer("major_deficiencies").default(0),
+  criticalDeficiencies: integer("critical_deficiencies").default(0),
+  complianceLevel: varchar("compliance_level", { length: 10 }),
+  
+  // Output
+  overallRiskRating: varchar("overall_risk_rating", { length: 1 }), // 'A', 'B', 'C'
+  nextInspectionDate: timestamp("next_inspection_date"),
+  
+  status: varchar("status", { length: 20 }).default('PARTIAL'), // 'PARTIAL' or 'FINALIZED'
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// --- ADD TO RELATIONS ---
+export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => ({
+  facility: one(companies, { fields: [riskAssessments.facilityId], references: [companies.id] }),
+  application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),
+}));

@@ -1,121 +1,95 @@
 "use server"
 
 import { db } from "@/db";
-import { companies, companyAffiliations, productLines, products, applications, qmsTimelines } from "@/db/schema";
+import { 
+  companies, companyAffiliations, productLines, 
+  products, applications, qmsTimelines, riskAssessments 
+} from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { lodFormSchema } from "@/lib/validations";
 
-/**
- * HELPER: Standardizes strings for database consistency
- */
+// HELPER: Now used to look up the Category selected in the dropdown
+const RISK_CATEGORIES: Record<string, { complexity: number, criticality: number }> = {
+  "VACCINES / BIOLOGICALS": { complexity: 3, criticality: 3 },
+  "STERILE INJECTABLES": { complexity: 3, criticality: 2 },
+  "POWDER BETA-LACTAMS": { complexity: 2, criticality: 3 },
+  "TABLETS (GENERAL)": { complexity: 1, criticality: 2 },
+  "MULTIVITAMINS": { complexity: 1, criticality: 1 },
+};
+
 const normalize = (str: string) => str?.trim().toUpperCase() || "";
 
 export async function submitLODApplication(rawData: any) {
-  // 0. VALIDATE INPUT
   const validated = lodFormSchema.safeParse(rawData);
-  
-  if (!validated.success) {
-    return { 
-      success: false, 
-      error: "Validation Failed", 
-      details: validated.error.flatten().fieldErrors 
-    };
-  }
+  if (!validated.success) return { success: false, error: "Validation Failed" };
 
   const data = validated.data;
   const normalizedAppNumber = normalize(data.appNumber);
 
   try {
-    // 1. PRE-CHECK: Prevent Unique Constraint Violation (APP 159 error)
     const existingApp = await db.query.applications.findFirst({
       where: eq(applications.applicationNumber, normalizedAppNumber)
     });
 
-    if (existingApp) {
-      return { 
-        success: false, 
-        error: `Application Number "${normalizedAppNumber}" already exists in the registry.` 
-      };
-    }
+    if (existingApp) return { success: false, error: `App Number "${normalizedAppNumber}" exists.` };
 
     return await db.transaction(async (tx) => {
-      
-      // 2. NORMALIZATION HELPER FOR COMPANIES
+      // 1. Handle Companies
       const upsertCompany = async (name: string, address: string, category: 'LOCAL' | 'FOREIGN') => {
         const cleanName = normalize(name);
-        const cleanAddress = address?.trim() || "";
-
         const existing = await tx.query.companies.findFirst({
-          where: and(
-            eq(companies.name, cleanName), 
-            eq(companies.category, category)
-          )
+          where: and(eq(companies.name, cleanName), eq(companies.category, category))
         });
-
-        if (existing) {
-          // Update address if it was missing but is now provided
-          if (!existing.address && cleanAddress) {
-            await tx.update(companies)
-              .set({ address: cleanAddress })
-              .where(eq(companies.id, existing.id));
-          }
-          return existing;
-        }
-
-        const [inserted] = await tx.insert(companies).values({ 
-          name: cleanName, 
-          address: cleanAddress, 
-          category 
-        }).returning();
-        
+        if (existing) return existing;
+        const [inserted] = await tx.insert(companies).values({ name: cleanName, address, category }).returning();
         return inserted;
       };
 
       const localComp = await upsertCompany(data.companyName, data.companyAddress, 'LOCAL');
       const foreignFact = await upsertCompany(data.facilityName, data.facilityAddress, 'FOREIGN');
 
-      // 3. AFFILIATION LINK
-      await tx.insert(companyAffiliations).values({
-        localCompanyId: localComp.id,
-        foreignFactoryId: foreignFact.id,
-      }).onConflictDoNothing();
+      // 2. Links & Products
+      await tx.insert(companyAffiliations).values({ localCompanyId: localComp.id, foreignFactoryId: foreignFact.id }).onConflictDoNothing();
 
-      // 4. NORMALIZED PRODUCT LINES & PRODUCTS
-      if (data.productLines && data.productLines.length > 0) {
-        for (const lineEntry of data.productLines) {
-          const cleanLineName = normalize(lineEntry.lineName);
-          if (!cleanLineName) continue;
+      // Calculate Max Risk Scores
+      let maxComp = 1;
+      let maxCrit = 1;
 
-          let lineRecord = await tx.query.productLines.findFirst({
-            where: and(
-              eq(productLines.companyId, foreignFact.id), 
-              eq(productLines.name, cleanLineName)
-            )
-          });
+      for (const lineEntry of data.productLines) {
+        // IMPORTANT: We now check lineEntry.riskCategory instead of lineName
+        const categoryKey = normalize(lineEntry.riskCategory);
+        const risk = RISK_CATEGORIES[categoryKey];
+        
+        if (risk) {
+          maxComp = Math.max(maxComp, risk.complexity);
+          maxCrit = Math.max(maxCrit, risk.criticality);
+        }
 
-          if (!lineRecord) {
-            [lineRecord] = await tx.insert(productLines).values({
-              companyId: foreignFact.id,
-              name: cleanLineName
-            }).returning();
-          }
+        // We still save the lineName to the database for the factory profile
+        const cleanLineName = normalize(lineEntry.lineName);
+        let [lineRec] = await tx.insert(productLines)
+          .values({ 
+            companyId: foreignFact.id, 
+            name: cleanLineName 
+          })
+          .onConflictDoUpdate({ 
+            target: [productLines.companyId, productLines.name], 
+            set: { name: cleanLineName } 
+          })
+          .returning();
 
-          if (lineEntry.products && Array.isArray(lineEntry.products)) {
-            for (const prod of lineEntry.products) {
-              const cleanProdName = normalize(prod.name);
-              if (cleanProdName) {
-                await tx.insert(products).values({
-                  lineId: lineRecord.id,
-                  name: cleanProdName
-                }).onConflictDoNothing();
-              }
-            }
+        if (lineEntry.products) {
+          for (const prod of lineEntry.products) {
+            await tx.insert(products).values({ 
+              lineId: lineRec.id, 
+              name: normalize(prod.name) 
+            }).onConflictDoNothing();
           }
         }
       }
 
-      // 5. CREATE APPLICATION (The Dossier)
+      // 3. Create Application
       const [newApp] = await tx.insert(applications).values({
         applicationNumber: normalizedAppNumber,
         type: data.type,
@@ -123,43 +97,33 @@ export async function submitLODApplication(rawData: any) {
         foreignFactoryId: foreignFact.id,
         status: 'PENDING_DIRECTOR',
         currentPoint: 'Director Review',
-        details: {
-          companyName: normalize(data.companyName),
-          companyAddress: data.companyAddress?.trim() || "",
-          facilityName: normalize(data.facilityName),
-          facilityAddress: data.facilityAddress?.trim() || "",
-          
-          assignedDivisions: data.divisions,
-          productLines: data.productLines, 
-          lodRemarks: data.lodRemarks,
-          notificationEmail: data.notificationEmail?.toLowerCase().trim(),
-          poaUrl: data.poaUrl || "",
-          inspectionReportUrl: data.inspectionReportUrl || "",
-          comments: [{
-            from: "LOD",
-            role: "LOD Officer",
-            text: data.lodRemarks || "Application logged and routed for Director Review.",
-            timestamp: new Date().toISOString()
-          }]
-        }
+        details: data 
       }).returning();
 
-      // 6. QMS TIMELINE (Timing staff as per QMS requirements)
-      await tx.insert(qmsTimelines).values({
+      // 4. Create Pass 1 Risk Assessment (Inherent Risk)
+      const score = maxComp * maxCrit;
+      const level = score <= 2 ? "Low" : score <= 4 ? "Medium" : "High";
+
+      await tx.insert(riskAssessments).values({
+        facilityId: foreignFact.id,
         applicationId: newApp.id,
-        staffId: "LOD_INTAKE_OFFICER", 
-        division: "LOD",
-        point: 'Director Review',
-        startTime: new Date(),
+        complexityScore: maxComp,
+        criticalityScore: maxCrit,
+        intrinsicLevel: level,
+        status: 'PARTIAL' // Awaiting Pass 2 (Compliance)
       });
 
-      revalidatePath("/dashboard/director");
+      // 5. Audit/Timeline
+      await tx.insert(qmsTimelines).values({ 
+        applicationId: newApp.id, 
+        division: "LOD", 
+        point: 'Director Review' 
+      });
+
       revalidatePath("/dashboard/lod");
-      
       return { success: true, id: newApp.id };
     });
-  } catch (error: any) {
-    console.error("Critical Submission Error:", error);
-    return { success: false, error: error.message || "An internal server error occurred" };
+  } catch (e: any) {
+    return { success: false, error: e.message };
   }
 }
