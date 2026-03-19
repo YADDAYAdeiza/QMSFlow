@@ -37,7 +37,7 @@ export const products = pgTable("products", {
   uniqueProduct: uniqueIndex("unique_product_per_line").on(table.lineId, table.name),
 }));
 
-// 5. Applications (The Dossier)
+// 5. Applications
 export const applications = pgTable("applications", {
   id: serial("id").primaryKey(),
   applicationNumber: varchar("application_number", { length: 255 }).notNull().unique(),
@@ -62,6 +62,7 @@ export const applications = pgTable("applications", {
       role: string;
       text: string;
       timestamp: string;
+      attachmentUrl?: string;
     }>;
   }>(),
   createdAt: timestamp("created_at").defaultNow(),
@@ -90,12 +91,41 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// --- RELATIONS ---
+// 8. Product Line Risks (Lookup Table)
+export const productLineRisks = pgTable("product_line_risks", {
+  id: serial("id").primaryKey(),
+  lineName: varchar("line_name", { length: 255 }).notNull().unique(),
+  complexityScore: integer("complexity_score").notNull(),
+  criticalityScore: integer("criticality_score").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// 9. Risk Assessments
+export const riskAssessments = pgTable("risk_assessments", {
+  id: serial("id").primaryKey(),
+  facilityId: integer("facility_id").references(() => companies.id, { onDelete: 'cascade' }),
+  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }),
+  complexityScore: integer("complexity_score"),
+  criticalityScore: integer("criticality_score"),
+  intrinsicLevel: varchar("intrinsic_level", { length: 10 }), 
+  sraStatus: text("sra_status").default('FALSE'), 
+  majorDeficiencies: integer("major_deficiencies").default(0),
+  criticalDeficiencies: integer("critical_deficiencies").default(0),
+  complianceLevel: varchar("compliance_level", { length: 10 }),
+  overallRiskRating: varchar("overall_risk_rating", { length: 1 }), 
+  nextInspectionDate: timestamp("next_inspection_date"),
+  status: varchar("status", { length: 20 }).default('PARTIAL'),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// --- UPDATED RELATIONS (The Fix) ---
 
 export const companiesRelations = relations(companies, ({ many }) => ({
   productLines: many(productLines),
   applicationsAsLocal: many(applications, { relationName: "local_app_rel" }),
   applicationsAsForeign: many(applications, { relationName: "foreign_app_rel" }),
+  riskAssessments: many(riskAssessments),
 }));
 
 export const productLinesRelations = relations(productLines, ({ one, many }) => ({
@@ -119,6 +149,8 @@ export const applicationsRelations = relations(applications, ({ one, many }) => 
     relationName: "foreign_app_rel"
   }),
   timelines: many(qmsTimelines),
+  // ✅ FIX: This was missing and caused the "referencedTable" error
+  riskAssessments: many(riskAssessments), 
 }));
 
 export const qmsTimelinesRelations = relations(qmsTimelines, ({ one }) => ({
@@ -128,43 +160,6 @@ export const qmsTimelinesRelations = relations(qmsTimelines, ({ one }) => ({
   }),
 }));
 
-// 8. Risk Reference Lookup (Seed with your table data)
-export const productLineRisks = pgTable("product_line_risks", {
-  id: serial("id").primaryKey(),
-  lineName: varchar("line_name", { length: 255 }).notNull().unique(),
-  complexityScore: integer("complexity_score").notNull(),
-  criticalityScore: integer("criticality_score").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// 9. The Risk Assessment "Engine" Table
-export const riskAssessments = pgTable("risk_assessments", {
-  id: serial("id").primaryKey(),
-  // Foreign Keys (Integer to match your serial IDs)
-  facilityId: integer("facility_id").references(() => companies.id, { onDelete: 'cascade' }),
-  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }),
-  
-  // Pass 1: Intrinsic (LOD Stage)
-  complexityScore: integer("complexity_score"),
-  criticalityScore: integer("criticality_score"),
-  intrinsicLevel: varchar("intrinsic_level", { length: 10 }), // 'Low', 'Medium', 'High'
-  
-  // Pass 2: Compliance (Staff Stage)
-  sraStatus: text("sra_status").default('FALSE'), // Using text or boolean based on your preference
-  majorDeficiencies: integer("major_deficiencies").default(0),
-  criticalDeficiencies: integer("critical_deficiencies").default(0),
-  complianceLevel: varchar("compliance_level", { length: 10 }),
-  
-  // Output
-  overallRiskRating: varchar("overall_risk_rating", { length: 1 }), // 'A', 'B', 'C'
-  nextInspectionDate: timestamp("next_inspection_date"),
-  
-  status: varchar("status", { length: 20 }).default('PARTIAL'), // 'PARTIAL' or 'FINALIZED'
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-// --- ADD TO RELATIONS ---
 export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => ({
   facility: one(companies, { fields: [riskAssessments.facilityId], references: [companies.id] }),
   application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),

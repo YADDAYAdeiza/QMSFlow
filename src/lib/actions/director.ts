@@ -1,9 +1,10 @@
 "use server"
 
 import { db } from "@/db";
-import { applications, companies, qmsTimelines, users } from "@/db/schema";
+import { applications, companies, qmsTimelines, users, riskAssessments } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import {calculateORR} from '@/lib/actions/riskEngine'
 
 /**
  * Director -> DD: Initial Assignment
@@ -177,6 +178,8 @@ export async function issueFinalClearance(
   try {
     return await db.transaction(async (tx) => {
       const dbNow = sql`now()`;
+      
+      // 1. Fetch the application AND its current partial risk assessment
       const app = await tx.query.applications.findFirst({
         where: eq(applications.id, appId),
       });
@@ -184,8 +187,36 @@ export async function issueFinalClearance(
       if (!app) throw new Error("Application not found");
       const oldDetails = (app.details as any) || {};
 
+      // 2. RISK ENGINE LOGIC: Calculate Final ORR and Inspection Date
+      const currentRisk = await tx.query.riskAssessments.findFirst({
+        where: eq(riskAssessments.applicationId, appId)
+      });
+
+      if (currentRisk && currentRisk.intrinsicLevel && currentRisk.complianceLevel) {
+        // Use your Matrix Logic
+        const { rating, interval } = calculateORR(
+          currentRisk.intrinsicLevel as any, 
+          currentRisk.complianceLevel as any
+        );
+
+        // Calculate Next Inspection Date based on your interval (months)
+        const nextDate = new Date();
+        nextDate.setMonth(nextDate.getMonth() + interval);
+
+        // Update the Risk Ledger to FINALIZED
+        await tx.update(riskAssessments)
+          .set({
+            overallRiskRating: rating,
+            nextInspectionDate: nextDate,
+            status: 'FINALIZED',
+            updatedAt: dbNow
+          })
+          .where(eq(riskAssessments.applicationId, appId));
+      }
+
+      // 3. Update Application Status & Audit Narrative
       const finalEntry = {
-        from: "Director General", // or 'Executive Director'
+        from: "Director General",
         role: "Director",
         text: remarks,
         timestamp: new Date().toISOString(),
@@ -193,8 +224,6 @@ export async function issueFinalClearance(
         archive_path: storagePath
       };
 
-      // 1. Move to Registry Archival instead of COMPLETED immediately
-      // This allows Registry to perform the final "Release" action.
       await tx.update(applications)
         .set({
           status: 'CLEARED',
@@ -209,7 +238,7 @@ export async function issueFinalClearance(
         })
         .where(eq(applications.id, appId));
 
-      // 2. Stop Director's FINAL clock
+      // 4. QMS Clock Management
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
@@ -218,8 +247,6 @@ export async function issueFinalClearance(
           isNull(qmsTimelines.endTime)
         ));
 
-      // 3. Open Registry Archival Clock
-      // This tracks the final "Dispatch" lead time
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: 'Registry Archival',
@@ -228,7 +255,8 @@ export async function issueFinalClearance(
       });
 
       revalidatePath('/dashboard/director');
-      revalidatePath('/dashboard/registry'); // Notify Registry
+      revalidatePath('/dashboard/registry');
+      revalidatePath('/dashboard/risk'); // Important: Refresh the Risk Inventory
       
       return { success: true };
     });

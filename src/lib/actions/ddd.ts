@@ -1,9 +1,11 @@
 "use server"
 
 import { db } from "@/db";
-import { qmsTimelines, applications, users } from "@/db/schema";
+import { applications, qmsTimelines, users, riskAssessments } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { calculateORR } from "@/lib/actions/riskEngine"; 
+
 // import { getDirectorId } from "./utils";
 
 /**
@@ -138,29 +140,62 @@ export async function approveToDirector(
 ) {
   try {
     return await db.transaction(async (tx) => {
-      // 1. Identify the actor (The DD currently holding the dossier)
+      // 1. Identify Actor (DDD)
       const actingUser = await tx.query.users.findFirst({ 
         where: (u, { eq }) => eq(u.id, loggedInUserId) 
       });
-      
       if (!actingUser) throw new Error("Acting User not found");
 
-      // 2. QMS Workflow Routing
       const isIRSD = actingUser.division === "IRSD";
-      
-      // Technical DD -> IRSD Hub Clearance
-      // IRSD DD -> Director Final Review
       const nextPoint = isIRSD ? "Director Final Review" : "IRSD Hub Clearance";
       const actionLabel = isIRSD ? "ENDORSED_FOR_DIRECTOR_SIGN_OFF" : "TECHNICAL_CONCURRENCE_FORWARDED_TO_HUB";
       const nextStatus = isIRSD ? "PENDING_DIRECTOR_APPROVAL" : "UNDER_HUB_CLEARANCE";
       
-      let nextOwnerId: string | null = null;
-
+      // 2. GRACEFUL ORR CALCULATION (Only for IRSD DD)
       if (isIRSD) {
-        nextOwnerId = await getDirectorId();
-        if (!nextOwnerId) throw new Error("Director not found in system. Please check Registry.");
+        try {
+          const riskRecord = await tx.query.riskAssessments.findFirst({
+            where: (ra, { eq }) => eq(ra.applicationId, appId)
+          });
+
+          // Graceful check: Only calculate if the data is actually there
+          if (riskRecord?.intrinsicLevel && riskRecord?.complianceLevel) {
+            const { rating, interval } = calculateORR(
+              riskRecord.intrinsicLevel as any, 
+              riskRecord.complianceLevel as any
+            );
+
+            const nextInspectionDate = new Date();
+            nextInspectionDate.setMonth(nextInspectionDate.getMonth() + interval);
+
+            await tx.update(riskAssessments)
+              .set({
+                overallRiskRating: rating,
+                nextInspectionDate: nextInspectionDate,
+                status: "FINALIZED",
+                updatedAt: new Date()
+              })
+              .where(eq(riskAssessments.applicationId, appId));
+
+            console.log(`[RISK_LOG]: App ${appId} finalized with ORR: ${rating}`);
+          } else {
+            // Log the omission but don't stop the transaction
+            console.warn(`[RISK_LOG]: Skipping ORR for App ${appId} - Data incomplete.`);
+          }
+        } catch (riskErr) {
+          // If the risk table update fails, we log it and continue so the workflow isn't blocked
+          console.error("[RISK_CALC_ERROR]:", riskErr);
+        }
+      }
+
+      // 3. Resolve Next Owner (Director or IRSD DD)
+      let nextOwnerId: string | null = null;
+      if (isIRSD) {
+        const director = await tx.query.users.findFirst({
+          where: (u, { eq }) => eq(u.role, 'Director')
+        });
+        nextOwnerId = director?.id || null;
       } else {
-        // Find the specific DD in the IRSD division
         const irsdDD = await tx.query.users.findFirst({
           where: (u, { and, eq }) => and(
             eq(u.division, 'IRSD'), 
@@ -170,15 +205,11 @@ export async function approveToDirector(
         nextOwnerId = irsdDD?.id || null;
       }
 
-      // 3. Application State Retrieval
-      const app = await tx.query.applications.findFirst({ 
-        where: (a, { eq }) => eq(a.id, appId) 
-      });
+      // 4. Update Application & Audit Trail
+      const app = await tx.query.applications.findFirst({ where: (a, { eq }) => eq(a.id, appId) });
       if (!app) throw new Error("Application record missing");
       
       const oldDetails = (app.details as any) || {};
-
-      // 4. Construct Audit Trail Entry
       const newEntry = {
         from: actingUser.name,
         role: "Divisional Deputy Director",
@@ -186,13 +217,11 @@ export async function approveToDirector(
         text: recommendationNote,
         timestamp: new Date().toISOString(),
         action: actionLabel,
-        // We preserve the staff report link in the DD's note for the Director's convenience
         referenceReport: isIRSD ? oldDetails.verificationReportUrl : oldDetails.technicalAssessmentUrl
       };
 
-      const dbTimestamp = sql`now()`;
+      const dbTimestamp = new Date();
 
-      // A. Update Application Data
       await tx.update(applications)
         .set({
           currentPoint: nextPoint,
@@ -200,22 +229,17 @@ export async function approveToDirector(
           details: { 
             ...oldDetails, 
             comments: [...(oldDetails.comments || []), newEntry],
-            // Track the last DD who endorsed it
             lastEndorsedBy: actingUser.id 
           },
           updatedAt: dbTimestamp
         })
         .where(eq(applications.id, appId));
 
-      // B. Close the current DD's QMS Clock
+      // 5. QMS Timing Management
       await tx.update(qmsTimelines)
         .set({ endTime: dbTimestamp })
-        .where(and(
-          eq(qmsTimelines.applicationId, appId), 
-          isNull(qmsTimelines.endTime)
-        ));
+        .where(and(eq(qmsTimelines.applicationId, appId), isNull(qmsTimelines.endTime)));
 
-      // C. Open the Next Stage Clock
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: nextPoint,
@@ -224,10 +248,9 @@ export async function approveToDirector(
         startTime: dbTimestamp,
       });
 
-      // D. Refresh Cache for all relevant dashboards
+      // 6. Refresh UI
       revalidatePath('/dashboard/ddd');
       revalidatePath('/dashboard/director'); 
-      revalidatePath('/dashboard/registry');
       
       return { success: true };
     });

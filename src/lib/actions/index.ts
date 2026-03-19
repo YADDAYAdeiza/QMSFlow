@@ -9,11 +9,10 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { lodFormSchema } from "@/lib/validations";
 
-// HELPER: Now used to look up the Category selected in the dropdown
 const RISK_CATEGORIES: Record<string, { complexity: number, criticality: number }> = {
   "VACCINES / BIOLOGICALS": { complexity: 3, criticality: 3 },
   "STERILE INJECTABLES": { complexity: 3, criticality: 2 },
-  "POWDER BETA-LACTAMS": { complexity: 2, criticality: 3 },
+  "POWDER BETA-LATAMS": { complexity: 2, criticality: 3 },
   "TABLETS (GENERAL)": { complexity: 1, criticality: 2 },
   "MULTIVITAMINS": { complexity: 1, criticality: 1 },
 };
@@ -52,12 +51,10 @@ export async function submitLODApplication(rawData: any) {
       // 2. Links & Products
       await tx.insert(companyAffiliations).values({ localCompanyId: localComp.id, foreignFactoryId: foreignFact.id }).onConflictDoNothing();
 
-      // Calculate Max Risk Scores
       let maxComp = 1;
       let maxCrit = 1;
 
       for (const lineEntry of data.productLines) {
-        // IMPORTANT: We now check lineEntry.riskCategory instead of lineName
         const categoryKey = normalize(lineEntry.riskCategory);
         const risk = RISK_CATEGORIES[categoryKey];
         
@@ -66,13 +63,9 @@ export async function submitLODApplication(rawData: any) {
           maxCrit = Math.max(maxCrit, risk.criticality);
         }
 
-        // We still save the lineName to the database for the factory profile
         const cleanLineName = normalize(lineEntry.lineName);
         let [lineRec] = await tx.insert(productLines)
-          .values({ 
-            companyId: foreignFact.id, 
-            name: cleanLineName 
-          })
+          .values({ companyId: foreignFact.id, name: cleanLineName })
           .onConflictDoUpdate({ 
             target: [productLines.companyId, productLines.name], 
             set: { name: cleanLineName } 
@@ -89,7 +82,24 @@ export async function submitLODApplication(rawData: any) {
         }
       }
 
-      // 3. Create Application
+      // --- NEW LOGIC: UNIFY LOD REMARKS INTO THE COMMENTS ARRAY ---
+      // We take the lodRemarks and transform it into the first formal audit entry.
+      const initialComment = {
+        from: "LOD INTAKE",
+        role: "Director General / Director",
+        text: data.lodRemarks || "Application submitted via LOD.",
+        round: 1,
+        action: "INTAKE_DIRECTIVE",
+        timestamp: new Date().toISOString()
+      };
+
+      // Prepare the details object with the unified comments array
+      const enhancedDetails = {
+        ...data,
+        comments: [initialComment] // This starts the trail
+      };
+
+      // 3. Create Application with enhancedDetails
       const [newApp] = await tx.insert(applications).values({
         applicationNumber: normalizedAppNumber,
         type: data.type,
@@ -97,7 +107,7 @@ export async function submitLODApplication(rawData: any) {
         foreignFactoryId: foreignFact.id,
         status: 'PENDING_DIRECTOR',
         currentPoint: 'Director Review',
-        details: data 
+        details: enhancedDetails // Unified array is now inside details
       }).returning();
 
       // 4. Create Pass 1 Risk Assessment (Inherent Risk)
@@ -110,7 +120,7 @@ export async function submitLODApplication(rawData: any) {
         complexityScore: maxComp,
         criticalityScore: maxCrit,
         intrinsicLevel: level,
-        status: 'PARTIAL' // Awaiting Pass 2 (Compliance)
+        status: 'PARTIAL'
       });
 
       // 5. Audit/Timeline
