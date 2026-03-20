@@ -4,7 +4,8 @@ import React, { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
-  History, UserPlus, Gavel, FileText, Eye, Zap, AlertCircle, ClipboardList
+  History, UserPlus, Gavel, FileText, Eye, Zap, AlertCircle, ClipboardList,
+  Upload, ExternalLink
 } from 'lucide-react';
 import { approveToDirector, assignToStaff } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
@@ -26,6 +27,9 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
   const complianceLevel = app?.complianceLevel;
   const findings = app?.findingsLedger || [];
   const summary = app?.complianceSummary || {};
+
+  // Evidence URL from the staff submission
+  const evidenceUrl = app?.evidenceUrl || appDetails?.evidenceUrl || "";
 
   const dossierUrl = appDetails?.poaUrl || "";
   const staffReportUrl = pdfUrl; 
@@ -81,7 +85,7 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
 
             <div className="flex items-center gap-4 pr-4">
               <div className="flex flex-col items-end">
-                <span className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">Baseline</span>
+                <span className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">Intrinsic Risk</span>
                 <div className={`px-3 py-1 rounded-full border text-[9px] font-bold uppercase ${getRiskStyles(intrinsicLevel)}`}>
                    {intrinsicLevel}
                 </div>
@@ -118,20 +122,32 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
               </span>
             </h3>
             <div className="space-y-3">
-              {findings.map((f: any) => (
-                <div key={f.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 group">
+              {findings.map((f: any, idx: number) => (
+                <div key={f.id || `finding-${idx}`} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 group">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-[8px] font-black uppercase text-slate-400 bg-white px-2 py-1 rounded shadow-sm">
                       {f.system}
                     </span>
-                    <span className={`text-[9px] font-black uppercase ${f.classification === 'Critical' ? 'text-rose-600' : 'text-amber-600'}`}>
-                      {f.classification}
+                    <span className={`text-[9px] font-black uppercase ${f.severity === 'Critical' ? 'text-rose-600' : 'text-amber-600'}`}>
+                      {f.severity || f.classification}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-700 font-medium italic leading-relaxed">"{f.text}"</p>
                 </div>
               ))}
             </div>
+
+            {/* RESTORED EVIDENCE LINK */}
+            {evidenceUrl && (
+              <a 
+                href={evidenceUrl} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="mt-6 flex items-center justify-center gap-2 w-full p-4 rounded-2xl border-2 border-dashed border-emerald-100 bg-emerald-50/50 text-emerald-600 text-[9px] font-black uppercase hover:bg-emerald-50 transition-all"
+              >
+                <ExternalLink className="w-3 h-3" /> View Uploaded Evidence
+              </a>
+            )}
           </div>
         )}
 
@@ -142,7 +158,7 @@ export default function DeputyDirectorReviewClient({ app, staffList, pdfUrl, log
            </h3>
            <div className="space-y-4">
              {[...history].reverse().map((note: any, idx: number) => (
-               <div key={idx} className="group relative pl-6 border-l-2 border-slate-100 pb-2">
+               <div key={note.id || `note-${idx}`} className="group relative pl-6 border-l-2 border-slate-100 pb-2">
                   <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-4 border-slate-100" />
                   <div className="flex justify-between items-center mb-1 font-mono text-[8px] text-slate-400 uppercase font-black">
                     <span>{note?.from}</span>

@@ -16,7 +16,7 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
   const [isOpen, setIsOpen] = useState(false);
   if (!complianceRisk) return null;
 
-  const { summary, isSra, findings, intrinsicLevel, overallRating } = complianceRisk;
+  const { summary, isSra, findings = [], intrinsicLevel, overallRating } = complianceRisk;
   
   const getRatingColor = (level: string) => {
     const l = level?.toUpperCase();
@@ -25,12 +25,10 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
     return "bg-rose-600 text-white border-rose-400";
   };
 
-  // Spring physics curve
   const springTransition = { transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
 
   return (
     <div className="space-y-4 mb-8">
-      {/* 1. EXECUTIVE HERO: THE GRADE */}
       <div className="w-full">
         <div className={`p-8 rounded-[2.5rem] border-4 shadow-2xl flex items-center justify-between transition-all duration-500 ${getRatingColor(overallRating)}`}>
           <div>
@@ -38,15 +36,14 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
             <h2 className="text-6xl font-black tracking-tighter uppercase italic leading-none">{overallRating}</h2>
           </div>
           <div className="text-right">
-             <div className="bg-white/20 backdrop-blur-md px-5 py-3 rounded-2xl inline-block border border-white/30">
+             {/* <div className="bg-white/20 backdrop-blur-md px-5 py-3 rounded-2xl inline-block border border-white/30">
                 <p className="text-[8px] font-black uppercase tracking-[0.1em] text-white/90 leading-none mb-1">Authorization Tier</p>
                 <p className="text-sm font-black uppercase italic leading-none tracking-tight text-white">Full Approval</p>
-             </div>
+             </div> */}
           </div>
         </div>
       </div>
 
-      {/* 2. TECHNICAL DISCLOSURE - SPRINGY TOGGLE */}
       <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
         <button 
           onClick={() => setIsOpen(!isOpen)}
@@ -65,7 +62,6 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
           <div className="overflow-hidden">
             <div className="p-8 pt-2 space-y-8 border-t border-slate-50">
               
-              {/* SPLIT-CARD: INTRINSIC BADGE & SRA STATUS */}
               <div className="flex gap-3 h-32">
                 <div className="w-1/4 bg-slate-900 rounded-[2rem] flex flex-col items-center justify-center p-4 text-center border-b-4 border-blue-500 shadow-xl shadow-slate-900/10">
                   <Activity className="w-5 h-5 text-blue-400 mb-2" />
@@ -112,10 +108,10 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-slate-500">Observations Ledger</span>
                   </div>
                   <div className="space-y-2 max-h-[180px] overflow-y-auto pr-2 custom-scrollbar font-sans">
-                    {findings.map((f: string, i: number) => (
-                      <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-[11px] text-slate-600 italic leading-relaxed shadow-inner">
+                    {findings.map((f: any, i: number) => (
+                      <div key={f.id || `obs-${i}`} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-[11px] text-slate-600 italic leading-relaxed shadow-inner">
                         <span className="text-blue-500 font-black mr-2 uppercase">Obs {i+1}</span>
-                        {f}
+                        {typeof f === 'string' ? f : f.text}
                       </div>
                     ))}
                   </div>
@@ -138,7 +134,6 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
   const router = useRouter();
 
   const details = app.details || {};
-  const activeStream = stream || "VMD";
   const complianceRisk = app?.complianceRisk;
 
   const trail = useMemo(() => {
@@ -207,7 +202,9 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
           <div className="h-full w-full pt-4">
             {viewMode === 'draft' ? (
               <BlobProvider document={docConfig.component}>
-                {({ url, loading }) => loading ? <div className="h-full flex items-center justify-center font-black uppercase text-[10px] text-slate-400 italic">Compiling Executive Draft...</div> : <iframe src={`${url}#toolbar=0`} className="w-full h-full border-none" /> }
+                {({ url, loading }) => loading ? (
+                  <div className="h-full flex items-center justify-center font-black uppercase text-[10px] text-slate-400 italic">Compiling Executive Draft...</div>
+                ) : <iframe src={`${url}#toolbar=0`} className="w-full h-full border-none" /> }
               </BlobProvider>
             ) : <iframe src={`${pdfUrl}#toolbar=0`} className="w-full h-full border-none" /> }
           </div>
@@ -249,7 +246,8 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
           <div className="space-y-6">
             <h3 className="text-[11px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2">Full Audit Narrative</h3>
             {trail.map((note: any, idx: number) => (
-              <div key={idx} className="pl-6 border-l-2 border-slate-200 relative pb-4">
+              // FIX: Used note.timestamp or note.id if available, fallback to index
+              <div key={note.timestamp || `note-${idx}`} className="pl-6 border-l-2 border-slate-200 relative pb-4">
                 <div className="absolute -left-[5px] top-0 w-2 h-2 rounded-full bg-slate-300" />
                 <span className="text-[10px] font-black uppercase text-blue-600 tracking-tighter">
                   {note.roleDisplay}

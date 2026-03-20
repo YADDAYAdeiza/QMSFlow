@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { qmsTimelines, applications, users } from "@/db/schema";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, asc, and, isNull } from "drizzle-orm";
 import { supabase } from "@/lib/supabase";
 import QMSCountdown from "@/components/QMSCountdown";
 import ReviewSubmissionForm from "@/components/ReviewSubmissionForm";
@@ -18,10 +18,12 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
   const { division: pathDiv, id } = await params;
   const sParams = await searchParams;
 
-  const resolvedDivision = (sParams.division || pathDiv).toUpperCase();
   const applicationId = parseInt(id);
+  if (isNaN(applicationId)) return notFound();
 
-  // 1. Fetch Application & Risk Data
+  const resolvedDivision = (sParams.division || pathDiv).toUpperCase();
+
+  // 1. Fetch Application with Risk Data
   const appData = await db.query.applications.findFirst({
     where: eq(applications.id, applicationId),
     with: { riskAssessments: true }
@@ -32,17 +34,11 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
   const riskData = appData.riskAssessments?.[0] as any;
   const details = (appData.details as any) || {};
   
-  // 2. Source Compliance Data for the Form
-  const prevCompliance = riskData ? {
-    criticalCount: riskData.criticalDeficiencies || 0,
-    majorCount: riskData.majorDeficiencies || 0,
-    otherCount: riskData.otherDeficiencies || 0,
-    complianceLevel: riskData.complianceLevel
-  } : null;
+  // 2. Data Handshake: Extract the ledger directly from the details object
+  const prevFindings = details.findings_ledger || [];
+  const prevIsSra = details.is_sra || false;
 
-  const prevFindings = riskData?.findings || details.findings_ledger || [];
-
-  // 3. Resolve PDF URL (Documents bucket)
+  // 3. Resolve PDF URL from Supabase 'Documents' bucket
   const rawPath = details.poaUrl || details.dossierPath || details.reportUrl || ""; 
   let publicUrl = "";
   if (rawPath) {
@@ -54,7 +50,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
     }
   }
 
-  // 4. Access Control
+  // 4. Access Control Logic
   const isHubVetting = appData.currentPoint === "IRSD Staff Vetting";
   const staffIdToLookup = isHubVetting ? details.irsd_reviewer_id : details.staff_reviewer_id;
 
@@ -75,10 +71,11 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
     );
   }
 
-  // 5. QMS Timing
+  // 5. QMS Timing Logic
   const allSegments = await db.select().from(qmsTimelines).where(eq(qmsTimelines.applicationId, applicationId)).orderBy(asc(qmsTimelines.startTime));
-  const activeTask = allSegments.find(s => s.endTime === null && s.staffId === assignedUser.id);
-  if (!activeTask) return <div className="p-20 text-center font-black uppercase text-slate-300">Task Inactive</div>;
+  const activeTask = allSegments.find(s => isNull(s.endTime) && s.staffId === assignedUser.id);
+  
+  if (!activeTask) return <div className="p-20 text-center font-black uppercase text-slate-300 tracking-widest">Task Inactive</div>;
 
   const secondsUsed = allSegments
     .filter(s => s.staffId === assignedUser.id)
@@ -88,47 +85,44 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
+      {/* LEFT: PDF VIEWER */}
       <div className="w-2/3 h-full border-r border-slate-200 bg-slate-800 relative">
         <iframe src={`${publicUrl}#toolbar=0`} className="w-full h-full border-none" title="Dossier" />
       </div>
 
+      {/* RIGHT: VETTING FORM */}
       <div className="w-1/3 h-full flex flex-col bg-white overflow-y-auto">
         <div className="p-8 pb-32">
           
-          {/* HEADER SNAPSHOT */}
           <div className="mb-8 flex items-center justify-between bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
             <div className="flex flex-col">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Intrinsic</span>
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Intrinsic Risk</span>
               <div className="px-3 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-600 text-[9px] font-bold uppercase">
                 {riskData?.intrinsicLevel || "Low"}
               </div>
             </div>
             
-            {isHubVetting && (
-              <div className="flex flex-col items-end">
-                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Compliance</span>
-                <div className={`px-3 py-1 rounded-full border text-[9px] font-bold uppercase ${
-                  riskData?.complianceLevel === 'High' ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-emerald-50 border-emerald-200 text-emerald-600'
-                }`}>
-                  {riskData?.complianceLevel || "PENDING"}
-                </div>
+            <div className="flex flex-col items-end">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Current Status</span>
+              <div className="px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-blue-600 text-[9px] font-bold uppercase">
+                {appData.status?.replace(/_/g, ' ')}
               </div>
-            )}
+            </div>
           </div>
 
           <ReviewSubmissionForm 
             appId={applicationId} 
-            division={resolvedDivision} 
             staffId={assignedUser.id} 
             staffName={assignedUser.name}
             comments={details.comments || []}
             isHubVetting={isHubVetting}
             riskId={riskData?.id}
-            previousCompliance={prevCompliance}
             previousFindings={prevFindings}
+            previousIsSra={prevIsSra}
           />
         </div>
         
+        {/* STICKY QMS TIMER */}
         <div className="mt-auto p-6 border-t border-slate-100 bg-white sticky bottom-0 z-20">
           <QMSCountdown startTime={activeTask.startTime!} initialRemainingSeconds={remaining} />
         </div>

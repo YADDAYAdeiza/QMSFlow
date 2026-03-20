@@ -1,243 +1,262 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { 
-  ShieldAlert, 
-  CheckCircle2, 
-  History, 
-  FileText, 
-  ExternalLink, 
-  Loader2, 
-  AlertTriangle,
-  Plus,
-  Trash2
+  ShieldAlert, CheckCircle2, History, FileText, 
+  Loader2, Plus, Trash2, Upload, FileCheck 
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase"; // Ensure this is imported
 
-interface ReviewSubmissionFormProps {
-  appId: number;
-  division: string;
-  staffId: string;
-  staffName: string;
-  comments: any[];
-  isHubVetting: boolean;
-  riskId?: number;
-  previousCompliance?: any; // { criticalCount, majorCount, otherCount }
-  previousFindings?: any[];
-}
+const GMP_SYSTEMS = [
+  "Quality Management System",
+  "Production System",
+  "Facilities & Equipment System",
+  "Laboratory Control System",
+  "Materials System",
+  "Packaging & Labeling System"
+];
+
+const SEVERITIES = ["Critical", "Major", "Other"];
 
 export default function ReviewSubmissionForm({
-  appId,
-  staffId,
-  staffName,
-  comments,
-  isHubVetting,
-  riskId,
-  previousCompliance,
-  previousFindings = []
-}: ReviewSubmissionFormProps) {
+  appId, staffId, staffName, comments, isHubVetting, riskId, 
+  previousFindings = [], 
+  previousIsSra = false 
+}: any) {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
-  const [isSra, setIsSra] = useState(false);
+  
+  // 1. State Management
+  const [isSra, setIsSra] = useState(previousIsSra);
   const [justification, setJustification] = useState("");
-  const [reportUrl, setReportUrl] = useState("");
-  
-  // Deficiency State
-  const [critical, setCritical] = useState(previousCompliance?.criticalCount || 0);
-  const [major, setMajor] = useState(previousCompliance?.majorCount || 0);
-  const [other, setOther] = useState(previousCompliance?.otherCount || 0);
-  
-  // Findings Ledger (JSONB source)
-  const [findings, setFindings] = useState<string[]>(
-    previousFindings.length > 0 ? previousFindings : [""]
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [findings, setFindings] = useState<Array<{ system: string; severity: string; text: string }>>(
+    previousFindings.length > 0 
+      ? previousFindings 
+      : [{ system: GMP_SYSTEMS[0], severity: "Other", text: "" }]
   );
 
-  const addFinding = () => setFindings([...findings, ""]);
-  const updateFinding = (val: string, i: number) => {
-    const newFindings = [...findings];
-    newFindings[i] = val;
-    setFindings(newFindings);
+  // 2. Tallies
+  const counts = {
+    critical: findings.filter(f => f.severity === "Critical" && f.text.trim()).length,
+    major: findings.filter(f => f.severity === "Major" && f.text.trim()).length,
+    other: findings.filter(f => f.severity === "Other" && f.text.trim()).length,
   };
-  const removeFinding = (i: number) => setFindings(findings.filter((_, idx) => idx !== i));
+
+  const addFinding = () => setFindings([...findings, { system: GMP_SYSTEMS[0], severity: "Other", text: "" }]);
+  
+  const updateFinding = (index: number, field: string, value: string) => {
+    const next = [...findings];
+    (next[index] as any)[field] = value;
+    setFindings(next);
+  };
+
+  const removeFinding = (index: number) => setFindings(findings.filter((_, i) => i !== index));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!justification || !reportUrl) return alert("Please provide justification and report URL");
-
     setLoading(true);
-    const complianceData = {
-      riskId,
-      isSra,
-      summary: { criticalCount: critical, majorCount: major, otherCount: other },
-      findings: findings.filter(f => f.trim() !== "")
-    };
 
-    const res = await submitToDDD(appId, staffId, justification, isHubVetting, reportUrl, complianceData);
-    
-    if (res.success) {
-      router.push('/dashboard/staff');
-      router.refresh();
-    } else {
-      alert(res.error);
+    let uploadedUrl = "";
+
+    try {
+      // 3. Handle Supabase File Upload
+      if (evidenceFile) {
+        const fileExt = evidenceFile.name.split('.').pop();
+        const fileName = `${appId}_evidence_${Date.now()}.${fileExt}`;
+        const filePath = `verification_evidence/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('documents') // Matches your bucket name
+          .upload(filePath, evidenceFile);
+
+        if (uploadError) throw uploadError;
+
+        const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
+        uploadedUrl = data.publicUrl;
+      }
+
+      // 4. Prepare Compliance Meta
+      const complianceData = {
+        riskId,
+        isSra,
+        summary: { 
+          criticalCount: counts.critical, 
+          majorCount: counts.major, 
+          otherCount: counts.other 
+        },
+        findings: findings.filter(f => f.text.trim() !== ""),
+        evidenceUrl: uploadedUrl // Attach the new URL here
+      };
+
+      // 5. Submit Action
+      const res = await submitToDDD(appId, staffId, justification, isHubVetting, uploadedUrl, complianceData);
+      
+      if (res.success) {
+        router.push('/dashboard/staff');
+        router.refresh();
+      } else {
+        throw new Error(res.error);
+      }
+    } catch (err: any) {
+      alert(err.message || "Submission failed");
+    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-12">
+    <form onSubmit={handleSubmit} className="space-y-10">
       
-      {/* 1. COMPLIANCE ENGINE SECTION */}
+      {/* 1. DEFICIENCY LEDGER SECTION */}
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-slate-900" />
-            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-900">Compliance Assessment</h4>
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-900">Deficiency Ledger</h4>
           </div>
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <span className="text-[9px] font-bold text-slate-400 group-hover:text-blue-600 transition-colors uppercase">SRA Origin?</span>
+          <label className="flex items-center gap-2 cursor-pointer">
             <input 
               type="checkbox" 
               checked={isSra} 
-              onChange={(e) => setIsSra(e.target.checked)}
-              className="w-3 h-3 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              onChange={(e) => setIsSra(e.target.checked)} 
+              className="rounded border-slate-300 text-blue-600 w-3 h-3" 
             />
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">SRA Origin</span>
           </label>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: "Critical", val: critical, set: setCritical, color: "rose" },
-            { label: "Major", val: major, set: setMajor, color: "amber" },
-            { label: "Other", val: other, set: setOther, color: "slate" }
-          ].map((item) => (
-            <div key={item.label} className={`p-4 rounded-3xl border border-${item.color}-100 bg-${item.color}-50/30`}>
-              <span className={`text-[8px] font-black uppercase text-${item.color}-500 mb-2 block tracking-tighter`}>{item.label}</span>
-              <input 
-                type="number" 
-                value={item.val} 
-                onChange={(e) => item.set(parseInt(e.target.value) || 0)}
-                className="w-full bg-transparent text-xl font-black text-slate-900 focus:outline-none"
-              />
-            </div>
-          ))}
-        </div>
-
-        {/* FINDINGS LEDGER */}
-        <div className="space-y-3">
-          <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Deficiency Ledger</span>
+        <div className="space-y-4">
           {findings.map((f, i) => (
-            <div key={i} className="flex gap-2 items-start">
+            <div key={i} className="p-5 rounded-[2rem] border border-slate-100 bg-white shadow-sm space-y-3 relative transition-all hover:border-blue-100">
+              <div className="flex flex-wrap gap-2 items-center">
+                <select 
+                  value={f.system} 
+                  onChange={(e) => updateFinding(i, 'system', e.target.value)} 
+                  className="bg-slate-50 border-none rounded-full px-3 py-1 text-[9px] font-bold text-slate-600 outline-none"
+                >
+                  {GMP_SYSTEMS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                
+                <select 
+                  value={f.severity} 
+                  onChange={(e) => updateFinding(i, 'severity', e.target.value)}
+                  className={`border-none rounded-full px-3 py-1 text-[9px] font-black uppercase outline-none transition-colors ${
+                    f.severity === 'Critical' ? 'bg-rose-500 text-white' : 
+                    f.severity === 'Major' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                
+                <button type="button" onClick={() => removeFinding(i)} className="ml-auto text-slate-200 hover:text-rose-500 transition-colors">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               <textarea 
-                value={f}
-                onChange={(e) => updateFinding(e.target.value, i)}
-                placeholder="Describe deficiency..."
-                className="flex-1 p-4 rounded-2xl border border-slate-100 text-[11px] text-slate-600 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none min-h-[60px] transition-all"
+                value={f.text} 
+                onChange={(e) => updateFinding(i, 'text', e.target.value)} 
+                placeholder="Describe specific observation..." 
+                className="w-full bg-transparent text-[11px] text-slate-600 italic focus:outline-none min-h-[50px] resize-none" 
               />
-              <button type="button" onClick={() => removeFinding(i)} className="p-2 text-slate-300 hover:text-rose-500 mt-2">
-                <Trash2 className="w-3 h-3" />
-              </button>
             </div>
           ))}
+
           <button 
             type="button" 
             onClick={addFinding}
-            className="w-full py-3 rounded-2xl border-2 border-dashed border-slate-100 text-[9px] font-black text-slate-400 hover:border-blue-200 hover:text-blue-500 transition-all uppercase flex items-center justify-center gap-2"
+            className="w-full py-4 rounded-[2rem] border-2 border-dashed border-slate-100 text-[9px] font-black text-slate-400 hover:text-blue-500 hover:border-blue-100 transition-all uppercase flex items-center justify-center gap-2"
           >
             <Plus className="w-3 h-3" /> Add Observation
           </button>
         </div>
+
+        <div className="flex gap-4 px-2 pt-2 border-t border-slate-50">
+           <div className="text-[9px] font-black uppercase"><span className="text-rose-500 mr-1">{counts.critical}</span> Critical</div>
+           <div className="text-[9px] font-black uppercase"><span className="text-amber-500 mr-1">{counts.major}</span> Major</div>
+           <div className="text-[9px] font-black uppercase"><span className="text-slate-400 mr-1">{counts.other}</span> Other</div>
+        </div>
       </div>
 
-      {/* 2. SUBMISSION SECTION */}
+      {/* NEW: EVIDENCE UPLOAD SECTION */}
       <div className="space-y-4">
-        <div className="flex items-center gap-2 px-2">
-          <FileText className="w-4 h-4 text-slate-400" />
-          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Final Recommendation</h4>
+        <div className="flex items-center gap-2 px-2 text-slate-400">
+          <Upload className="w-4 h-4" />
+          <h4 className="text-[10px] font-black uppercase tracking-widest">Verification Evidence</h4>
+        </div>
+        
+        <div 
+          onClick={() => fileInputRef.current?.click()}
+          className={`p-8 rounded-[2.5rem] border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-2 ${
+            evidenceFile ? "border-emerald-200 bg-emerald-50" : "border-slate-100 bg-slate-50 hover:border-blue-200"
+          }`}
+        >
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)}
+            className="hidden" 
+            accept=".pdf,.jpg,.png"
+          />
+          {evidenceFile ? (
+            <>
+              <FileCheck className="w-6 h-6 text-emerald-500" />
+              <span className="text-[10px] font-bold text-emerald-600 uppercase">{evidenceFile.name}</span>
+            </>
+          ) : (
+            <>
+              <Upload className="w-6 h-6 text-slate-300" />
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Upload Supporting Document</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 2. REMARKS & SUBMIT */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 px-2 text-slate-400">
+          <FileText className="w-4 h-4" />
+          <h4 className="text-[10px] font-black uppercase tracking-widest">Executive Summary</h4>
         </div>
         
         <textarea 
           required
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
-          placeholder="Enter your final assessment notes for the Deputy Director..."
-          className="w-full p-6 rounded-[2.5rem] border border-slate-200 text-xs text-slate-600 focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 outline-none min-h-[150px] transition-all shadow-sm"
-        />
-
-        <input 
-          required
-          type="text"
-          value={reportUrl}
-          onChange={(e) => setReportUrl(e.target.value)}
-          placeholder="Paste Assessment Report URL (Sharepoint/Cloud)"
-          className="w-full p-5 rounded-full border border-slate-200 text-[10px] text-slate-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+          placeholder="Final assessment summary for the Divisional Deputy Director..."
+          className="w-full p-6 rounded-[2.5rem] border border-slate-200 text-xs text-slate-600 min-h-[150px] shadow-sm focus:ring-4 focus:ring-blue-500/5 outline-none transition-all"
         />
 
         <button 
           disabled={loading}
           type="submit"
-          className="w-full p-5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em] hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full p-5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em] hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-          {isHubVetting ? "Submit Hub Vetting" : "Return to Deputy Director"}
+          SUBMIT TO {isHubVetting ? "HUB" : "DDD"}
         </button>
       </div>
 
-      {/* 3. AUDIT TRAIL / SNAPSHOT HISTORY */}
-      <div className="pt-8 border-t border-slate-100 space-y-6">
-        <div className="flex items-center gap-2 px-2">
-          <History className="w-4 h-4 text-slate-400" />
-          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Application Narrative</h4>
+      {/* 3. AUDIT TRAIL */}
+      <div className="pt-8 border-t border-slate-100 space-y-6 opacity-60">
+        <div className="flex items-center gap-2 px-2 text-slate-400">
+          <History className="w-4 h-4" />
+          <h4 className="text-[10px] font-black uppercase tracking-widest">Application Narrative</h4>
         </div>
-        
-        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-          {comments && comments.length > 0 ? (
-            comments.slice().reverse().map((c: any, i: number) => (
-              <div key={i} className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 relative group transition-all hover:bg-white hover:shadow-md">
-                
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex flex-col">
-                    <span className="text-[9px] font-black uppercase text-blue-600 tracking-tighter">{c.from}</span>
-                    <span className="text-[7px] font-bold text-slate-300 uppercase">{c.role} • {c.division}</span>
-                  </div>
-                  <span className="text-[8px] font-mono text-slate-400">
-                    {c.timestamp ? new Date(c.timestamp).toLocaleDateString() : 'N/A'}
-                  </span>
-                </div>
-
-                {/* SNAPSHOT BADGES */}
-                {c.complianceSnapshot && (
-                  <div className="flex flex-wrap gap-1.5 mb-3">
-                    {c.complianceSnapshot.critical > 0 && (
-                      <span className="px-2 py-0.5 rounded-md bg-rose-500 text-[7px] font-black text-white uppercase">
-                        {c.complianceSnapshot.critical} Critical
-                      </span>
-                    )}
-                    {c.complianceSnapshot.major > 0 && (
-                      <span className="px-2 py-0.5 rounded-md bg-amber-500 text-[7px] font-black text-slate-900 uppercase">
-                        {c.complianceSnapshot.major} Major
-                      </span>
-                    )}
-                    {c.complianceSnapshot.isSra && (
-                      <span className="px-2 py-0.5 rounded-md bg-blue-600 text-[7px] font-black text-white uppercase">SRA</span>
-                    )}
-                  </div>
-                )}
-
-                <p className="text-[11px] text-slate-600 italic leading-relaxed">"{c.text}"</p>
-                
-                {c.attachmentUrl && (
-                  <a href={c.attachmentUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1.5 text-[8px] font-black text-blue-500 hover:text-blue-700 uppercase tracking-tighter">
-                    <ExternalLink className="w-3 h-3" /> View Document
-                  </a>
-                )}
+        <div className="space-y-4">
+          {comments?.slice().reverse().map((c: any, i: number) => (
+            <div key={i} className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[9px] font-black uppercase text-blue-600 tracking-tighter">{c.from}</span>
+                <span className="text-[8px] font-mono text-slate-400">{new Date(c.timestamp).toLocaleDateString()}</span>
               </div>
-            ))
-          ) : (
-            <div className="text-center py-10 opacity-30">
-              <p className="text-[9px] font-black uppercase tracking-widest">No history recorded</p>
+              <p className="text-[11px] text-slate-600 italic leading-relaxed">"{c.text}"</p>
             </div>
-          )}
+          ))}
         </div>
       </div>
     </form>
