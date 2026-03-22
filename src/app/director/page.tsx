@@ -6,7 +6,6 @@ import { eq, and, isNull, sql } from "drizzle-orm";
 import QMSCountdown from "@/components/QMSCountdown";
 import AssignToDDDButton from "@/components/AssignToDDDButton"; 
 import DossierLink from "@/components/DossierLink"; 
-// Added Factory and Landmark for icons
 import { Inbox, ShieldAlert, CheckCircle2, ClipboardList, Factory, Landmark } from "lucide-react";
 import Link from "next/link";
 
@@ -16,11 +15,12 @@ export default async function DirectorPage({
   searchParams: Promise<{ view?: string }> 
 }) {
   const { view } = await searchParams;
-  const currentView = (await view) === "final" ? "Director Final Review" : "Director Review";
+  const currentView = view === "final" ? "Director Final Review" : "Director Review";
 
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
+  // Fetch available Divisional Deputy Directors
   const availableHeads = await db
     .select({
       id: users.id,
@@ -46,6 +46,7 @@ export default async function DirectorPage({
         isNull(qmsTimelines.endTime)
     ));
 
+  // QMS Limit: 48 Hours for Director Point
   const QMS_LIMIT_SECONDS = 48 * 3600;
 
   return (
@@ -88,14 +89,15 @@ export default async function DirectorPage({
           const savedUrl = details?.poaUrl || details?.inspectionReportUrl;
           
           /**
-           * ✅ TYPE CAPTURE LOGIC
-           * Determines if it is a Foreign Inspection Review or a Local Facility Verification
+           * ✅ ROUND 2 DETECTION
+           * Identifying if this is a Foreign Compliance Review
            */
-          const isInspectionReview = !!details?.inspectionReportUrl;
-          const appTypeLabel = isInspectionReview ? "Inspection Report Review (Foreign)" : "Facility Verification";
+          const isInspectionReview = details?.type === "Inspection Report Review (Foreign)" || !!details?.inspectionReportUrl;
+          const appTypeLabel = isInspectionReview ? "Compliance Review (Foreign)" : "Facility Verification (Local)";
 
-          const lodSuggestedDiv = details?.assignedDivisions?.[0] || "VMD";
-          const productName = details?.products?.[0] || "Dossier under review";
+          const firstProduct = details?.productLines?.[0]?.products?.[0]?.name || "Product info pending";
+          const lodSuggestedDiv = details?.divisions?.[0] || "VMD";
+          const manufacturer = details?.facilityName || "Unspecified Site";
 
           return (
             <div key={app.id} className="p-6 bg-white rounded-[2.5rem] shadow-sm border-2 border-slate-100 hover:border-blue-300 transition-all flex justify-between items-center group">
@@ -105,25 +107,32 @@ export default async function DirectorPage({
                       #{app.nr}
                     </p>
                     
-                    {/* ✅ TYPE BADGE: Visual indicator for the Director */}
                     <span className={`flex items-center gap-1.5 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-tighter ${
-                      isInspectionReview ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-700'
+                      isInspectionReview ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-blue-50 text-blue-700 border border-blue-100'
                     }`}>
                       {isInspectionReview ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
                       {appTypeLabel}
                     </span>
 
                     {remaining < 14400 && ( 
-                        <span className="flex items-center gap-1 text-[9px] font-black bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full uppercase italic">
+                        <span className="flex items-center gap-1 text-[9px] font-black bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full uppercase italic animate-pulse">
                             <ShieldAlert className="w-3 h-3" /> Priority
                         </span>
                     )}
                 </div>
-                <div className="flex flex-col mt-1">
-                   <span className="text-[11px] text-slate-700 font-bold uppercase tracking-tight italic">{productName}</span>
-                   <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest mt-0.5">
-                     LOD Route: {lodSuggestedDiv} | Manufacturer: {details?.factory_name || "N/A"}
-                   </span>
+
+                <div className="flex flex-col mt-2">
+                    <span className="text-[12px] text-slate-800 font-extrabold uppercase tracking-tight italic">
+                     {firstProduct}
+                    </span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[9px] bg-slate-100 text-slate-500 font-black px-2 py-0.5 rounded uppercase">
+                        {lodSuggestedDiv}
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">
+                        Site: {manufacturer}
+                      </span>
+                    </div>
                 </div>
               </div>
 
@@ -134,16 +143,18 @@ export default async function DirectorPage({
 
                 <div className="flex items-center gap-2">
                   <DossierLink url={savedUrl} />
+                  
                   {currentView === "Director Review" ? (
                     <AssignToDDDButton 
                       appId={app.id} 
                       defaultDivision={lodSuggestedDiv} 
                       availableHeads={availableHeads as any}
+                      isCompliance={isInspectionReview} // Trigger Round 2 UI state
                     />
                   ) : (
                     <Link 
                       href={`/dashboard/director/review/${app.id}`} 
-                      className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase shadow-lg flex items-center gap-2 hover:bg-emerald-700 transition-colors"
+                      className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase shadow-lg flex items-center gap-2 hover:bg-emerald-700 transition-all"
                     >
                       Final Sign-off <CheckCircle2 className="w-4 h-4" />
                     </Link>
@@ -156,7 +167,7 @@ export default async function DirectorPage({
 
         {inbox.length === 0 && (
           <div className="p-32 text-center bg-slate-100/30 rounded-[3rem] border-2 border-dashed border-slate-200">
-            <p className="text-slate-400 font-bold italic uppercase text-xs tracking-[0.3em]">
+            <p className="text-slate-400 font-bold italic uppercase text-[10px] tracking-[0.3em]">
               Clean Desk: No {currentView === 'Director Review' ? 'New Reviews' : 'Pending Approvals'}
             </p>
           </div>

@@ -9,7 +9,7 @@ import {calculateORR} from '@/lib/actions/riskEngine'
 /**
  * Director -> DD: Initial Assignment
  * Moves point to Technical DD Review
- */
+*/
 // @/lib/actions/director.ts
 
 // export async function assignToDDD(
@@ -87,6 +87,15 @@ import {calculateORR} from '@/lib/actions/riskEngine'
  * Moves application from Director to the Technical DD
  * Handles the QMS Handover Clock and updates JSONB details.
  */
+
+/**
+ * Moves application from Director to the Technical DD (Divisional Deputy Director)
+ * Handles the QMS Handover Clock and updates JSONB details for both Round 1 & 2.
+ */
+/**
+ * Moves application from Director to the Technical DD
+ * Handles the QMS Handover Clock and updates JSONB details for Round 1 & Round 2.
+ */
 export async function assignToDDD(
   appId: number, 
   divisions: string[], 
@@ -96,18 +105,26 @@ export async function assignToDDD(
   try {
     return await db.transaction(async (tx) => {
       
+      // 1. Fetch current application to detect context (Round 1 vs Round 2)
+      const currentApp = await tx.query.applications.findFirst({
+        where: eq(applications.id, appId)
+      });
+
+      if (!currentApp) throw new Error("Application not found");
+
+      const isRound2 = currentApp.type === "Inspection Report Review (Foreign)";
+      
       const directorMinute = {
         from: "Director",
         role: "Director",
         text: comment,
-        round: 1,
-        action: "TECHNICAL_DIRECTION",
+        round: isRound2 ? 2 : 1,
+        action: isRound2 ? "COMPLIANCE_REVIEW_DIRECTION" : "TECHNICAL_DIRECTION",
         division: divisions[0],
         timestamp: new Date().toISOString()
       };
 
-      // 1. Update Application Status and Metadata
-      // Restored point name to 'Technical DD Review'
+      // 2. Update Application Point and JSONB Details
       await tx.update(applications)
         .set({ 
           currentPoint: 'Technical DD Review',
@@ -129,8 +146,7 @@ export async function assignToDDD(
         })
         .where(eq(applications.id, appId));
 
-      // 2. STOP Director's Clock
-      // Targets the active 'Director Review' entry
+      // 3. Close Director's Timeline
       await tx.update(qmsTimelines)
         .set({ endTime: sql`now()` })
         .where(and(
@@ -139,7 +155,7 @@ export async function assignToDDD(
           isNull(qmsTimelines.endTime)
         ));
 
-      // 3. START Technical DD Review Clock
+      // 4. Start DD Review Timeline
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         staffId: headId || null, 
@@ -148,12 +164,11 @@ export async function assignToDDD(
         startTime: sql`now()`,
         details: {
           previousStep: 'Director Review',
-          actionRequested: 'Technical Review',
+          actionRequested: isRound2 ? 'Compliance Report Vetting' : 'Technical Review',
           handoverBy: 'Director'
         }
       });
 
-      // 4. Refresh Cache
       revalidatePath("/dashboard/director");
       revalidatePath("/dashboard/ddd"); 
       
@@ -170,6 +185,32 @@ export async function assignToDDD(
  * Final Clearance
  * Moves Point to COMPLETED
  */
+
+// Helper for Risk Matrix (Ensure this matches your logic)
+// function calculateORR(intrinsic: string, compliance: string) {
+//   const matrix: Record<string, Record<string, { rating: string; interval: number }>> = {
+//     High: {
+//       High: { rating: "A", interval: 18 },
+//       Medium: { rating: "B", interval: 12 },
+//       Low: { rating: "C", interval: 6 },
+//     },
+//     Medium: {
+//       High: { rating: "A", interval: 24 },
+//       Medium: { rating: "B", interval: 18 },
+//       Low: { rating: "C", interval: 12 },
+//     },
+//     Low: {
+//       High: { rating: "A", interval: 36 },
+//       Medium: { rating: "B", interval: 24 },
+//       Low: { rating: "C", interval: 18 },
+//     },
+//   };
+
+//   const i = intrinsic || "Medium";
+//   const c = compliance || "Medium";
+//   return matrix[i]?.[c] || { rating: "B", interval: 12 };
+// }
+
 export async function issueFinalClearance(
   appId: number, 
   remarks: string, 
@@ -179,31 +220,31 @@ export async function issueFinalClearance(
     return await db.transaction(async (tx) => {
       const dbNow = sql`now()`;
       
-      // 1. Fetch the application AND its current partial risk assessment
+      // 1. Fetch the application with relations if needed
       const app = await tx.query.applications.findFirst({
         where: eq(applications.id, appId),
       });
 
-      if (!app) throw new Error("Application not found");
-      const oldDetails = (app.details as any) || {};
+      if (!app) throw new Error("Application not found in database.");
+      
+      // Handle the JSONB details safely
+      const oldDetails = app.details || { comments: [], productLines: [] };
+      const currentComments = Array.isArray(oldDetails.comments) ? oldDetails.comments : [];
 
-      // 2. RISK ENGINE LOGIC: Calculate Final ORR and Inspection Date
+      // 2. RISK ENGINE LOGIC
       const currentRisk = await tx.query.riskAssessments.findFirst({
         where: eq(riskAssessments.applicationId, appId)
       });
 
       if (currentRisk && currentRisk.intrinsicLevel && currentRisk.complianceLevel) {
-        // Use your Matrix Logic
         const { rating, interval } = calculateORR(
-          currentRisk.intrinsicLevel as any, 
-          currentRisk.complianceLevel as any
+          currentRisk.intrinsicLevel, 
+          currentRisk.complianceLevel
         );
 
-        // Calculate Next Inspection Date based on your interval (months)
         const nextDate = new Date();
         nextDate.setMonth(nextDate.getMonth() + interval);
 
-        // Update the Risk Ledger to FINALIZED
         await tx.update(riskAssessments)
           .set({
             overallRiskRating: rating,
@@ -216,12 +257,12 @@ export async function issueFinalClearance(
 
       // 3. Update Application Status & Audit Narrative
       const finalEntry = {
-        from: "Director General",
+        from: "Dr. Mrs. Susan Yusuf",
         role: "Director",
         text: remarks,
         timestamp: new Date().toISOString(),
         action: "FINAL_CLEARANCE_ISSUED",
-        archive_path: storagePath
+        attachmentUrl: storagePath // mapping storagePath to the schema's attachmentUrl
       };
 
       await tx.update(applications)
@@ -232,13 +273,14 @@ export async function issueFinalClearance(
             ...oldDetails,
             archived_path: storagePath,
             final_approval_date: new Date().toISOString(),
-            comments: [...(oldDetails.comments || []), finalEntry]
+            comments: [...currentComments, finalEntry]
           },
           updatedAt: dbNow,
         })
         .where(eq(applications.id, appId));
 
       // 4. QMS Clock Management
+      // Stop Director Clock
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
@@ -247,6 +289,7 @@ export async function issueFinalClearance(
           isNull(qmsTimelines.endTime)
         ));
 
+      // Start Registry Clock
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: 'Registry Archival',
@@ -256,16 +299,14 @@ export async function issueFinalClearance(
 
       revalidatePath('/dashboard/director');
       revalidatePath('/dashboard/registry');
-      revalidatePath('/dashboard/risk'); // Important: Refresh the Risk Inventory
       
       return { success: true };
     });
   } catch (err: any) {
     console.error("CLEARANCE_ACTION_ERROR:", err);
-    return { success: false, error: err.message };
+    return { success: false, error: err.message || "Internal Server Error" };
   }
 }
-
 /**
  * Director -> DD or Staff: Return for Rework
  */

@@ -10,9 +10,15 @@ import FileUpload from './FileUpload';
 import { CompanySearch } from './CompanySearch';
 import { 
   Plus, Trash2, Globe, Building2, Save, Loader2, 
-  MessageSquare, Share2, X, ChevronDown, AlertCircle, ShieldAlert, Mail
+  MessageSquare, Share2, X, ChevronDown, Mail, RefreshCcw
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
+
+const CURRENT_USER = { 
+  id: "user_susan_yusuf", 
+  name: "Dr. Mrs. Susan Yusuf", 
+  role: "Specialist" 
+};
 
 const DIVISION_OPTIONS = ["VMD", "AFPD", "PAD", "IRSD"];
 
@@ -25,7 +31,7 @@ const RISK_CATEGORIES = [
 ];
 
 /**
- * Re-instated: The Creatable Searchable Dropdown for Lines and Products
+ * Robust CreatableSelect with click-outside detection and state sync
  */
 function CreatableSelect({ 
   value, 
@@ -73,7 +79,7 @@ function CreatableSelect({
         <span className={value ? "text-slate-900" : "text-slate-400"}>
           {value || placeholder}
         </span>
-        <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={cn("w-3 h-3 transition-transform", isOpen && "rotate-180")} />
       </div>
 
       {isOpen && (
@@ -112,292 +118,286 @@ function CreatableSelect({
   );
 }
 
-export default function LODEntryForm() {
+export default function LODEntryForm({ initialData, isUpdate = false }: { initialData?: any; isUpdate?: boolean }) {
   const router = useRouter();
   const [availableLines, setAvailableLines] = useState<any[]>([]);
-  const [submitError, setSubmitError] = useState<string | null>(null);
   
   const { 
     register, handleSubmit, watch, setValue, control, reset, 
-    formState: { isSubmitting, isSubmitSuccessful, errors } 
+    formState: { isSubmitting, errors } 
   } = useForm({
     resolver: zodResolver(lodFormSchema),
     defaultValues: {
-      appNumber: "", type: "Facility Verification", companyName: "", companyAddress: "", notificationEmail: "",
-      facilityName: "", facilityAddress: "", lodRemarks: "",
+      appNumber: "", 
+      type: "Facility Verification", 
+      companyName: "", 
+      companyAddress: "", 
+      notificationEmail: "",
+      facilityName: "", 
+      facilityAddress: "", 
+      lodRemarks: "",
       productLines: [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
-      divisions: ["VMD"], poaUrl: "", inspectionReportUrl: ""
+      divisions: ["VMD"], 
+      poaUrl: "", 
+      inspectionReportUrl: ""
     }
   });
 
   const { fields: lineFields, append: appendLine, remove: removeLine } = useFieldArray({ control, name: "productLines" });
-  const selectedType = watch("type");
-  const selectedDivs = watch("divisions");
-  const watchProductLines = watch("productLines");
 
-  const getInherentRisk = () => {
-    let maxComp = 1; let maxCrit = 1;
-    watchProductLines.forEach(l => {
-      const riskData = RISK_CATEGORIES.find(r => r.name === l.riskCategory);
-      if (riskData) {
-        maxComp = Math.max(maxComp, riskData.comp);
-        maxCrit = Math.max(maxCrit, riskData.crit);
+  // HANDSHAKE SYNC: Maps the flat data from getApplicationForEditing into the form
+  useEffect(() => {
+    if (initialData) {
+      reset({
+        ...initialData,
+        // specialist assessment should always start clean
+        lodRemarks: "", 
+        type: isUpdate ? "Inspection Report Review (Foreign)" : (initialData.type || "Facility Verification"),
+        // Ensure defaults if nested arrays are missing
+        productLines: initialData.productLines || [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
+        divisions: initialData.divisions || ["VMD"],
+      });
+
+      if (initialData.productLines) {
+        setAvailableLines(initialData.productLines);
       }
-    });
-    const score = maxComp * maxCrit;
-    if (score <= 2) return { label: "LOW", text: "text-emerald-600", border: "border-emerald-100" };
-    if (score <= 4) return { label: "MEDIUM", text: "text-amber-600", border: "border-amber-100" };
-    return { label: "HIGH", text: "text-rose-600", border: "border-rose-100" };
-  };
+    }
+  }, [initialData, reset, isUpdate]);
 
-  const currentRisk = getInherentRisk();
+  const watchType = watch("type");
+  const selectedDivs = watch("divisions") || [];
 
   const toggleDivision = (div: string) => {
-    const current = [...selectedDivs];
-    const updated = current.includes(div) 
-        ? (current.length > 1 ? current.filter(d => d !== div) : current)
-        : [...current, div];
-    setValue("divisions", updated);
+    const updated = selectedDivs.includes(div) 
+        ? (selectedDivs.length > 1 ? selectedDivs.filter(d => d !== div) : selectedDivs)
+        : [...selectedDivs, div];
+    setValue("divisions", updated, { shouldDirty: true, shouldValidate: true });
   };
 
   const onSubmit = async (data: any) => {
-    setSubmitError(null);
-    const result = await submitLODApplication(data);
+    const result = await submitLODApplication(
+        data, 
+        CURRENT_USER.id, 
+        CURRENT_USER.name,
+        CURRENT_USER.role
+    );
     if (result.success) {
+      router.push("/risk");
       router.refresh();
-    } else {
-      setSubmitError(result.error);
     }
   };
 
   return (
     <div className="max-w-4xl mx-auto pb-20">
-      {/* Visual Debugger for blocked forms */}
-      {Object.keys(errors).length > 0 && (
-        <div className="mb-6 p-6 bg-rose-50 border-2 border-rose-200 rounded-[2.5rem] shadow-sm animate-in slide-in-from-top-4">
-          <div className="flex items-center gap-2 mb-3 text-rose-600">
-            <AlertCircle className="w-5 h-5" />
-            <h4 className="text-[10px] font-black uppercase tracking-widest">Incomplete Fields Detected</h4>
-          </div>
-          <ul className="grid grid-cols-2 gap-2 text-[11px] font-bold text-rose-500">
-            {Object.entries(errors).map(([key, err]: any) => (
-              <li key={key} className="flex gap-2"><span>•</span> {err.message}</li>
-            ))}
-          </ul>
+      <form key={initialData?.id || 'new'} onSubmit={handleSubmit(onSubmit)} className="space-y-8 p-10 bg-white rounded-[3rem] shadow-2xl border border-slate-100">
+        
+        <div className="flex items-center justify-between mb-4">
+            <div className={cn(
+                "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2",
+                isUpdate ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+            )}>
+                {isUpdate ? <RefreshCcw className="w-3 h-3 animate-spin-slow" /> : <Plus className="w-3 h-3" />}
+                {isUpdate ? "Workflow Round 2: Compliance Review" : "Workflow Round 1: Initial Intake"}
+            </div>
         </div>
-      )}
 
-      {isSubmitSuccessful ? (
-        <div className="bg-emerald-50 border border-emerald-200 p-12 rounded-[3rem] text-center shadow-xl animate-in zoom-in-95">
-          <h3 className="text-2xl font-black text-emerald-900 uppercase italic">Application Submitted</h3>
-          <button onClick={() => { reset(); setAvailableLines([]); }} className="mt-6 px-10 py-4 bg-emerald-600 text-white rounded-full font-black text-[11px] uppercase tracking-widest hover:bg-emerald-700 transition-all">Process Another</button>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 p-10 bg-white rounded-[3rem] shadow-2xl border border-slate-100">
-          <header className="flex justify-between items-center border-b border-slate-100 pb-8">
-            <div>
-              <h2 className="text-4xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">LOD Intake</h2>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-2">Dossier Receipt & Initial Routing</p>
-            </div>
-            <div className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl border-2 transition-all", currentRisk.border)}>
-              <ShieldAlert className={cn("w-5 h-5", currentRisk.text)} />
-              <div className="flex flex-col">
-                <span className="text-[8px] font-black uppercase opacity-60 text-slate-400">Risk Assessment</span>
-                <span className={cn("text-sm font-black uppercase tracking-tighter", currentRisk.text)}>{currentRisk.label}</span>
-              </div>
-            </div>
-          </header>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-2">App Number</label>
-              <input {...register("appNumber")} className="bg-slate-50 p-5 rounded-[1.5rem] text-sm font-bold border-2 border-transparent focus:border-blue-500/20 uppercase outline-none" />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Category</label>
-              <select {...register("type")} className="bg-slate-50 p-5 rounded-[1.5rem] text-sm font-bold outline-none cursor-pointer">
-                <option value="Facility Verification">Facility Verification</option>
-                <option value="Inspection Report Review (Foreign)">Inspection Report Review (Foreign)</option>
-              </select>
-            </div>
+        <header className="flex justify-between items-center border-b border-slate-100 pb-8">
+          <div>
+            <h2 className="text-4xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">
+              {isUpdate ? "Compliance Review" : "LOD Intake"}
+            </h2>
+            <p className="text-[9px] font-bold uppercase text-slate-400 mt-2 tracking-widest">
+              Directorate of Veterinary Medicines and Allied Products
+            </p>
           </div>
+        </header>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
-              <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><Building2 className="w-4 h-4" /> Local Company</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2">App Number</label>
+            <input 
+              {...register("appNumber")} 
+              readOnly={isUpdate}
+              className={cn(
+                "bg-slate-50 p-5 rounded-[1.5rem] text-sm font-bold border-2 border-transparent focus:border-blue-500/20 uppercase outline-none",
+                isUpdate && "opacity-60 cursor-not-allowed"
+              )} 
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Review Type</label>
+            <select {...register("type")} className="bg-slate-50 p-5 rounded-[1.5rem] text-sm font-bold outline-none cursor-pointer">
+              <option value="Facility Verification">Facility Verification (Round 1)</option>
+              <option value="Inspection Report Review (Foreign)">Compliance Review (Round 2)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
+            <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><Building2 className="w-4 h-4" /> Local Applicant</h3>
+            {!isUpdate && (
               <CompanySearch 
                 category="LOCAL" 
                 onSelect={(company) => {
-                  setValue("companyName", company.name);
-                  setValue("companyAddress", company.address);
-                  if (company.email) setValue("notificationEmail", company.email);
+                  setValue("companyName", company.name, { shouldDirty: true });
+                  setValue("companyAddress", company.address, { shouldDirty: true });
+                  if (company.email) setValue("notificationEmail", company.email, { shouldDirty: true });
                 }}
               />
-              <input {...register("companyName")} placeholder="Company Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
-              <input {...register("companyAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
-                <input {...register("notificationEmail")} placeholder="Email Address" className="w-full p-4 pl-10 rounded-xl text-sm font-bold text-blue-600 shadow-sm border-none" />
-              </div>
+            )}
+            <input {...register("companyName")} placeholder="Company Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
+            <input {...register("companyAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
+              <input {...register("notificationEmail")} placeholder="Email Address" className="w-full p-4 pl-10 rounded-xl text-sm font-bold text-blue-600 shadow-sm border-none" />
             </div>
+          </div>
 
-            <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4">
-              <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2"><Globe className="w-4 h-4" /> Foreign Manufacturer</h3>
+          <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4">
+            <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2"><Globe className="w-4 h-4" /> Manufacturing Site</h3>
+            {!isUpdate && (
               <CompanySearch 
                 category="FOREIGN" 
                 onSelect={(factory) => {
-                  setValue("facilityName", factory.name);
-                  setValue("facilityAddress", factory.address);
+                  setValue("facilityName", factory.name, { shouldDirty: true });
+                  setValue("facilityAddress", factory.address, { shouldDirty: true });
                   setAvailableLines(factory.product_lines || []);
                 }}
               />
-              <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
-              <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
-              <FileUpload 
-                label={selectedType === "Facility Verification" ? "POA / Authorization" : "Inspection Report"}
-                onUploadComplete={(url) => setValue(selectedType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url)} 
-              />
-            </div>
+            )}
+            <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
+            <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
+            
+            <FileUpload 
+                label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"}
+                onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true })} 
+            />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex justify-between items-center px-4">
+            <h3 className="text-[11px] font-black text-slate-400 uppercase italic">Technical Scope</h3>
+            <button 
+              type="button" 
+              onClick={() => appendLine({ lineName: "", riskCategory: "", products: [{ name: "" }] })}
+              className="text-[10px] font-black text-blue-600 bg-blue-50 px-5 py-2 rounded-full hover:bg-blue-100 transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-3 h-3" /> ADD LINE
+            </button>
           </div>
 
-          {/* PRODUCT LINES - REVERTED TO SOPHISTICATED NESTED FIELD ARRAY */}
-          <div className="space-y-4">
-            <div className="flex justify-between items-center px-4">
-              <h3 className="text-[11px] font-black text-slate-400 uppercase italic">Product Line Scope</h3>
-              <button 
-                type="button" 
-                onClick={() => appendLine({ lineName: "", riskCategory: "", products: [{ name: "" }] })}
-                className="text-[10px] font-black text-blue-600 bg-blue-50 px-5 py-2 rounded-full hover:bg-blue-100 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-3 h-3" /> ADD LINE
+          {lineFields.map((line, index) => (
+            <div key={line.id} className="p-8 bg-white border border-slate-100 rounded-[3rem] relative shadow-sm group/line animate-in slide-in-from-right-4">
+              <button type="button" onClick={() => removeLine(index)} className="absolute top-8 right-8 p-2 text-slate-200 hover:text-rose-500 rounded-full transition-all">
+                <Trash2 className="w-4 h-4" />
               </button>
-            </div>
 
-            {lineFields.map((line, index) => {
-              const currentLineName = watchProductLines[index]?.lineName;
-              const lineData = availableLines.find(al => al.name === currentLineName);
-              const suggestedProducts = lineData?.products || [];
-
-              return (
-                <div key={line.id} className="p-8 bg-white border border-slate-100 rounded-[3rem] relative shadow-sm group/line animate-in slide-in-from-right-4">
-                  <button 
-                    type="button" 
-                    onClick={() => removeLine(index)} 
-                    className="absolute top-8 right-8 p-2 text-slate-200 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Creatable Select for Line Name */}
-                      <div className="space-y-2">
-                        <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Line Name</label>
-                        <Controller
-                          name={`productLines.${index}.lineName`}
-                          control={control}
-                          render={({ field }) => (
-                            <CreatableSelect 
-                              value={field.value}
-                              options={availableLines}
-                              onChange={field.onChange}
-                              placeholder="e.g. SVP Line"
-                              onSelectOption={(opt) => {
-                                setValue(`productLines.${index}.products`, opt.products.length > 0 ? opt.products.map((p: any) => ({ name: p.name })) : [{ name: "" }]);
-                              }}
-                            />
-                          )}
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Line Name</label>
+                    <Controller
+                      name={`productLines.${index}.lineName`}
+                      control={control}
+                      render={({ field }) => (
+                        <CreatableSelect 
+                          value={field.value}
+                          options={availableLines}
+                          onChange={field.onChange}
+                          placeholder="Select/Type Line..."
+                          onSelectOption={(opt) => {
+                            setValue(`productLines.${index}.products`, opt.products?.map((p: any) => ({ name: p.name })) || [{ name: "" }]);
+                          }}
                         />
-                      </div>
-
-                      {/* Risk Category Select */}
-                      <div className="space-y-2">
-                        <label className="text-[9px] font-black text-blue-400 uppercase ml-2">Risk Class</label>
-                        <select 
-                          {...register(`productLines.${index}.riskCategory`)}
-                          className="w-full bg-blue-50/50 p-4 rounded-xl text-[11px] font-bold uppercase outline-none border-2 border-transparent focus:border-blue-200 cursor-pointer shadow-sm"
-                        >
-                          <option value="">Select Category...</option>
-                          {RISK_CATEGORIES.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    
-                    <NestedProductArray 
-                      nestIndex={index} 
-                      control={control} 
-                      register={register} 
-                      suggestedProducts={suggestedProducts} 
+                      )}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-blue-400 uppercase ml-2">Risk Class</label>
+                    <select 
+                      {...register(`productLines.${index}.riskCategory`)}
+                      className="w-full bg-blue-50/50 p-4 rounded-xl text-[11px] font-bold uppercase outline-none border-2 border-transparent focus:border-blue-200 cursor-pointer shadow-sm"
+                    >
+                      <option value="">Select Category...</option>
+                      {RISK_CATEGORIES.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
+                    </select>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* DIVISIONS */}
-          <div className="p-8 bg-slate-900 rounded-[2.5rem] shadow-xl">
-            <h3 className="text-[11px] font-black text-white uppercase tracking-widest mb-6 flex items-center gap-2"><Share2 className="text-blue-400 w-5 h-5" /> Assign Divisions</h3>
-            <div className="flex flex-wrap gap-3">
-              {DIVISION_OPTIONS.map(div => (
-                <button 
-                  key={div} type="button" onClick={() => toggleDivision(div)}
-                  className={cn("px-8 py-3 rounded-2xl text-[11px] font-black border-2 transition-all", 
-                    selectedDivs.includes(div) ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
-                  )}
-                >
-                  {div}
-                </button>
-              ))}
+                
+                <NestedProductArray nestIndex={index} control={control} />
+              </div>
             </div>
-          </div>
+          ))}
+        </div>
 
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2"><MessageSquare className="w-3 h-3" /> LOD Remarks</label>
-            <textarea {...register("lodRemarks")} className="w-full p-6 bg-slate-50 rounded-[2rem] text-sm font-medium outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" rows={3} placeholder="Observations..." />
+        <div className="p-8 bg-slate-900 rounded-[2.5rem] shadow-xl">
+          <h3 className="text-[11px] font-black text-white uppercase tracking-widest mb-6 flex items-center gap-2"><Share2 className="text-blue-400 w-5 h-5" /> Target Units</h3>
+          <div className="flex flex-wrap gap-3">
+            {DIVISION_OPTIONS.map(div => (
+              <button 
+                key={div} type="button" onClick={() => toggleDivision(div)}
+                className={cn("px-8 py-3 rounded-2xl text-[11px] font-black border-2 transition-all", 
+                  selectedDivs.includes(div) ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
+                )}
+              >
+                {div}
+              </button>
+            ))}
           </div>
+        </div>
 
-          <button 
-            type="submit" disabled={isSubmitting} 
-            className="w-full py-8 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase text-[12px] tracking-[0.2em] flex items-center justify-center gap-4 hover:bg-blue-600 transition-all shadow-2xl disabled:opacity-50"
-          >
-            {isSubmitting ? <Loader2 className="animate-spin w-6 h-6" /> : <><Save className="w-5 h-5" /> Authorize & Route Application</>}
-          </button>
-        </form>
-      )}
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">
+            <MessageSquare className="w-3 h-3" /> 
+            {isUpdate ? "Technical Assessment Findings" : "Intake Directive"}
+          </label>
+          <textarea 
+            {...register("lodRemarks")} 
+            className="w-full p-6 bg-slate-50 rounded-[2rem] text-sm font-medium outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
+            rows={3} 
+            placeholder={isUpdate ? "Detail your technical vetting based on the report..." : "Add instructions for D(VMAP)..."} 
+          />
+        </div>
+
+        <button 
+          type="submit" disabled={isSubmitting} 
+          className="w-full py-8 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase text-[12px] tracking-[0.2em] flex items-center justify-center gap-4 hover:bg-blue-600 transition-all shadow-2xl disabled:opacity-50"
+        >
+          {isSubmitting ? <Loader2 className="animate-spin w-6 h-6" /> : <><Save className="w-5 h-5" /> {isUpdate ? "Forward to Director" : "Initiate Workflow"}</>}
+        </button>
+      </form>
     </div>
   );
 }
 
-function NestedProductArray({ nestIndex, control, suggestedProducts }: any) {
+function NestedProductArray({ nestIndex, control }: any) {
   const { fields, append, remove } = useFieldArray({ control, name: `productLines.${nestIndex}.products` });
-
   return (
     <div className="mt-4 space-y-2 border-t border-slate-50 pt-4">
-      <div className="flex justify-between items-center mb-2">
-        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Line Products</span>
-        <button type="button" onClick={() => append({ name: "" })} className="text-[9px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-colors">
+      <div className="flex justify-between items-center px-2 mb-2">
+        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Products</span>
+        <button type="button" onClick={() => append({ name: "" })} className="text-[9px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1">
           <Plus className="w-3 h-3" /> ADD PRODUCT
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {fields.map((item, k) => (
-          <div key={item.id} className="group flex items-center gap-2">
+          <div key={item.id} className="flex items-center gap-2">
             <Controller
               name={`productLines.${nestIndex}.products.${k}.name`}
               control={control}
               render={({ field }) => (
                 <CreatableSelect 
-                  value={field.value}
-                  options={suggestedProducts || []}
-                  onChange={field.onChange}
-                  placeholder="Select Product..."
+                  value={field.value} 
+                  onChange={field.onChange} 
+                  options={[]} 
+                  placeholder="Product Name..." 
                 />
               )}
             />
-            <button type="button" onClick={() => remove(k)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors">
-              <X className="w-4 h-4" />
-            </button>
+            <button type="button" onClick={() => remove(k)} className="p-2 text-slate-300 hover:text-rose-500"><X className="w-4 h-4" /></button>
           </div>
         ))}
       </div>

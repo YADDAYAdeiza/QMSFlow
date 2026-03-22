@@ -133,6 +133,10 @@ async function getDirectorId() {
   return director?.id || null;
 }
 
+
+// Assuming you have this utility for the final risk math
+// import { calculateORR } from "@/lib/utils/risk-engine"; 
+
 export async function approveToDirector(
   appId: number, 
   recommendationNote: string, 
@@ -140,55 +144,45 @@ export async function approveToDirector(
 ) {
   try {
     return await db.transaction(async (tx) => {
-      // 1. Identify Actor (DDD)
+      // 1. Identify Actor (The DDD performing the action)
       const actingUser = await tx.query.users.findFirst({ 
         where: (u, { eq }) => eq(u.id, loggedInUserId) 
       });
       if (!actingUser) throw new Error("Acting User not found");
 
+      // LOGIC: If the user is from IRSD, they are sending to the Director.
+      // If they are from VMD/AFPD etc, they are sending to the IRSD Hub.
       const isIRSD = actingUser.division === "IRSD";
-      const nextPoint = isIRSD ? "Director Final Review" : "IRSD Hub Clearance";
-      const actionLabel = isIRSD ? "ENDORSED_FOR_DIRECTOR_SIGN_OFF" : "TECHNICAL_CONCURRENCE_FORWARDED_TO_HUB";
-      const nextStatus = isIRSD ? "PENDING_DIRECTOR_APPROVAL" : "UNDER_HUB_CLEARANCE";
       
-      // 2. GRACEFUL ORR CALCULATION (Only for IRSD DD)
+      const nextPoint = isIRSD ? "Director Final Review" : "IRSD Hub Clearance";
+      const nextStatus = isIRSD ? "PENDING_DIRECTOR_APPROVAL" : "UNDER_HUB_CLEARANCE";
+      const actionLabel = isIRSD ? "ENDORSED_FOR_DIRECTOR_SIGN_OFF" : "TECHNICAL_CONCURRENCE_FORWARDED_TO_HUB";
+      
+      // 2. FINAL RISK FINALIZATION (Only for IRSD DD)
       if (isIRSD) {
-        try {
-          const riskRecord = await tx.query.riskAssessments.findFirst({
-            where: (ra, { eq }) => eq(ra.applicationId, appId)
-          });
+        const riskRecord = await tx.query.riskAssessments.findFirst({
+          where: (ra, { eq }) => eq(ra.applicationId, appId)
+        });
 
-          // Graceful check: Only calculate if the data is actually there
-          if (riskRecord?.intrinsicLevel && riskRecord?.complianceLevel) {
-            const { rating, interval } = calculateORR(
-              riskRecord.intrinsicLevel as any, 
-              riskRecord.complianceLevel as any
-            );
+        // If we have both levels, bake the final score
+        if (riskRecord?.intrinsicLevel && riskRecord?.complianceLevel) {
+          // Replace this with your actual ORR calculation logic
+          const rating = riskRecord.intrinsicLevel === 'High' || riskRecord.complianceLevel === 'High' ? 'High' : 'Medium';
+          const interval = rating === 'High' ? 6 : 12; // Months until next inspection
 
-            const nextInspectionDate = new Date();
-            nextInspectionDate.setMonth(nextInspectionDate.getMonth() + interval);
+          const nextDate = new Date();
+          nextDate.setMonth(nextDate.getMonth() + interval);
 
-            await tx.update(riskAssessments)
-              .set({
-                overallRiskRating: rating,
-                nextInspectionDate: nextInspectionDate,
-                status: "FINALIZED",
-                updatedAt: new Date()
-              })
-              .where(eq(riskAssessments.applicationId, appId));
-
-            console.log(`[RISK_LOG]: App ${appId} finalized with ORR: ${rating}`);
-          } else {
-            // Log the omission but don't stop the transaction
-            console.warn(`[RISK_LOG]: Skipping ORR for App ${appId} - Data incomplete.`);
-          }
-        } catch (riskErr) {
-          // If the risk table update fails, we log it and continue so the workflow isn't blocked
-          console.error("[RISK_CALC_ERROR]:", riskErr);
+          await tx.update(riskAssessments).set({
+            overallRiskRating: rating,
+            nextInspectionDate: nextDate,
+            status: "FINALIZED",
+            updatedAt: new Date()
+          }).where(eq(riskAssessments.applicationId, appId));
         }
       }
 
-      // 3. Resolve Next Owner (Director or IRSD DD)
+      // 3. Resolve Next Owner
       let nextOwnerId: string | null = null;
       if (isIRSD) {
         const director = await tx.query.users.findFirst({
@@ -206,10 +200,14 @@ export async function approveToDirector(
       }
 
       // 4. Update Application & Audit Trail
-      const app = await tx.query.applications.findFirst({ where: (a, { eq }) => eq(a.id, appId) });
+      const app = await tx.query.applications.findFirst({ where: eq(applications.id, appId) });
       if (!app) throw new Error("Application record missing");
       
       const oldDetails = (app.details as any) || {};
+      
+      // We explicitly link the report that the Director should be looking at
+      const reportForDirector = oldDetails.verificationReportUrl || oldDetails.technicalAssessmentUrl;
+
       const newEntry = {
         from: actingUser.name,
         role: "Divisional Deputy Director",
@@ -217,7 +215,7 @@ export async function approveToDirector(
         text: recommendationNote,
         timestamp: new Date().toISOString(),
         action: actionLabel,
-        referenceReport: isIRSD ? oldDetails.verificationReportUrl : oldDetails.technicalAssessmentUrl
+        referenceReport: reportForDirector 
       };
 
       const dbTimestamp = new Date();
@@ -229,7 +227,8 @@ export async function approveToDirector(
           details: { 
             ...oldDetails, 
             comments: [...(oldDetails.comments || []), newEntry],
-            lastEndorsedBy: actingUser.id 
+            lastEndorsedBy: actingUser.id,
+            finalRecommendationReport: reportForDirector // Specific key for the Director's UI
           },
           updatedAt: dbTimestamp
         })
@@ -248,7 +247,6 @@ export async function approveToDirector(
         startTime: dbTimestamp,
       });
 
-      // 6. Refresh UI
       revalidatePath('/dashboard/ddd');
       revalidatePath('/dashboard/director'); 
       
@@ -405,6 +403,79 @@ export async function assignToIRSDStaff(appId: number, irsdStaffId: string, inst
       return { success: true };
     });
   } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function forwardToHub(appId: number, remarks: string) {
+  try {
+    return await db.transaction(async (tx) => {
+      // 1. Fetch Application
+      const app = await tx.query.applications.findFirst({
+        where: eq(applications.id, appId)
+      });
+      if (!app) throw new Error("Application not found");
+
+      // 2. Fetch the DD(IRSD) user to "clock" the application to him
+      // We look for the user who is the 'Divisional Deputy Director' of 'IRSD'
+      const hubDD = await tx.query.users.findFirst({
+        where: and(
+          eq(users.division, "IRSD"),
+          eq(users.role, "Divisional Deputy Director")
+        )
+      });
+
+      if (!hubDD) throw new Error("DD(IRSD) not found in the system. Cannot open QMS clock.");
+
+      const oldDetails = (app.details as any) || {};
+      const timestamp = sql`now()`;
+
+      // 3. Log the Comment
+      const hubComment = {
+        from: `Divisional Deputy Director (${app.division})`,
+        role: "Divisional Deputy Director",
+        division: app.division,
+        text: remarks,
+        action: "FORWARDED_TO_IRSD_HUB",
+        timestamp: new Date().toISOString()
+      };
+
+      // 4. CLOSE CURRENT CLOCK (The Technical DD's clock)
+      await tx.update(qmsTimelines)
+        .set({ endTime: timestamp })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId),
+          isNull(qmsTimelines.endTime)
+        ));
+
+      // 5. START NEW CLOCK (For the DD(IRSD))
+      // This ensures he is timed from the second it leaves the Technical Dept.
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
+        point: "IRSD Hub Clearance",
+        staffId: hubDD.id, // Clocked to the DD(IRSD) specifically
+        division: "IRSD",
+        startTime: timestamp,
+      });
+
+      // 6. Update Application State
+      await tx.update(applications)
+        .set({
+          currentPoint: "IRSD Hub Clearance",
+          status: "PENDING_HUB_CLEARANCE",
+          updatedAt: timestamp,
+          details: {
+            ...oldDetails,
+            comments: [...(oldDetails.comments || []), hubComment]
+          }
+        })
+        .where(eq(applications.id, appId));
+
+      revalidatePath('/dashboard/ddd');
+      return { success: true };
+    });
+  } catch (error: any) {
+    console.error("FORWARD_TO_HUB_ERROR:", error);
     return { success: false, error: error.message };
   }
 }

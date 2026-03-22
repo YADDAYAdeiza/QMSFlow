@@ -5,14 +5,15 @@ import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
   Loader2, RotateCcw, Activity, ShieldCheck, 
-  FileText, CheckCircle2, ChevronDown, Beaker, ListFilter, Globe2
+  FileText, CheckCircle2, ChevronDown, Beaker, ListFilter, Globe2, Award
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
+import { GmpCertificate } from "@/components/documents/GmpCertificate"; // You'll need this component
 import { supabase } from "@/lib/supabase";
 import RejectionModal from "@/components/RejectionModal";
 
-function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
+function RiskExecutiveSummary({ complianceRisk, isInspection }: { complianceRisk: any; isInspection: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
   if (!complianceRisk) return null;
 
@@ -20,7 +21,7 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
   
   const getRatingColor = (level: string) => {
     const l = level?.toUpperCase();
-    if (l === "A" || l === "LOW") return "bg-emerald-600 text-white border-emerald-400";
+    if (l === "A" || l === "LOW" || l === "COMPLIANT") return "bg-emerald-600 text-white border-emerald-400";
     if (l === "B" || l === "MEDIUM") return "bg-amber-500 text-white border-amber-300";
     return "bg-rose-600 text-white border-rose-400";
   };
@@ -32,14 +33,18 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
       <div className="w-full">
         <div className={`p-8 rounded-[2.5rem] border-4 shadow-2xl flex items-center justify-between transition-all duration-500 ${getRatingColor(overallRating)}`}>
           <div>
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70 mb-1 text-white/80">Final Risk Rating</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70 mb-1 text-white/80">
+                {isInspection ? "Inspection Compliance Rating" : "Final Risk Rating"}
+            </p>
             <h2 className="text-6xl font-black tracking-tighter uppercase italic leading-none">{overallRating}</h2>
           </div>
           <div className="text-right">
-             {/* <div className="bg-white/20 backdrop-blur-md px-5 py-3 rounded-2xl inline-block border border-white/30">
-                <p className="text-[8px] font-black uppercase tracking-[0.1em] text-white/90 leading-none mb-1">Authorization Tier</p>
-                <p className="text-sm font-black uppercase italic leading-none tracking-tight text-white">Full Approval</p>
-             </div> */}
+             <div className="bg-white/20 backdrop-blur-md px-5 py-3 rounded-2xl inline-block border border-white/30">
+                <p className="text-[8px] font-black uppercase tracking-[0.1em] text-white/90 leading-none mb-1">Status</p>
+                <p className="text-sm font-black uppercase italic leading-none tracking-tight text-white">
+                    {isInspection ? "Full Certification" : "Full Approval"}
+                </p>
+             </div>
           </div>
         </div>
       </div>
@@ -51,7 +56,9 @@ function RiskExecutiveSummary({ complianceRisk }: { complianceRisk: any }) {
         >
           <div className="flex items-center gap-3">
             <Beaker className="w-4 h-4 text-slate-400 group-hover:rotate-12 transition-transform duration-300" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 font-sans">Technical Validation Details</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 font-sans">
+                {isInspection ? "Inspection Audit Details" : "Technical Validation Details"}
+            </span>
           </div>
           <div className={`transition-transform duration-500 ${isOpen ? 'rotate-180' : 'rotate-0'}`} style={springTransition}>
             <ChevronDown className="w-5 h-5 text-slate-300" />
@@ -135,6 +142,8 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
 
   const details = app.details || {};
   const complianceRisk = app?.complianceRisk;
+  const isInspection = app.isInspection;
+  const docTitle = app.docTitle;
 
   const trail = useMemo(() => {
     const comments = app.commentsTrail || details.comments || [];
@@ -161,15 +170,19 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
       products: mappedProducts
     };
 
-    return { component: <ClearanceLetter data={templateData} />, prefix: "CLEARANCE" };
-  }, [app, details]);
+    // Swapping the component based on detection
+    return { 
+      component: isInspection ? <GmpCertificate data={templateData} /> : <ClearanceLetter data={templateData} />, 
+      prefix: isInspection ? "GMP_CERTIFICATE" : "CLEARANCE" 
+    };
+  }, [app, details, isInspection]);
 
   const handleApprove = async () => {
     if (!remarks.trim()) return alert("Executive remarks required.");
     setProcessing(true);
     try {
       const blob = await pdf(docConfig.component).toBlob();
-      const path = `Final_Outputs/${app.applicationNumber}/CLEARANCE_SIGNED_${Date.now()}.pdf`;
+      const path = `Final_Outputs/${app.applicationNumber}/${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
       const { error: uploadError } = await supabase.storage.from('documents').upload(path, blob);
       if (uploadError) throw uploadError;
 
@@ -192,10 +205,10 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
           <div className="absolute top-6 left-6 right-6 z-20 flex justify-center">
             <div className="bg-slate-900/90 backdrop-blur-xl p-1.5 rounded-full flex gap-1 shadow-2xl">
               <button onClick={() => setViewMode('dossier')} className={`px-4 py-2 rounded-full text-[9px] font-black uppercase flex items-center gap-2 transition-all duration-300 ${viewMode === 'dossier' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-                <FileText className="w-3 h-3" /> Dossier
+                <FileText className="w-3 h-3" /> {isInspection ? "Inspection Report" : "Dossier"}
               </button>
               <button onClick={() => setViewMode('draft')} className={`px-4 py-2 rounded-full text-[9px] font-black uppercase flex items-center gap-2 transition-all duration-300 ${viewMode === 'draft' ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-                <CheckCircle2 className="w-3 h-3" /> Draft Certificate
+                <CheckCircle2 className="w-3 h-3" /> Draft {isInspection ? "Certificate" : "Letter"}
               </button>
             </div>
           </div>
@@ -223,7 +236,7 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
             </button>
           </header>
 
-          <RiskExecutiveSummary complianceRisk={complianceRisk} />
+          <RiskExecutiveSummary complianceRisk={complianceRisk} isInspection={isInspection} />
 
           <div className="bg-blue-600 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden border-b-8 border-blue-700">
               <ShieldCheck className="absolute -top-4 -right-4 p-4 w-24 h-24 opacity-10 rotate-12" />
@@ -236,17 +249,16 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
             <textarea 
               value={remarks} onChange={(e) => setRemarks(e.target.value)} 
               className="w-full h-40 bg-slate-800/50 border-none rounded-[2rem] p-6 text-sm mb-6 outline-none text-white italic placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500/20 transition-all" 
-              placeholder="Enter final executive decision remarks and justification..." 
+              placeholder={`Enter final executive decision remarks and ${isInspection ? 'certification' : 'clearance'} justification...`} 
             />
             <button onClick={handleApprove} disabled={processing || isPending} className="w-full py-5 bg-emerald-500 rounded-3xl font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20 transition-all">
-              {processing ? <Loader2 className="animate-spin w-5 h-5" /> : "Authorize & Sign Certificate"}
+              {processing ? <Loader2 className="animate-spin w-5 h-5" /> : `Authorize & Sign ${docTitle}`}
             </button>
           </div>
 
           <div className="space-y-6">
             <h3 className="text-[11px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2">Full Audit Narrative</h3>
             {trail.map((note: any, idx: number) => (
-              // FIX: Used note.timestamp or note.id if available, fallback to index
               <div key={note.timestamp || `note-${idx}`} className="pl-6 border-l-2 border-slate-200 relative pb-4">
                 <div className="absolute -left-[5px] top-0 w-2 h-2 rounded-full bg-slate-300" />
                 <span className="text-[10px] font-black uppercase text-blue-600 tracking-tighter">

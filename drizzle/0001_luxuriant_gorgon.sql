@@ -1,0 +1,1 @@
+ALTER TABLE "risk_assessments" ADD COLUMN "other_deficiencies" integer DEFAULT 0;

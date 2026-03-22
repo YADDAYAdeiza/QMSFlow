@@ -8,6 +8,27 @@
       "when": 1773824928196,
       "tag": "0000_warm_apocalypse",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774206841317,
+      "tag": "0001_luxuriant_gorgon",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774210822789,
+      "tag": "0002_nebulous_diamondback",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774211136462,
+      "tag": "0003_last_carnage",
+      "breakpoints": true
     }
   ]
 }

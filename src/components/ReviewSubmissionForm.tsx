@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { 
-  ShieldAlert, CheckCircle2, History, FileText, 
-  Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp 
+  ShieldAlert, CheckCircle2, FileText, 
+  Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
+  AlertTriangle, Info
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
@@ -20,23 +21,34 @@ const GMP_SYSTEMS = [
 
 const SEVERITIES = ["Critical", "Major", "Other"];
 
+interface Props {
+  appId: number;
+  staffId: string;
+  staffName: string;
+  comments: any[];
+  isHubVetting: boolean;
+  isComplianceReview: boolean; // Context from Page
+  riskId: string;
+  previousFindings?: any[];
+  previousIsSra?: boolean;
+}
+
 export default function ReviewSubmissionForm({
-  appId, staffId, staffName, comments, isHubVetting, riskId, 
+  appId, staffId, staffName, comments, isHubVetting, isComplianceReview, riskId, 
   previousFindings = [], 
   previousIsSra = false 
-}: any) {
+}: Props) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   
-  // Visibility Toggle for Optional Ledger
-  const [isLedgerVisible, setIsLedgerVisible] = useState(previousFindings.length > 0);
+  // Logic: In Compliance Review, the ledger MUST be visible.
+  const [isLedgerVisible, setIsLedgerVisible] = useState(isComplianceReview || previousFindings.length > 0);
   
   const [isSra, setIsSra] = useState(previousIsSra);
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   
-  // Findings start empty if no previous findings exist
   const [findings, setFindings] = useState<Array<{ system: string; severity: string; text: string }>>(
     previousFindings.length > 0 ? previousFindings : []
   );
@@ -48,15 +60,22 @@ export default function ReviewSubmissionForm({
   };
 
   const addFinding = () => setFindings([...findings, { system: GMP_SYSTEMS[0], severity: "Other", text: "" }]);
+  
   const updateFinding = (index: number, field: string, value: string) => {
     const next = [...findings];
     (next[index] as any)[field] = value;
     setFindings(next);
   };
+
   const removeFinding = (index: number) => setFindings(findings.filter((_, i) => i !== index));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isComplianceReview && findings.length === 0 && !confirm("You are submitting a Compliance Audit with zero recorded deficiencies. Proceed?")) {
+        return;
+    }
+
     setLoading(true);
 
     let uploadedUrl = "";
@@ -65,6 +84,7 @@ export default function ReviewSubmissionForm({
         const fileExt = evidenceFile.name.split('.').pop();
         const fileName = `${appId}_evidence_${Date.now()}.${fileExt}`;
         const filePath = `verification_evidence/${fileName}`;
+        // Note: Using 'Documents' bucket as per Saved Info
         const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, evidenceFile);
         if (uploadError) throw uploadError;
         const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
@@ -74,17 +94,18 @@ export default function ReviewSubmissionForm({
       const complianceData = {
         riskId,
         isSra,
+        isComplianceReview,
         summary: isLedgerVisible ? { 
           criticalCount: counts.critical, 
           majorCount: counts.major, 
           otherCount: counts.other 
         } : { criticalCount: 0, majorCount: 0, otherCount: 0 },
-        // IMPORTANT: If ledger is hidden, send empty findings
         findings: isLedgerVisible ? findings.filter(f => f.text.trim() !== "") : [],
         evidenceUrl: uploadedUrl
       };
 
       const res = await submitToDDD(appId, staffId, justification, isHubVetting, uploadedUrl, complianceData);
+      
       if (res.success) {
         router.push('/dashboard/staff');
         router.refresh();
@@ -97,32 +118,37 @@ export default function ReviewSubmissionForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-10">
       
-      {/* 1. OPTIONAL DEFICIENCY LEDGER SECTION */}
+      {/* 1. DEFICIENCY / AUDIT LEDGER */}
       <div className="space-y-4">
         <div 
-          onClick={() => setIsLedgerVisible(!isLedgerVisible)}
-          className={`flex items-center justify-between p-6 rounded-[2rem] cursor-pointer transition-all border ${
-            isLedgerVisible ? "bg-slate-900 border-slate-900 shadow-xl" : "bg-white border-slate-100 hover:border-blue-200"
-          }`}
+          onClick={() => !isComplianceReview && setIsLedgerVisible(!isLedgerVisible)}
+          className={`flex items-center justify-between p-6 rounded-[2rem] transition-all border ${
+            isLedgerVisible 
+              ? isComplianceReview ? "bg-purple-900 border-purple-800 shadow-xl" : "bg-slate-900 border-slate-900 shadow-xl"
+              : "bg-white border-slate-100 hover:border-blue-200 cursor-pointer"
+          } ${isComplianceReview ? 'cursor-default ring-4 ring-purple-500/10' : ''}`}
         >
           <div className="flex items-center gap-3">
             <ShieldAlert className={`w-4 h-4 ${isLedgerVisible ? "text-rose-400" : "text-slate-400"}`} />
             <div>
               <h4 className={`text-[10px] font-black uppercase tracking-widest ${isLedgerVisible ? "text-white" : "text-slate-900"}`}>
-                Deficiency Ledger
+                {isComplianceReview ? "Compliance Audit Ledger" : "Deficiency Ledger"}
               </h4>
               <p className={`text-[8px] font-bold uppercase ${isLedgerVisible ? "text-slate-400" : "text-slate-300"}`}>
-                {isLedgerVisible ? "Active - Observations recorded" : "Optional - Click to record non-compliances"}
+                {isComplianceReview ? "Mandatory Analysis" : "Optional Observations"}
               </p>
             </div>
           </div>
-          {isLedgerVisible ? <ChevronUp className="w-4 h-4 text-white" /> : <ChevronDown className="w-4 h-4 text-slate-300" />}
+          {!isComplianceReview && (isLedgerVisible ? <ChevronUp className="w-4 h-4 text-white" /> : <ChevronDown className="w-4 h-4 text-slate-300" />)}
         </div>
 
-        {/* Springy Content */}
         {isLedgerVisible && (
           <div className="space-y-6 pt-2 animate-in fade-in slide-in-from-top-4 duration-300">
-            <div className="flex justify-end px-2">
+            <div className="flex justify-between items-center px-2">
+              <div className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                <Info className="w-3 h-3" />
+                <span className="text-[8px] font-black uppercase tracking-tight">Record specific non-compliances found in report</span>
+              </div>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input 
                   type="checkbox" 
@@ -165,7 +191,7 @@ export default function ReviewSubmissionForm({
                   <textarea 
                     value={f.text} 
                     onChange={(e) => updateFinding(i, 'text', e.target.value)} 
-                    placeholder="Describe specific observation..." 
+                    placeholder="Describe specific observation from the inspection report..." 
                     className="w-full bg-transparent text-[11px] text-slate-600 italic focus:outline-none min-h-[50px] resize-none" 
                   />
                 </div>
@@ -176,12 +202,15 @@ export default function ReviewSubmissionForm({
                 onClick={addFinding}
                 className="w-full py-4 rounded-[2rem] border-2 border-dashed border-slate-100 text-[9px] font-black text-slate-400 hover:text-blue-500 hover:border-blue-100 transition-all uppercase flex items-center justify-center gap-2"
               >
-                <Plus className="w-3 h-3" /> Add Observation
+                <Plus className="w-3 h-3" /> Add Observation Entry
               </button>
             </div>
 
             <div className="flex gap-4 px-2 pt-2 border-t border-slate-50">
-                <div className="text-[9px] font-black uppercase"><span className="text-rose-500 mr-1">{counts.critical}</span> Critical</div>
+                <div className="text-[9px] font-black uppercase flex items-center gap-1">
+                   <AlertTriangle className="w-3 h-3 text-rose-500" />
+                   <span className="text-rose-500 mr-1">{counts.critical}</span> Critical
+                </div>
                 <div className="text-[9px] font-black uppercase"><span className="text-amber-500 mr-1">{counts.major}</span> Major</div>
                 <div className="text-[9px] font-black uppercase"><span className="text-slate-400 mr-1">{counts.other}</span> Other</div>
             </div>
@@ -189,11 +218,11 @@ export default function ReviewSubmissionForm({
         )}
       </div>
 
-      {/* 2. EVIDENCE UPLOAD SECTION (Stays visible as it's often needed) */}
+      {/* 2. EVIDENCE UPLOAD */}
       <div className="space-y-4">
         <div className="flex items-center gap-2 px-2 text-slate-400">
           <Upload className="w-4 h-4" />
-          <h4 className="text-[10px] font-black uppercase tracking-widest">Verification Evidence</h4>
+          <h4 className="text-[10px] font-black uppercase tracking-widest">Supporting Evidence</h4>
         </div>
         
         <div 
@@ -211,39 +240,39 @@ export default function ReviewSubmissionForm({
           ) : (
             <>
               <Upload className="w-6 h-6 text-slate-300" />
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Upload Supporting Document</span>
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Upload Verification Document</span>
             </>
           )}
         </div>
       </div>
 
-      {/* 3. REMARKS & SUBMIT */}
+      {/* 3. EXECUTIVE SUMMARY & SUBMIT */}
       <div className="space-y-4">
         <div className="flex items-center gap-2 px-2 text-slate-400">
           <FileText className="w-4 h-4" />
-          <h4 className="text-[10px] font-black uppercase tracking-widest">Executive Summary</h4>
+          <h4 className="text-[10px] font-black uppercase tracking-widest">Executive Assessment</h4>
         </div>
         
         <textarea 
           required
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
-          placeholder="Final assessment summary for the Divisional Deputy Director..."
+          placeholder={isComplianceReview ? "Final compliance verdict based on the inspection report audit..." : "Final assessment summary for the DDD..."}
           className="w-full p-6 rounded-[2.5rem] border border-slate-200 text-xs text-slate-600 min-h-[150px] shadow-sm focus:ring-4 focus:ring-blue-500/5 outline-none transition-all"
         />
 
         <button 
           disabled={loading}
           type="submit"
-          className="w-full p-5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em] hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
+          className={`w-full p-5 rounded-full text-white text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 ${
+            isComplianceReview ? "bg-purple-600 hover:bg-purple-700" : "bg-slate-900 hover:bg-blue-600"
+          }`}
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
           SUBMIT TO {isHubVetting ? "IRSD HUB" : "DIVISIONAL DEPUTY DIRECTOR"}
         </button>
       </div>
 
-      {/* 4. AUDIT TRAIL */}
-      {/* ... keeping the narrative section as before ... */}
     </form>
   );
 }

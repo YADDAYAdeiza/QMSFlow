@@ -1,99 +1,3 @@
-// "use server";
-
-// import { db } from "@/db";
-// import { qmsTimelines, applications, users, riskAssessments } from "@/db/schema";
-// import { eq, and, isNull, sql } from "drizzle-orm";
-// import { revalidatePath } from "next/cache";
-
-// export async function submitToDDD(
-//   appId: number,
-//   staffId: string,
-//   remarks: string,
-//   isHubVetting: boolean,
-//   reportUrl: string,
-//   complianceData: any // Expected: { isSra, summary: {criticalCount, majorCount, otherCount}, findings, riskId }
-// ) {
-//   try {
-//     return await db.transaction(async (tx) => {
-//       const dbNow = sql`now()`;
-      
-//       const app = await tx.query.applications.findFirst({
-//         where: eq(applications.id, appId),
-//       });
-
-//       if (!app) throw new Error("Application not found");
-//       const oldDetails = (app.details as any) || {};
-
-//       const newEntry = {
-//         from: isHubVetting ? "IRSD Staff" : "Technical Reviewer",
-//         role: "Staff",
-//         text: remarks,
-//         attachmentUrl: reportUrl,
-//         timestamp: new Date().toISOString(),
-//       };
-
-//       // 1. UPDATE APPLICATION DETAILS
-//       // We save the findings specifically so the next person in the chain can see them.
-//       const updatedDetails = {
-//         ...oldDetails,
-//         comments: [...(oldDetails.comments || []), newEntry],
-//         compliance_summary: complianceData.summary, 
-//         findings_ledger: complianceData.findings,
-//         is_sra: complianceData.isSra,
-//       };
-
-//       await tx.update(applications)
-//         .set({
-//           status: isHubVetting ? "VETTING_COMPLETED" : "REVIEW_COMPLETED",
-//           currentPoint: isHubVetting ? "Director Final Review" : "DDD Review",
-//           details: updatedDetails,
-//           updatedAt: dbNow,
-//         })
-//         .where(eq(applications.id, appId));
-
-//       // 2. UPDATE RISK ASSESSMENT (Pass 2)
-//       if (complianceData.riskId) {
-//         // Simple logic to determine Compliance Level based on tallies
-//         let level: 'Low' | 'Medium' | 'High' = 'Low';
-//         if (complianceData.summary.criticalCount > 0) level = 'High';
-//         else if (complianceData.summary.majorCount >= 3) level = 'Medium';
-
-//         await tx.update(riskAssessments)
-//           .set({
-//             complianceLevel: level,
-//             updatedAt: dbNow
-//           })
-//           .where(eq(riskAssessments.id, complianceData.riskId));
-//       }
-
-//       // 3. QMS CLOCK MANAGEMENT
-//       // Stop current staff clock
-//       await tx.update(qmsTimelines)
-//         .set({ endTime: dbNow })
-//         .where(and(
-//           eq(qmsTimelines.applicationId, appId),
-//           eq(qmsTimelines.staffId, staffId),
-//           isNull(qmsTimelines.endTime)
-//         ));
-
-//       // Start DDD or Director clock
-//       await tx.insert(qmsTimelines).values({
-//         applicationId: appId,
-//         point: isHubVetting ? 'Director Final Review' : 'DDD Review',
-//         division: isHubVetting ? 'DIRECTORATE' : oldDetails.division || 'VMD',
-//         startTime: dbNow,
-//       });
-
-//       revalidatePath('/dashboard/staff');
-//       revalidatePath('/dashboard/director');
-      
-//       return { success: true };
-//     });
-//   } catch (err: any) {
-//     console.error("SUBMISSION_ERROR:", err);
-//     return { success: false, error: err.message };
-//   }
-// }
 
 "use server";
 
@@ -111,35 +15,44 @@ export async function submitToDDD(
   complianceData: any 
 ) {
   try {
+    // 1. Fetch User and appropriate DDD for the division
     const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
     if (!user) throw new Error("User not found");
 
+    // Important: We find the DD of the user's current division (e.g., IRSD or VMD)
     const divisionalDD = await db.query.users.findFirst({
-      where: (u, { and, eq }) => and(eq(u.division, user.division as any), eq(u.role, 'Divisional Deputy Director')),
+      where: (u, { and, eq }) => and(
+        eq(u.division, user.division as any), 
+        eq(u.role, 'Divisional Deputy Director')
+      ),
     });
 
     return await db.transaction(async (tx) => {
       const dbTimestamp = new Date();
-      const app = await tx.query.applications.findFirst({ where: eq(applications.id, appId) });
+      
+      const app = await tx.query.applications.findFirst({ 
+        where: eq(applications.id, appId) 
+      });
       if (!app) throw new Error("Application not found");
 
       const oldDetails = (app.details as any) || {};
+      const isRound2 = complianceData.isComplianceReview;
 
-      // THE TIME CAPSULE: We bake the compliance data INTO the comment
+      // 2. THE AUDIT TRAIL: Capture the snapshot of this specific submission
       const newComment = {
         from: user.name,
-        role: isHubVetting ? "IRSD Officer" : "Staff",
+        role: isHubVetting ? "IRSD Officer" : "Technical Specialist",
         division: user.division,
         text: justification,
-        action: isHubVetting ? "HUB_VETTING_COMPLETED" : "TECHNICAL_ASSESSMENT_SUBMITTED",
+        action: isRound2 ? "COMPLIANCE_AUDIT_COMPLETED" : "TECHNICAL_VETTING_SUBMITTED",
         attachmentUrl: reportUrl, 
         timestamp: dbTimestamp.toISOString(),
-        // Capture the snapshot for the Audit Trail
         complianceSnapshot: {
           isSra: complianceData.isSra,
-          critical: complianceData.summary.criticalCount,
-          major: complianceData.summary.majorCount,
-          other: complianceData.summary.otherCount
+          critical: complianceData.summary?.criticalCount || 0,
+          major: complianceData.summary?.majorCount || 0,
+          other: complianceData.summary?.otherCount || 0,
+          phase: isHubVetting ? "Post-Registration (IRSD)" : "Technical (VMD)"
         }
       };
 
@@ -149,22 +62,34 @@ export async function submitToDDD(
         compliance_summary: complianceData.summary, 
         findings_ledger: complianceData.findings,
         is_sra: complianceData.isSra,
-        ...(isHubVetting ? { verificationReportUrl: reportUrl } : { technicalAssessmentUrl: reportUrl })
+        // Map URLs correctly so the DD viewer sees them
+        ...(isHubVetting 
+            ? { verificationReportUrl: reportUrl, inspectionAuditReportUrl: reportUrl } 
+            : { technicalAssessmentUrl: reportUrl, inspectionReportUrl: reportUrl }
+        )
       };
 
-      // Update Application Table
+      // 3. Update Application State
+      // IRSD Staff Vetting Return triggers the 'Approve to Director' button in the UI
+      const targetPoint = isHubVetting ? "IRSD Staff Vetting Return" : "Technical DD Review Return";
+      const targetStatus = isHubVetting ? "AWAITING_HUB_ENDORSEMENT" : "PENDING_DD_RECOMMENDATION";
+
       await tx.update(applications).set({
-        currentPoint: isHubVetting ? "IRSD Hub Clearance" : "Technical DD Review Return",
-        status: isHubVetting ? "AWAITING_HUB_ENDORSEMENT" : "PENDING_DD_RECOMMENDATION",
+        currentPoint: targetPoint,
+        status: targetStatus,
+        isComplianceReview: false, // Close the specialist's editing lock
         details: updatedDetails,
         updatedAt: dbTimestamp
       }).where(eq(applications.id, appId));
 
-      // Update Risk Assessment Table
+      // 4. Update Risk Assessment Table (if ID provided)
       if (complianceData.riskId) {
         let level: 'Low' | 'Medium' | 'High' = 'Low';
-        if (complianceData.summary.criticalCount > 0) level = 'High';
-        else if (complianceData.summary.majorCount >= 3) level = 'Medium';
+        if (complianceData.summary.criticalCount > 0) {
+          level = 'High';
+        } else if (complianceData.summary.majorCount >= 3) {
+          level = 'Medium';
+        }
 
         await tx.update(riskAssessments).set({
           complianceLevel: level,
@@ -177,11 +102,19 @@ export async function submitToDDD(
         }).where(eq(riskAssessments.id, complianceData.riskId));
       }
 
-      // QMS Logic
-      await tx.update(qmsTimelines).set({ endTime: dbTimestamp }).where(and(eq(qmsTimelines.applicationId, appId), isNull(qmsTimelines.endTime)));
+      // 5. QMS Timing Logic
+      // Stop the clock for the Staff Member
+      await tx.update(qmsTimelines)
+        .set({ endTime: dbTimestamp })
+        .where(and(
+          eq(qmsTimelines.applicationId, appId), 
+          isNull(qmsTimelines.endTime)
+        ));
+
+      // Start the clock for the Divisional Deputy Director
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
-        point: isHubVetting ? "IRSD Hub Clearance" : "Technical DD Review Return",
+        point: targetPoint,
         division: user.division as any,
         staffId: divisionalDD?.id || null, 
         startTime: dbTimestamp,
@@ -189,7 +122,11 @@ export async function submitToDDD(
 
       revalidatePath('/dashboard/ddd');
       revalidatePath('/dashboard/staff');
+      
       return { success: true };
     });
-  } catch (error: any) { return { success: false, error: error.message }; }
+  } catch (error: any) { 
+    console.error("Submission Error:", error);
+    return { success: false, error: error.message }; 
+  }
 }

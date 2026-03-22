@@ -1,16 +1,18 @@
 "use client"
 
 import React from 'react';
+import Link from 'next/link'; // Added for navigation
 import { 
   ShieldCheck, ShieldAlert, Clock, 
   ChevronRight, Factory, FileSearch, Calendar,
-  MoreHorizontal, AlertTriangle
+  Edit3, AlertCircle
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
 interface RiskItem {
   id: number;
+  applicationId: number; // Added: Essential for the "Second Pass" link
   facilityName: string;
   appNumber: string;
   intrinsicLevel: 'Low' | 'Medium' | 'High' | null;
@@ -64,7 +66,7 @@ export default function RiskTable({ data }: { data: RiskItem[] }) {
                 </div>
               </td>
 
-              {/* Pass 2: Final ORR */}
+              {/* Pass 2: Final ORR / Compliance */}
               <td className="px-6 py-5">
                 {item.orr ? (
                   <div className="flex items-center gap-2">
@@ -74,7 +76,10 @@ export default function RiskTable({ data }: { data: RiskItem[] }) {
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Rating</span>
                   </div>
                 ) : (
-                  <span className="text-[10px] font-black text-slate-300 uppercase italic">Awaiting Review</span>
+                  <div className="flex items-center gap-2 text-amber-500">
+                    <AlertCircle className="w-4 h-4 animate-pulse" />
+                    <span className="text-[10px] font-black uppercase italic tracking-tighter">Awaiting Report</span>
+                  </div>
                 )}
               </td>
 
@@ -83,25 +88,40 @@ export default function RiskTable({ data }: { data: RiskItem[] }) {
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
                     <div className={cn(
-                      "w-2 h-2 rounded-full animate-pulse",
-                      item.status === 'FINALIZED' ? "bg-emerald-500" : "bg-amber-400"
+                      "w-2 h-2 rounded-full",
+                      item.status === 'FINALIZED' ? "bg-emerald-500" : "bg-amber-400 animate-pulse"
                     )} />
                     <span className="text-[10px] font-black uppercase text-slate-700">{item.status}</span>
                   </div>
-                  {item.nextInspection && (
+                  {item.nextInspection ? (
                     <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400">
                       <Calendar className="w-3 h-3" />
-                      Expires: {format(new Date(item.nextInspection), 'MMM yyyy')}
+                      Next: {format(new Date(item.nextInspection), 'MMM yyyy')}
                     </div>
+                  ) : (
+                    <span className="text-[9px] font-bold text-slate-300 uppercase italic">No Expiry Set</span>
                   )}
                 </div>
               </td>
 
-              {/* Actions */}
+              {/* Actions: Link to Second Pass Form */}
               <td className="px-6 py-5 text-right">
-                <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all">
-                  <ChevronRight className="w-5 h-5" />
-                </button>
+                {item.status === 'PARTIAL' ? (
+                  <Link 
+                    href={`/risk/categorize/${item.applicationId}`}
+                    className="inline-flex items-center gap-2 px-5 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 transition-all shadow-md shadow-slate-200"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    Review Report
+                  </Link>
+                ) : (
+                  <Link 
+                    href={`/risk/categorize/${item.applicationId}`}
+                    className="p-2 inline-block text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </Link>
+                )}
               </td>
             </tr>
           ))}

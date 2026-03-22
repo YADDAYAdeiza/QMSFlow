@@ -8,13 +8,14 @@ export async function getRiskInventory() {
   try {
     const inventory = await db.select({
       id: riskAssessments.id,
+      applicationId: riskAssessments.applicationId, // <--- ADD THIS
       facilityName: companies.name,
       facilityId: companies.id,
       appNumber: applications.applicationNumber,
-      intrinsicLevel: riskAssessments.intrinsicLevel, // Pass 1 result
-      complianceLevel: riskAssessments.complianceLevel, // Pass 2 result
-      orr: riskAssessments.overallRiskRating, // The 'A', 'B', 'C'
-      status: riskAssessments.status, // 'PARTIAL' | 'FINALIZED'
+      intrinsicLevel: riskAssessments.intrinsicLevel,
+      complianceLevel: riskAssessments.complianceLevel,
+      orr: riskAssessments.overallRiskRating,
+      status: riskAssessments.status, 
       nextInspection: riskAssessments.nextInspectionDate,
       updatedAt: riskAssessments.updatedAt,
     })
@@ -29,7 +30,6 @@ export async function getRiskInventory() {
     return { success: false, error: "Could not retrieve risk data." };
   }
 }
-
 // lib/actions/risk.ts
 // import { db } from "@/db";
 // import { riskAssessments, companies } from "@/db/schema";
@@ -75,5 +75,45 @@ export async function getInspectionDeadlines() {
   } catch (error) {
     console.error("CRITICAL ERROR in getInspectionDeadlines:", error);
     return [];
+  }
+}
+
+export async function getApplicationForEditing(id: number) {
+  try {
+    const app = await db.query.applications.findFirst({
+      where: eq(applications.id, id),
+      with: {
+        localApplicant: true,
+        foreignFactory: true,
+      },
+    });
+
+    if (!app) return { success: false, error: "Application not found" };
+
+    // We return a flat object that matches the form's schema exactly
+    return {
+      success: true,
+      data: {
+        id: app.id,
+        appNumber: app.applicationNumber || "",
+        type: app.type || "Facility Verification",
+        companyName: app.localApplicant?.name || "",
+        companyAddress: app.localApplicant?.address || "",
+        notificationEmail: (app.details as any)?.notificationEmail || "",
+        facilityName: app.foreignFactory?.name || "",
+        facilityAddress: app.foreignFactory?.address || "",
+        // Pull directly from the flattened keys we created
+        productLines: (app.details as any)?.productLines || [
+          { lineName: "", riskCategory: "", products: [{ name: "" }] }
+        ],
+        divisions: (app.details as any)?.divisions || ["VMD"],
+        poaUrl: (app.details as any)?.poaUrl || "",
+        inspectionReportUrl: (app.details as any)?.inspectionReportUrl || "",
+        lodRemarks: "", // Always start fresh for the new assessment
+      }
+    };
+  } catch (error) {
+    console.error("Fetch Error:", error);
+    return { success: false, error: "Failed to fetch application data" };
   }
 }

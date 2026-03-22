@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
-import { applications, users } from "@/db/schema";
+import { applications, users, riskAssessments } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import DirectorReviewClient from "./DirectorReviewClient";
@@ -25,6 +25,13 @@ export default async function DirectorReviewPage({
 
   if (!app) return notFound();
 
+  const appDetails = (app.details as any) || {};
+  
+  // DETECTION LOGIC: Swapping to GMP Certificate mode if an inspection report exists
+  const isInspection = !!(appDetails.inspectionReportUrl || appDetails.isInspectionFlow);
+  const docTitle = isInspection ? "GMP Certificate" : "GMP Clearance Letter";
+  const docType = isInspection ? "CERTIFICATE" : "CLEARANCE";
+
   const riskData = app.riskAssessments?.[0];
   
   const complianceRisk = riskData ? {
@@ -34,15 +41,15 @@ export default async function DirectorReviewPage({
     summary: {
       criticalCount: riskData.criticalDeficiencies || 0,
       majorCount: riskData.majorDeficiencies || 0,
-      otherCount: 0, 
+      otherCount: appDetails.otherCount || 0, 
     },
-    findings: (app.details as any)?.complianceFindings || [],
+    findings: appDetails.complianceFindings || [],
   } : null;
 
-  const appDetails = (app.details as any) || {};
   const activeStream = appDetails.division || "VMD";
 
-  let finalPdfUrl = appDetails.poaUrl || appDetails.inspectionReportUrl || appDetails.reportUrl || "";
+  // Priority URL logic: Always favor the Inspection Report for this view if it exists
+  let finalPdfUrl = appDetails.inspectionReportUrl || appDetails.poaUrl || appDetails.reportUrl || "";
   if (finalPdfUrl && !finalPdfUrl.startsWith('http')) {
     const { data } = supabase.storage.from('documents').getPublicUrl(finalPdfUrl);
     finalPdfUrl = data.publicUrl;
@@ -50,12 +57,16 @@ export default async function DirectorReviewPage({
 
   const cleanApp = {
     ...app,
+    isInspection,
+    docTitle,
+    docType,
     company: app.localApplicant, 
     details: appDetails,
     commentsTrail: Array.isArray(appDetails.comments) ? appDetails.comments : [],
+    // Dynamic recommendation text based on type
     dddInstruction: [...(appDetails.comments || [])].reverse().find((c: any) => 
         c.role === "Divisional Deputy Director" || c.role === "DDD"
-    )?.text || "Recommended for approval based on technical compliance.",
+    )?.text || `Recommended for ${isInspection ? 'certification' : 'clearance'} based on technical compliance.`,
     complianceRisk 
   };
 

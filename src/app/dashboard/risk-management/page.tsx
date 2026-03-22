@@ -4,7 +4,7 @@ import InspectionExpiryDropdown from "@/components/InspectionExpiryDropdown";
 import { ShieldCheck, Database, Filter, AlertTriangle } from "lucide-react";
 
 export default async function RiskManagementPage() {
-  // Parallel fetch for the inventory and the expiry deadlines
+  // Fetching inventory. Ensure 'data' includes 'applicationId' and 'status'
   const [{ data, success }, deadlines] = await Promise.all([
     getRiskInventory(),
     getInspectionDeadlines()
@@ -23,7 +23,6 @@ export default async function RiskManagementPage() {
         </div>
         
         <div className="flex gap-3">
-          {/* NEW: Specialized Watchlist for Foreign Manufacturers */}
           <InspectionExpiryDropdown deadlines={deadlines} />
 
           <button className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-slate-50 transition-all">
@@ -39,6 +38,7 @@ export default async function RiskManagementPage() {
 
       {success && data ? (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+           {/* The Link logic happens INSIDE this component */}
            <RiskTable data={data} />
         </div>
       ) : (
