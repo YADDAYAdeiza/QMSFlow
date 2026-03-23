@@ -5,15 +5,16 @@ import { useRouter } from 'next/navigation';
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
   History, UserPlus, Gavel, FileText, Eye, Zap, AlertCircle, ClipboardList,
-  ExternalLink, Building2, Landmark, Factory
+  ExternalLink, Building2, Landmark, Factory, Users
 } from 'lucide-react';
 import { approveToDirector, assignToStaff, forwardToHub } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
 
-export default function DeputyDirectorReviewClient({ app, staffList, loggedInUserId }: any) {
+export default function DeputyDirectorReviewClient({ app, staffList = [], loggedInUserId }: any) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isReworkModalOpen, setIsReworkModalOpen] = useState(false);
+  const [showAllStaff, setShowAllStaff] = useState(false); // Fallback toggle
 
   const [assignmentRemarks, setAssignmentRemarks] = useState(""); 
   const [endorsementRemarks, setEndorsementRemarks] = useState(""); 
@@ -27,25 +28,19 @@ export default function DeputyDirectorReviewClient({ app, staffList, loggedInUse
   const complianceLevel = app?.complianceLevel;
   const findings = app?.findingsLedger || appDetails?.findings_ledger || [];
   const summary = app?.complianceSummary || appDetails?.compliance_summary || {};
-  const evidenceUrl = appDetails?.verificationReportUrl || appDetails?.inspectionAuditReportUrl || "";
-
+  
   // --- PHASE & HUB LOGIC ---
   const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
   const isHubEntry = app?.currentPoint === 'IRSD Hub Clearance';
   const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
   
-  // Assignment Phase: Either fresh Technical Entry or fresh Hub Entry
   const isAssignmentPhase = app?.currentPoint === 'Technical DD Review' || isHubEntry;
-  
-  // Review Phase: Returns from either Technical staff or IRSD staff
   const isReviewPhase = isTechnicalReturn || isIRSDStaffReturn;
 
   // --- PDF VIEWER LOGIC ---
   const dossierUrl = appDetails?.poaUrl || "";
   const technicalReportUrl = appDetails?.inspectionReportUrl || "";
   const verificationReportUrl = appDetails?.verificationReportUrl || appDetails?.inspectionAuditReportUrl || "";
-
-  // Prioritize the report relevant to the current point
   const staffReportUrl = isIRSDStaffReturn ? verificationReportUrl : technicalReportUrl;
   const hasStaffSubmission = !!(technicalReportUrl || verificationReportUrl);
   
@@ -53,9 +48,20 @@ export default function DeputyDirectorReviewClient({ app, staffList, loggedInUse
     (hasStaffSubmission || isReviewPhase) ? 'report' : 'dossier'
   );
 
-  // --- FILTERING STAFF FOR ASSIGNMENT ---
-  const appDivision = app?.division || "VMD";
+  // --- REFACTORED FILTERING LOGIC ---
+  // We reach into the JSONB details or default to VMD
+  const appDivision = appDetails?.division || app?.division || "VMD";
   const activeAssignmentDivision = isHubEntry ? "IRSD" : appDivision;
+
+  // Filter staff based on the active division
+  const filteredStaff = staffList.filter((s: any) => 
+    showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
+  );
+
+  console.log('--- Workflow Debug ---');
+  console.log('Target Division:', activeAssignmentDivision);
+  console.log('Available Staff in list:', staffList.length);
+  console.log('Matches found:', filteredStaff.length);
 
   // --- ACTIONS ---
   const handleAssign = async () => {
@@ -71,13 +77,10 @@ export default function DeputyDirectorReviewClient({ app, staffList, loggedInUse
     startTransition(async () => {
       let result;
       if (isTechnicalReturn) {
-        // Technical DD -> Forward to DD(IRSD)
         result = await forwardToHub(app.id, endorsementRemarks);
       } else if (isIRSDStaffReturn) {
-        // Hub DD -> Final Approval to Director
         result = await approveToDirector(app.id, endorsementRemarks, loggedInUserId);
       }
-      
       if (result?.success) { router.push('/dashboard/ddd'); router.refresh(); }
     });
   };
@@ -134,7 +137,7 @@ export default function DeputyDirectorReviewClient({ app, staffList, loggedInUse
       {/* RIGHT: ACTION PANEL */}
       <div className="col-span-5 space-y-6 overflow-y-auto max-h-[90vh] pr-2 custom-scrollbar pb-10">
         
-        {/* FINDINGS LEDGER (From your original version) */}
+        {/* FINDINGS LEDGER */}
         {findings.length > 0 && (
           <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
             <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900 mb-6 flex items-center justify-between">
@@ -187,41 +190,59 @@ export default function DeputyDirectorReviewClient({ app, staffList, loggedInUse
             </div>
         </div>
 
-        {/* ASSIGNMENT BOX (Used by Tech DD or Hub DD) */}
+        {/* ASSIGNMENT BOX */}
         {isAssignmentPhase && (
           <div className={`p-8 rounded-[2.5rem] shadow-xl text-white transition-all duration-500 ${isHubEntry ? 'bg-emerald-600' : 'bg-blue-600'}`}>
-            <h3 className="text-[11px] font-black uppercase tracking-widest mb-6 flex items-center gap-2">
-              {isHubEntry ? <Gavel className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-              {isHubEntry ? "Hub Delegation (IRSD)" : "Technical Assignment"}
-            </h3>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-[11px] font-black uppercase tracking-widest flex items-center gap-2">
+                {isHubEntry ? <Gavel className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                {isHubEntry ? "Hub Delegation (IRSD)" : "Technical Assignment"}
+              </h3>
+              {/* Emergency Override Toggle */}
+              <button 
+                onClick={() => setShowAllStaff(!showAllStaff)}
+                className="text-[8px] font-bold bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full transition-colors"
+              >
+                {showAllStaff ? "Reset Filter" : "Show All Divisions"}
+              </button>
+            </div>
+            
             <div className="space-y-4">
               <select 
                 value={selectedStaffId}
                 onChange={(e) => setSelectedStaffId(e.target.value)}
                 className="w-full bg-black/20 border border-white/20 p-5 rounded-3xl text-xs font-bold text-white outline-none cursor-pointer appearance-none"
               >
-                <option value="" className="text-slate-900">Select {isHubEntry ? 'IRSD' : 'Technical'} Officer...</option>
-                {staffList
-                  .filter((s: any) => s.division === activeAssignmentDivision)
-                  .map((s: any) => (
-                    <option key={s.id} value={s.id} className="text-slate-900">{s.name}</option>
-                  ))
-                }
+                <option value="" className="text-slate-900">
+                  Select {isHubEntry ? 'IRSD' : activeAssignmentDivision} Officer ({filteredStaff.length} available)
+                </option>
+                {filteredStaff.map((s: any) => (
+                  <option key={s.id} value={s.id} className="text-slate-900">
+                    {s.name} {showAllStaff ? `(${s.division})` : ''}
+                  </option>
+                ))}
               </select>
+              
+              {filteredStaff.length === 0 && !showAllStaff && (
+                <div className="flex items-center gap-2 p-3 bg-amber-500/20 border border-amber-500/50 rounded-xl text-[10px] font-bold">
+                  <AlertCircle className="w-3 h-3" /> No staff found for {activeAssignmentDivision}
+                </div>
+              )}
+
               <textarea 
                 value={assignmentRemarks} 
                 onChange={(e) => setAssignmentRemarks(e.target.value)}
                 placeholder="Specific instructions for vetting..."
                 className="w-full h-24 bg-black/10 border border-white/10 rounded-2xl p-4 text-xs text-white outline-none placeholder:text-white/40"
               />
-              <button onClick={handleAssign} disabled={isPending} className="w-full py-5 bg-white text-slate-900 rounded-3xl font-black uppercase text-[10px]">
+              <button onClick={handleAssign} disabled={isPending || !selectedStaffId} className="w-full py-5 bg-white text-slate-900 rounded-3xl font-black uppercase text-[10px] disabled:opacity-50">
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `Dispatch for Vetting`}
               </button>
             </div>
           </div>
         )}
 
-        {/* FORWARDING BOX (Technical -> Hub or Hub -> Director) */}
+        {/* FORWARDING BOX */}
         {isReviewPhase && (
           <div className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl border border-slate-800">
             <div className="flex items-center gap-2 mb-4 ml-2">

@@ -3,7 +3,7 @@
 import { db } from "@/db";
 import { 
   companies, companyAffiliations, productLines, 
-  products, applications, qmsTimelines, riskAssessments 
+  products, applications, qmsTimelines, riskAssessments, users 
 } from "@/db/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -33,11 +33,20 @@ export async function submitLODApplication(
 
   try {
     return await db.transaction(async (tx) => {
+      // 1. Context Fetching
       const existingApp = await tx.query.applications.findFirst({
         where: eq(applications.applicationNumber, normalizedAppNumber)
       });
+      
+      const submittingUser = await tx.query.users.findFirst({
+        where: eq(users.id, userId)
+      });
 
       const isUpdate = !!existingApp;
+      const userDivision = submittingUser?.division || "LOD";
+      
+      // Determine if this is a Round 2 (Compliance) update or Pass 1
+      const isActuallyRound2 = isUpdate && (existingApp.status === 'TECHNICAL_PASSED' || existingApp.isComplianceReview === true);
 
       // 2. Upsert Companies
       const upsertCompany = async (name: string, address: string, category: 'LOCAL' | 'FOREIGN') => {
@@ -58,7 +67,7 @@ export async function submitLODApplication(
         foreignFactoryId: foreignFact.id 
       }).onConflictDoNothing();
 
-      // 4. Products & Risk Calculation
+      // 3. Products & Intrinsic Risk Calculation
       let maxComp = 1;
       let maxCrit = 1;
 
@@ -73,7 +82,7 @@ export async function submitLODApplication(
         const cleanLineName = normalize(lineEntry.lineName);
         const [lineRec] = await tx.insert(productLines)
           .values({ companyId: foreignFact.id, name: cleanLineName })
-          .onConflictToUpdate({ 
+          .onConflictDoUpdate({ 
             target: [productLines.companyId, productLines.name], 
             set: { name: cleanLineName } 
           })
@@ -89,54 +98,47 @@ export async function submitLODApplication(
         }
       }
 
-      // 5. ENHANCED DETAILS WITH COMPLIANCE FLAG
+      // 4. Update Details & Comments
       const existingDetails = (existingApp?.details as any) || {};
-      
       const newComment = {
         from: userName,
         role: userRole,
-        text: data.lodRemarks || (isUpdate ? "Technical review completed." : "Application initiated."),
-        round: isUpdate ? 2 : 1,
-        action: isUpdate ? "TECHNICAL_VETTING" : "INTAKE_DIRECTIVE",
+        text: data.lodRemarks || (isUpdate ? "Technical details updated." : "Application initiated."),
+        round: isActuallyRound2 ? 2 : 1,
+        action: isActuallyRound2 ? "COMPLIANCE_DATA_UPDATE" : "INTAKE_DIRECTIVE",
         timestamp: new Date().toISOString()
       };
 
-      const updatedComments = Array.isArray(existingDetails.comments) 
-        ? [...existingDetails.comments, newComment]
-        : [newComment];
-
       const enhancedDetails = {
         ...data,
-        comments: updatedComments,
-        // CRITICAL: Set the flag based on update status
-        isComplianceReview: isUpdate 
+        comments: [...(existingDetails.comments || []), newComment],
+        isComplianceReview: isActuallyRound2 
       };
 
       let appId = existingApp?.id;
 
       if (isUpdate) {
-        // --- UPDATE PATH (Round 2) ---
-        await tx.update(qmsTimelines)
-          .set({ endTime: new Date() })
-          .where(and(eq(qmsTimelines.applicationId, existingApp.id), isNull(qmsTimelines.endTime)));
-
         await tx.update(applications)
           .set({
-            status: 'PENDING_DIRECTOR_FINAL',
+            status: isActuallyRound2 ? 'PENDING_DIRECTOR_FINAL' : 'PENDING_DIRECTOR',
             currentPoint: 'Director Review',
             details: enhancedDetails,
-            type: data.type
+            type: data.type,
+            updatedAt: sql`now()`
           })
           .where(eq(applications.id, existingApp.id));
 
+        await tx.update(qmsTimelines)
+          .set({ endTime: sql`now()` })
+          .where(and(eq(qmsTimelines.applicationId, existingApp.id), isNull(qmsTimelines.endTime)));
+
         await tx.insert(qmsTimelines).values({
           applicationId: existingApp.id,
-          division: "VMAP",
-          point: 'Director Review'
+          division: userDivision as any, 
+          point: 'Director Review',
+          startTime: sql`now()`
         });
-
       } else {
-        // --- INSERT PATH (Round 1) ---
         const [newApp] = await tx.insert(applications).values({
           applicationNumber: normalizedAppNumber,
           type: data.type,
@@ -146,27 +148,31 @@ export async function submitLODApplication(
           currentPoint: 'Director Review',
           details: enhancedDetails
         }).returning();
-
         appId = newApp.id;
+      }
 
-        const score = maxComp * maxCrit;
-        const level = score <= 2 ? "Low" : score <= 4 ? "Medium" : "High";
+      // 5. Risk Assessment Upsert (Strictly Intrinsic in Pass 1)
+      const score = maxComp * maxCrit;
+      const level = score <= 2 ? "Low" : score <= 4 ? "Medium" : "High";
 
-        await tx.insert(riskAssessments).values({
+      await tx.insert(riskAssessments)
+        .values({
           facilityId: foreignFact.id,
           applicationId: appId,
           complexityScore: maxComp,
           criticalityScore: maxCrit,
           intrinsicLevel: level,
-          status: 'PARTIAL'
+          status: isActuallyRound2 ? 'DRAFT' : 'PARTIAL'
+        })
+        .onConflictDoUpdate({
+          target: [riskAssessments.applicationId],
+          set: {
+            complexityScore: maxComp,
+            criticalityScore: maxCrit,
+            intrinsicLevel: level,
+            updatedAt: sql`now()`
+          }
         });
-
-        await tx.insert(qmsTimelines).values({ 
-          applicationId: appId, 
-          division: "LOD", 
-          point: 'Director Review' 
-        });
-      }
 
       revalidatePath("/dashboard/director");
       return { success: true, id: appId };

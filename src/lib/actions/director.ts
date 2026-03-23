@@ -211,6 +211,12 @@ export async function assignToDDD(
 //   return matrix[i]?.[c] || { rating: "B", interval: 12 };
 // }
 
+/**
+ * Final Clearance Action
+ * Triggered by the Director to conclude a round.
+ * Pass 1: Moves to Registry/Hub for Pass 2 prep.
+ * Pass 2: Finalizes Risk and completes the application.
+ */
 export async function issueFinalClearance(
   appId: number, 
   remarks: string, 
@@ -220,39 +226,54 @@ export async function issueFinalClearance(
     return await db.transaction(async (tx) => {
       const dbNow = sql`now()`;
       
-      // 1. Fetch the application with relations if needed
+      // 1. Fetch current application state
       const app = await tx.query.applications.findFirst({
         where: eq(applications.id, appId),
       });
 
-      if (!app) throw new Error("Application not found in database.");
+      if (!app) throw new Error("Application not found.");
       
-      // Handle the JSONB details safely
-      const oldDetails = app.details || { comments: [], productLines: [] };
+      const oldDetails = (app.details as any) || { comments: [] };
       const currentComments = Array.isArray(oldDetails.comments) ? oldDetails.comments : [];
+      
+      // LOGIC CHECK: Are we in Pass 2? 
+      // We check if the application type suggests this is a post-inspection review
+      // or if the current point is specifically the final hub clearance.
+      const isPass2 = app.status === 'AWAITING_HUB_ENDORSEMENT' || app.type === "Inspection Report Review (Foreign)";
 
       // 2. RISK ENGINE LOGIC
       const currentRisk = await tx.query.riskAssessments.findFirst({
         where: eq(riskAssessments.applicationId, appId)
       });
 
-      if (currentRisk && currentRisk.intrinsicLevel && currentRisk.complianceLevel) {
-        const { rating, interval } = calculateORR(
-          currentRisk.intrinsicLevel, 
-          currentRisk.complianceLevel
-        );
+      if (currentRisk && currentRisk.intrinsicLevel) {
+        // If we are in Pass 2, we have a complianceLevel to work with
+        if (isPass2 && currentRisk.complianceLevel) {
+          const { rating, interval } = calculateORR(
+            currentRisk.intrinsicLevel as any, 
+            currentRisk.complianceLevel as any
+          );
 
-        const nextDate = new Date();
-        nextDate.setMonth(nextDate.getMonth() + interval);
+          const nextDate = new Date();
+          nextDate.setMonth(nextDate.getMonth() + interval);
 
-        await tx.update(riskAssessments)
-          .set({
-            overallRiskRating: rating,
-            nextInspectionDate: nextDate,
-            status: 'FINALIZED',
-            updatedAt: dbNow
-          })
-          .where(eq(riskAssessments.applicationId, appId));
+          await tx.update(riskAssessments)
+            .set({
+              overallRiskRating: rating,
+              nextInspectionDate: nextDate,
+              status: 'FINALIZED', // Only finalize when both levels are present in Pass 2
+              updatedAt: dbNow
+            })
+            .where(eq(riskAssessments.applicationId, appId));
+        } else {
+          // Pass 1: We just update the timestamp, keep status as PARTIAL/DRAFT
+          await tx.update(riskAssessments)
+            .set({
+              updatedAt: dbNow,
+              status: 'PARTIAL' 
+            })
+            .where(eq(riskAssessments.applicationId, appId));
+        }
       }
 
       // 3. Update Application Status & Audit Narrative
@@ -261,13 +282,13 @@ export async function issueFinalClearance(
         role: "Director",
         text: remarks,
         timestamp: new Date().toISOString(),
-        action: "FINAL_CLEARANCE_ISSUED",
-        attachmentUrl: storagePath // mapping storagePath to the schema's attachmentUrl
+        action: isPass2 ? "FINAL_CLEARANCE_ISSUED" : "TECHNICAL_PASS_CLEARED",
+        attachmentUrl: storagePath 
       };
 
       await tx.update(applications)
         .set({
-          status: 'CLEARED',
+          status: isPass2 ? 'CLEARED' : 'TECHNICAL_PASSED',
           currentPoint: 'Registry Archival', 
           details: {
             ...oldDetails,
@@ -280,12 +301,11 @@ export async function issueFinalClearance(
         .where(eq(applications.id, appId));
 
       // 4. QMS Clock Management
-      // Stop Director Clock
+      // Stop Director Clock (Handles both 'Director Review' and 'Director Final Review')
       await tx.update(qmsTimelines)
         .set({ endTime: dbNow })
         .where(and(
           eq(qmsTimelines.applicationId, appId),
-          eq(qmsTimelines.point, 'Director Final Review'),
           isNull(qmsTimelines.endTime)
         ));
 

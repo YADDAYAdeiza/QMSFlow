@@ -38,6 +38,9 @@ export default async function Page({
   // Filter staff by the acting division for targeted assignment
   const currentDiv = as?.toUpperCase() || "VMD";
   const staffList = await db.select().from(users).where(eq(users.division, currentDiv));
+
+  console.log('This is staffList: ', staffList);
+  console.log('This is currentDiv: ', currentDiv);
   
   const riskRecord = app.riskAssessments?.[0] as any;
   const details = (app.details as any) || {};

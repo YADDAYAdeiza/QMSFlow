@@ -182,7 +182,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
         CURRENT_USER.role
     );
     if (result.success) {
-      router.push("/risk");
+      router.push("/dashboard/lod");
       router.refresh();
     }
   };
