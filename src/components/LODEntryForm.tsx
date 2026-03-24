@@ -15,8 +15,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const CURRENT_USER = { 
-  id: "user_susan_yusuf", 
-  name: "Dr. Mrs. Susan Yusuf", 
+  id: "477d0494-3cfc-44c1-979d-5602eb01aabe", 
+  name: "LOD", 
   role: "Specialist" 
 };
 

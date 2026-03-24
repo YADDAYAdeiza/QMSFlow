@@ -64,6 +64,7 @@ export const applications = pgTable("applications", {
       timestamp: string;
       attachmentUrl?: string;
     }>;
+    isComplianceReview?: boolean; // Track Pass 1 vs Pass 2
   }>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -104,7 +105,8 @@ export const productLineRisks = pgTable("product_line_risks", {
 export const riskAssessments = pgTable("risk_assessments", {
   id: serial("id").primaryKey(),
   facilityId: integer("facility_id").references(() => companies.id, { onDelete: 'cascade' }),
-  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }),
+  // ✅ FIX: Added .unique() here so "onConflict" has an arbiter
+  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }).unique(), 
   complexityScore: integer("complexity_score"),
   criticalityScore: integer("criticality_score"),
   intrinsicLevel: varchar("intrinsic_level", { length: 10 }), 
@@ -118,9 +120,12 @@ export const riskAssessments = pgTable("risk_assessments", {
   status: varchar("status", { length: 20 }).default('PARTIAL'),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => ({
+  // ✅ SECONDARY FIX: Explicit unique index for Postgres
+  uniqueAppRisk: uniqueIndex("unique_app_risk").on(table.applicationId),
+}));
 
-// --- UPDATED RELATIONS (The Fix) ---
+// --- RELATIONS ---
 
 export const companiesRelations = relations(companies, ({ many }) => ({
   productLines: many(productLines),
@@ -150,7 +155,6 @@ export const applicationsRelations = relations(applications, ({ one, many }) => 
     relationName: "foreign_app_rel"
   }),
   timelines: many(qmsTimelines),
-  // ✅ FIX: This was missing and caused the "referencedTable" error
   riskAssessments: many(riskAssessments), 
 }));
 

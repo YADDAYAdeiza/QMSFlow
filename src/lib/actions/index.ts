@@ -27,7 +27,7 @@ export async function submitLODApplication(
 ) {
   const validated = lodFormSchema.safeParse(rawData);
   if (!validated.success) return { success: false, error: "Validation Failed" };
-
+console.log('This is userId: ', userId);
   const data = validated.data;
   const normalizedAppNumber = normalize(data.appNumber);
 

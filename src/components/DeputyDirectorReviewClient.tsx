@@ -14,7 +14,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isReworkModalOpen, setIsReworkModalOpen] = useState(false);
-  const [showAllStaff, setShowAllStaff] = useState(false); // Fallback toggle
+  const [showAllStaff, setShowAllStaff] = useState(false);
 
   const [assignmentRemarks, setAssignmentRemarks] = useState(""); 
   const [endorsementRemarks, setEndorsementRemarks] = useState(""); 
@@ -23,47 +23,47 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const appDetails = app?.details || {};
   const history = app?.narrativeHistory || [];
 
-  // --- RISK & COMPLIANCE CONTEXT ---
-  const intrinsicLevel = app?.intrinsicLevel || "Low";
-  const complianceLevel = app?.complianceLevel;
-  const findings = app?.findingsLedger || appDetails?.findings_ledger || [];
-  const summary = app?.complianceSummary || appDetails?.compliance_summary || {};
+  // --- PHASE DETECTION ---
+  const isRound2 = app?.isComplianceReview === true;
   
-  // --- PHASE & HUB LOGIC ---
+  // --- URL LOGIC ---
+  const dossierUrl = appDetails?.poaUrl || "";
+  const technicalReportUrl = appDetails?.inspectionReportUrl || "";
+  const verificationReportUrl = appDetails?.verificationReportUrl || "";
+
+  // If in Round 2, the "Staff Report" is either the Verification (IRSD) or Technical (VMD)
+  const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
+  const staffReportUrl = isIRSDStaffReturn ? verificationReportUrl : technicalReportUrl;
+  
+  const hasStaffSubmission = !!staffReportUrl;
+  
+  // --- SMART DEFAULT VIEW ---
+  // If it's Round 1, always start with Dossier/PoA. 
+  // If Round 2 and a report exists, show the report.
+  const [viewMode, setViewMode] = useState<'dossier' | 'report'>(
+    (isRound2 && hasStaffSubmission) ? 'report' : 'dossier'
+  );
+
+  // FINAL SAFETY: Guard against empty strings causing iframe recursion
+  const iframeSrc = viewMode === 'report' ? staffReportUrl : dossierUrl;
+
   const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
   const isHubEntry = app?.currentPoint === 'IRSD Hub Clearance';
-  const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
-  
   const isAssignmentPhase = app?.currentPoint === 'Technical DD Review' || isHubEntry;
   const isReviewPhase = isTechnicalReturn || isIRSDStaffReturn;
 
-  // --- PDF VIEWER LOGIC ---
-  const dossierUrl = appDetails?.poaUrl || "";
-  const technicalReportUrl = appDetails?.inspectionReportUrl || "";
-  const verificationReportUrl = appDetails?.verificationReportUrl || appDetails?.inspectionAuditReportUrl || "";
-  const staffReportUrl = isIRSDStaffReturn ? verificationReportUrl : technicalReportUrl;
-  const hasStaffSubmission = !!(technicalReportUrl || verificationReportUrl);
-  
-  const [viewMode, setViewMode] = useState<'dossier' | 'report'>(
-    (hasStaffSubmission || isReviewPhase) ? 'report' : 'dossier'
-  );
+  const intrinsicLevel = app?.intrinsicLevel || "Low";
+  const complianceLevel = app?.complianceLevel;
+  const findings = app?.findingsLedger || [];
+  const summary = app?.complianceSummary || {};
 
-  // --- REFACTORED FILTERING LOGIC ---
-  // We reach into the JSONB details or default to VMD
   const appDivision = appDetails?.division || app?.division || "VMD";
   const activeAssignmentDivision = isHubEntry ? "IRSD" : appDivision;
 
-  // Filter staff based on the active division
   const filteredStaff = staffList.filter((s: any) => 
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
 
-  console.log('--- Workflow Debug ---');
-  console.log('Target Division:', activeAssignmentDivision);
-  console.log('Available Staff in list:', staffList.length);
-  console.log('Matches found:', filteredStaff.length);
-
-  // --- ACTIONS ---
   const handleAssign = async () => {
     if (!selectedStaffId) return alert(`Please select an officer.`);
     startTransition(async () => {
@@ -99,11 +99,11 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         <div className="flex items-center justify-between bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex gap-1">
                 <button onClick={() => setViewMode('dossier')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'dossier' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
-                  <FileText className="w-3.5 h-3.5" /> Company Dossier
+                  <FileText className="w-3.5 h-3.5" /> Company Dossier / PoA
                 </button>
                 {hasStaffSubmission && (
                   <button onClick={() => setViewMode('report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'report' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
-                    <ShieldCheck className="w-3.5 h-3.5" /> {isIRSDStaffReturn ? 'Verification Report' : 'Technical Assessment'}
+                    <ShieldCheck className="w-3.5 h-3.5" /> Assessment Report
                   </button>
                 )}
             </div>
@@ -126,11 +126,20 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         </div>
 
         <div className="bg-white p-3 rounded-[3rem] shadow-2xl border border-slate-200 h-[82vh] relative overflow-hidden">
-          <iframe 
-            src={`${viewMode === 'report' ? staffReportUrl : dossierUrl}#toolbar=0`} 
-            className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" 
-            key={viewMode} 
-          />
+          {iframeSrc ? (
+            <iframe 
+              src={`${iframeSrc}#toolbar=0`} 
+              className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" 
+              key={viewMode} 
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-3">
+              <FileSearch className="w-12 h-12 opacity-20" />
+              <p className="text-xs font-bold uppercase tracking-widest text-center px-10">
+                The requested {viewMode === 'report' ? 'Assessment Report' : 'PoA/Dossier'} URL is missing.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -179,11 +188,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                    </div>
                    <div className="p-4 rounded-2xl bg-slate-50">
                      <p className="text-[11px] text-slate-600 italic leading-relaxed">"{note?.text}"</p>
-                     {note.attachmentUrl && (
-                       <a href={note.attachmentUrl} target="_blank" className="text-[8px] text-blue-500 mt-2 flex items-center gap-1 underline">
-                         <ExternalLink className="w-2 h-2" /> View File
-                       </a>
-                     )}
                    </div>
                 </div>
               ))}
@@ -198,7 +202,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                 {isHubEntry ? <Gavel className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
                 {isHubEntry ? "Hub Delegation (IRSD)" : "Technical Assignment"}
               </h3>
-              {/* Emergency Override Toggle */}
               <button 
                 onClick={() => setShowAllStaff(!showAllStaff)}
                 className="text-[8px] font-bold bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full transition-colors"
@@ -222,12 +225,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                   </option>
                 ))}
               </select>
-              
-              {filteredStaff.length === 0 && !showAllStaff && (
-                <div className="flex items-center gap-2 p-3 bg-amber-500/20 border border-amber-500/50 rounded-xl text-[10px] font-bold">
-                  <AlertCircle className="w-3 h-3" /> No staff found for {activeAssignmentDivision}
-                </div>
-              )}
 
               <textarea 
                 value={assignmentRemarks} 

@@ -1,9 +1,8 @@
-// @/app/dashboard/ddd/review/[id]/page.tsx
 export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import DeputyDirectorReviewClient from "@/components/DeputyDirectorReviewClient";
 import Link from "next/link";
 import { Landmark, Factory } from "lucide-react";
@@ -37,22 +36,19 @@ export default async function Page({
 
   // Filter staff by the acting division for targeted assignment
   const currentDiv = as?.toUpperCase() || "VMD";
-  const staffList = await db.select().from(users).where(eq(users.division, currentDiv));
-
-  console.log('This is staffList: ', staffList);
-  console.log('This is currentDiv: ', currentDiv);
+  const staffList = await db.select().from(users).where(eq(sql`UPPER(${users.division})`, currentDiv));
   
   const riskRecord = app.riskAssessments?.[0] as any;
   const details = (app.details as any) || {};
 
-  // ROUND 2 DETECTION
-  const isComplianceReview = details?.type === "Inspection Report Review (Foreign)" || !!details?.inspectionReportUrl;
+  // PASS 1 VS PASS 2 DETECTION
+  const isComplianceReview = details?.isComplianceReview === true || !!details?.inspectionReportUrl;
 
   const cleanApp = {
     ...app,
     company: app.localApplicant, 
     details,
-    isComplianceReview, // Injecting context
+    isComplianceReview, 
     narrativeHistory: details.comments || [],
     
     // Risk Levels (Pass 1 vs Pass 2)
@@ -63,8 +59,6 @@ export default async function Page({
     findingsLedger: details.findings_ledger || [],
     complianceSummary: details.compliance_summary || { criticalCount: 0, majorCount: 0, otherCount: 0 },
   };
-
-  const currentReportUrl = details.inspectionReportUrl || details.verificationReportUrl || details.poaUrl || "";
 
   return (
     <div className="relative font-sans">
@@ -82,7 +76,6 @@ export default async function Page({
       <DeputyDirectorReviewClient 
         app={cleanApp} 
         staffList={staffList} 
-        pdfUrl={currentReportUrl} 
         loggedInUserId={loggedInUserId} 
       />
     </div>
