@@ -29,31 +29,34 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
 
   if (!appData) return notFound();
 
-  // 2. EXTRACT FROM JSONB DETAILS (The "Evolving" Data)
+  // 2. EXTRACT FROM JSONB DETAILS
   const details = (appData.details as any) || {};
   
-  // Logic: Check the JSONB flag OR the specific workflow point
+  // Logic: Force Compliance mode if the Inspection Report exists (Pass 2)
   const isComplianceReview = 
     details.isComplianceReview === true || 
+    !!details.inspectionReportUrl || 
     appData.currentPoint === "Technical DD Review Return";
 
   const riskData = appData.riskAssessments?.[0] as any;
   
-  // LEGER DATA: History of findings and previous SRA status
   const findingsLedger = details.findings_ledger || details.findingsLedger || [];
   const auditTrail = details.comments || [];
   const prevIsSra = details.is_sra || details.isSra || false;
 
-  // 3. Resolve PDF URL (Documents Bucket)
-  const rawPath = isComplianceReview 
-    ? (details.inspectionReportUrl || details.reportUrl) 
-    : (details.poaUrl || details.dossierPath || details.reportUrl);
+  // 3. Resolve PDF URL
+  // We prioritize inspectionReportUrl (Pass 2) over poaUrl (Pass 1)
+  const rawPath = details.inspectionReportUrl || 
+                  details.reportUrl || 
+                  details.poaUrl || 
+                  details.dossierPath;
 
   let publicUrl = "";
   if (rawPath) {
     if (rawPath.startsWith('http')) { 
       publicUrl = rawPath; 
     } else {
+      // Note: Bucket name 'Documents' is case-sensitive in some Supabase configs
       const { data: urlData } = supabase.storage.from('Documents').getPublicUrl(rawPath);
       publicUrl = urlData.publicUrl;
     }
@@ -154,12 +157,18 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
             </div>
           </div>
 
-          {/* COMPLIANCE AUDIT LEDGER (IF DATA EXISTS) */}
+          {/* COMPLIANCE AUDIT LEDGER */}
           {findingsLedger.length > 0 && (
             <div className="mb-10 animate-in fade-in slide-in-from-top-4 duration-700">
               <div className="flex items-center gap-2 mb-4">
-                <ListChecks className="w-4 h-4 text-slate-400" />
-                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Compliance Audit Ledger</h3>
+                <ul className="list-none">
+                   <li>
+                     <div className="flex items-center gap-2">
+                        <ListChecks className="w-4 h-4 text-slate-400" />
+                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Compliance Audit Ledger</h3>
+                     </div>
+                   </li>
+                </ul>
               </div>
               <div className="space-y-3">
                 {findingsLedger.map((finding: any, idx: number) => (

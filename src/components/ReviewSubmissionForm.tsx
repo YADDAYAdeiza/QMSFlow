@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import { 
   ShieldAlert, CheckCircle2, FileText, 
   Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
-  AlertTriangle, Info
+  Info
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
@@ -27,7 +27,7 @@ interface Props {
   staffName: string;
   comments: any[];
   isHubVetting: boolean;
-  isComplianceReview: boolean; // Context from Page
+  isComplianceReview: boolean; 
   riskId: string;
   previousFindings?: any[];
   previousIsSra?: boolean;
@@ -42,9 +42,8 @@ export default function ReviewSubmissionForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   
-  // Logic: In Compliance Review, the ledger MUST be visible.
-  const [isLedgerVisible, setIsLedgerVisible] = useState(isComplianceReview || previousFindings.length > 0);
-  
+  // FIXED: Default to true so you can see the ledger immediately
+  const [isLedgerVisible, setIsLedgerVisible] = useState(true);
   const [isSra, setIsSra] = useState(previousIsSra);
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
@@ -84,10 +83,9 @@ export default function ReviewSubmissionForm({
         const fileExt = evidenceFile.name.split('.').pop();
         const fileName = `${appId}_evidence_${Date.now()}.${fileExt}`;
         const filePath = `verification_evidence/${fileName}`;
-        // Note: Using 'Documents' bucket as per Saved Info
-        const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, evidenceFile);
+        const { error: uploadError } = await supabase.storage.from('Documents').upload(filePath, evidenceFile);
         if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
+        const { data } = supabase.storage.from('Documents').getPublicUrl(filePath);
         uploadedUrl = data.publicUrl;
       }
 
@@ -116,58 +114,62 @@ export default function ReviewSubmissionForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-10">
+    <form onSubmit={handleSubmit} className="space-y-12 pb-20 max-w-4xl mx-auto">
       
       {/* 1. DEFICIENCY / AUDIT LEDGER */}
-      <div className="space-y-4">
+      <div className="space-y-6">
         <div 
-          onClick={() => !isComplianceReview && setIsLedgerVisible(!isLedgerVisible)}
-          className={`flex items-center justify-between p-6 rounded-[2rem] transition-all border ${
+          onClick={() => setIsLedgerVisible(!isLedgerVisible)}
+          className={`flex items-center justify-between p-8 rounded-[2.5rem] transition-all duration-500 border-2 shadow-sm cursor-pointer ${
             isLedgerVisible 
-              ? isComplianceReview ? "bg-purple-900 border-purple-800 shadow-xl" : "bg-slate-900 border-slate-900 shadow-xl"
-              : "bg-white border-slate-100 hover:border-blue-200 cursor-pointer"
-          } ${isComplianceReview ? 'cursor-default ring-4 ring-purple-500/10' : ''}`}
+              ? isComplianceReview 
+                ? "bg-gradient-to-br from-indigo-950 via-purple-950 to-purple-900 border-purple-500 shadow-xl shadow-purple-500/20" 
+                : "bg-slate-900 border-slate-700 shadow-xl shadow-slate-900/40"
+              : "bg-white border-slate-200 hover:border-blue-400 hover:shadow-md"
+          } ${isComplianceReview ? 'ring-4 ring-purple-500/10' : ''}`}
         >
-          <div className="flex items-center gap-3">
-            <ShieldAlert className={`w-4 h-4 ${isLedgerVisible ? "text-rose-400" : "text-slate-400"}`} />
+          <div className="flex items-center gap-6">
+            <div className={`p-4 rounded-2xl ${isLedgerVisible ? 'bg-white/10' : 'bg-slate-100'}`}>
+              <ShieldAlert className={`w-7 h-7 ${isLedgerVisible ? "text-rose-400" : "text-slate-500"}`} />
+            </div>
             <div>
-              <h4 className={`text-[10px] font-black uppercase tracking-widest ${isLedgerVisible ? "text-white" : "text-slate-900"}`}>
+              <h4 className={`text-base font-black uppercase tracking-[0.2em] ${isLedgerVisible ? "text-white" : "text-slate-900"}`}>
                 {isComplianceReview ? "Compliance Audit Ledger" : "Deficiency Ledger"}
               </h4>
-              <p className={`text-[8px] font-bold uppercase ${isLedgerVisible ? "text-slate-400" : "text-slate-300"}`}>
-                {isComplianceReview ? "Mandatory Analysis" : "Optional Observations"}
+              <p className={`text-[11px] font-bold uppercase tracking-widest mt-1 ${isLedgerVisible ? "text-purple-300" : "text-slate-500"}`}>
+                {isComplianceReview ? "Mandatory Analysis & Scoring" : "Optional Observations"}
               </p>
             </div>
           </div>
-          {!isComplianceReview && (isLedgerVisible ? <ChevronUp className="w-4 h-4 text-white" /> : <ChevronDown className="w-4 h-4 text-slate-300" />)}
+          {isLedgerVisible ? <ChevronUp className={`w-6 h-6 ${isLedgerVisible ? 'text-white' : 'text-slate-400'}`} /> : <ChevronDown className="w-6 h-6 text-slate-400" />}
         </div>
 
         {isLedgerVisible && (
-          <div className="space-y-6 pt-2 animate-in fade-in slide-in-from-top-4 duration-300">
-            <div className="flex justify-between items-center px-2">
-              <div className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                <Info className="w-3 h-3" />
-                <span className="text-[8px] font-black uppercase tracking-tight">Record specific non-compliances found in report</span>
+          <div className="space-y-8 pt-2 animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="flex justify-between items-center px-4">
+              <div className="flex items-center gap-3 text-blue-800 bg-blue-50 border border-blue-200 px-5 py-2.5 rounded-full shadow-sm">
+                <Info className="w-5 h-5 text-blue-600" />
+                <span className="text-[11px] font-black uppercase tracking-widest">Document specific findings below</span>
               </div>
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-3 cursor-pointer group">
                 <input 
                   type="checkbox" 
                   checked={isSra} 
                   onChange={(e) => setIsSra(e.target.checked)} 
-                  className="rounded border-slate-300 text-blue-600 w-3 h-3" 
+                  className="rounded-md border-slate-300 text-blue-600 w-5 h-5 transition-all focus:ring-blue-500/20 cursor-pointer" 
                 />
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">SRA Origin</span>
+                <span className="text-[12px] font-black text-slate-600 uppercase tracking-widest group-hover:text-blue-600 transition-colors">SRA Origin</span>
               </label>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-6">
               {findings.map((f, i) => (
-                <div key={i} className="p-5 rounded-[2rem] border border-slate-100 bg-white shadow-sm space-y-3 relative transition-all hover:border-blue-100">
-                  <div className="flex wrap gap-2 items-center">
+                <div key={i} className="p-7 rounded-[2.5rem] border border-slate-200 bg-white shadow-md space-y-5 relative transition-all hover:border-blue-300 group">
+                  <div className="flex wrap gap-4 items-center">
                     <select 
                       value={f.system} 
                       onChange={(e) => updateFinding(i, 'system', e.target.value)} 
-                      className="bg-slate-50 border-none rounded-full px-3 py-1 text-[9px] font-bold text-slate-600 outline-none"
+                      className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all cursor-pointer"
                     >
                       {GMP_SYSTEMS.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
@@ -175,16 +177,20 @@ export default function ReviewSubmissionForm({
                     <select 
                       value={f.severity} 
                       onChange={(e) => updateFinding(i, 'severity', e.target.value)}
-                      className={`border-none rounded-full px-3 py-1 text-[9px] font-black uppercase outline-none transition-colors ${
-                        f.severity === 'Critical' ? 'bg-rose-500 text-white' : 
-                        f.severity === 'Major' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'
+                      className={`border-none rounded-2xl px-6 py-2.5 text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer ${
+                        f.severity === 'Critical' ? 'bg-rose-600 text-white hover:bg-rose-700' : 
+                        f.severity === 'Major' ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-200 text-slate-800 hover:bg-slate-300'
                       }`}
                     >
                       {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                     
-                    <button type="button" onClick={() => removeFinding(i)} className="ml-auto text-slate-200 hover:text-rose-500 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <button 
+                      type="button" 
+                      onClick={() => removeFinding(i)} 
+                      className="ml-auto p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                    >
+                      <Trash2 className="w-5 h-5" />
                     </button>
                   </div>
 
@@ -192,7 +198,7 @@ export default function ReviewSubmissionForm({
                     value={f.text} 
                     onChange={(e) => updateFinding(i, 'text', e.target.value)} 
                     placeholder="Describe specific observation from the inspection report..." 
-                    className="w-full bg-transparent text-[11px] text-slate-600 italic focus:outline-none min-h-[50px] resize-none" 
+                    className="w-full bg-slate-50/50 p-5 rounded-2xl border border-slate-100 focus:border-blue-300 focus:bg-white text-sm text-slate-800 italic focus:outline-none min-h-[100px] resize-none transition-all shadow-inner placeholder:text-slate-400" 
                   />
                 </div>
               ))}
@@ -200,76 +206,99 @@ export default function ReviewSubmissionForm({
               <button 
                 type="button" 
                 onClick={addFinding}
-                className="w-full py-4 rounded-[2rem] border-2 border-dashed border-slate-100 text-[9px] font-black text-slate-400 hover:text-blue-500 hover:border-blue-100 transition-all uppercase flex items-center justify-center gap-2"
+                className="w-full py-7 rounded-[2.5rem] border-2 border-dashed border-slate-300 text-xs font-black text-slate-600 hover:text-blue-600 hover:border-blue-400 hover:bg-blue-50/50 transition-all uppercase flex items-center justify-center gap-4 tracking-widest"
               >
-                <Plus className="w-3 h-3" /> Add Observation Entry
+                <Plus className="w-5 h-5" /> Add Observation Entry
               </button>
             </div>
 
-            <div className="flex gap-4 px-2 pt-2 border-t border-slate-50">
-                <div className="text-[9px] font-black uppercase flex items-center gap-1">
-                   <AlertTriangle className="w-3 h-3 text-rose-500" />
-                   <span className="text-rose-500 mr-1">{counts.critical}</span> Critical
+            <div className="flex gap-10 px-8 py-6 bg-slate-100/50 rounded-[2.5rem] border border-slate-200 shadow-inner">
+                <div className="text-xs font-black uppercase flex items-center gap-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.6)]" />
+                    <span className="text-rose-700"><span className="text-lg mr-1">{counts.critical}</span> Critical</span>
                 </div>
-                <div className="text-[9px] font-black uppercase"><span className="text-amber-500 mr-1">{counts.major}</span> Major</div>
-                <div className="text-[9px] font-black uppercase"><span className="text-slate-400 mr-1">{counts.other}</span> Other</div>
+                <div className="text-xs font-black uppercase flex items-center gap-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
+                    <span className="text-amber-700"><span className="text-lg mr-1">{counts.major}</span> Major</span>
+                </div>
+                <div className="text-xs font-black uppercase flex items-center gap-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                    <span className="text-slate-600"><span className="text-lg mr-1">{counts.other}</span> Other</span>
+                </div>
             </div>
           </div>
         )}
       </div>
 
       {/* 2. EVIDENCE UPLOAD */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2 px-2 text-slate-400">
-          <Upload className="w-4 h-4" />
-          <h4 className="text-[10px] font-black uppercase tracking-widest">Supporting Evidence</h4>
+      <div className="space-y-6">
+        <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
+          <Upload className="w-6 h-6 text-blue-600" />
+          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Supporting Evidence</h4>
         </div>
         
         <div 
           onClick={() => fileInputRef.current?.click()}
-          className={`p-8 rounded-[2.5rem] border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-2 ${
-            evidenceFile ? "border-emerald-200 bg-emerald-50" : "border-slate-100 bg-slate-50 hover:border-blue-200"
+          className={`p-14 rounded-[3.5rem] border-2 border-dashed cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-5 shadow-sm ${
+            evidenceFile 
+              ? "border-emerald-500 bg-emerald-50/50 shadow-inner shadow-emerald-100" 
+              : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
           }`}
         >
           <input type="file" ref={fileInputRef} onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} className="hidden" accept=".pdf,.jpg,.png" />
           {evidenceFile ? (
             <>
-              <FileCheck className="w-6 h-6 text-emerald-500" />
-              <span className="text-[10px] font-bold text-emerald-600 uppercase">{evidenceFile.name}</span>
+              <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
+                <FileCheck className="w-10 h-10 text-white" />
+              </div>
+              <div className="text-center">
+                <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
+                <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to change selection</span>
+              </div>
             </>
           ) : (
             <>
-              <Upload className="w-6 h-6 text-slate-300" />
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Upload Verification Document</span>
+              <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
+                <Upload className="w-10 h-10 text-slate-400" />
+              </div>
+              <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select Verification Document</span>
             </>
           )}
         </div>
       </div>
 
       {/* 3. EXECUTIVE SUMMARY & SUBMIT */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2 px-2 text-slate-400">
-          <FileText className="w-4 h-4" />
-          <h4 className="text-[10px] font-black uppercase tracking-widest">Executive Assessment</h4>
+      <div className="space-y-6">
+        <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
+          <FileText className="w-6 h-6 text-blue-600" />
+          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Executive Assessment</h4>
         </div>
         
         <textarea 
           required
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
-          placeholder={isComplianceReview ? "Final compliance verdict based on the inspection report audit..." : "Final assessment summary for the DDD..."}
-          className="w-full p-6 rounded-[2.5rem] border border-slate-200 text-xs text-slate-600 min-h-[150px] shadow-sm focus:ring-4 focus:ring-blue-500/5 outline-none transition-all"
+          placeholder={isComplianceReview ? "Provide a final compliance verdict based on the inspection report audit..." : "Final assessment summary for the DDD..."}
+          className="w-full p-10 rounded-[3.5rem] border-2 border-slate-200 bg-white text-base text-slate-800 min-h-[220px] shadow-xl shadow-slate-200/30 focus:ring-8 focus:ring-blue-500/5 focus:border-blue-500 outline-none transition-all leading-relaxed placeholder:text-slate-400"
         />
 
         <button 
           disabled={loading}
           type="submit"
-          className={`w-full p-5 rounded-full text-white text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 ${
-            isComplianceReview ? "bg-purple-600 hover:bg-purple-700" : "bg-slate-900 hover:bg-blue-600"
+          className={`w-full py-7 rounded-full text-white text-sm font-black uppercase tracking-[0.4em] transition-all duration-300 flex items-center justify-center gap-5 shadow-2xl disabled:opacity-50 active:scale-[0.97] mt-4 ${
+            isComplianceReview 
+              ? "bg-purple-700 hover:bg-purple-800 shadow-purple-900/30 ring-4 ring-purple-500/10" 
+              : "bg-slate-900 hover:bg-blue-700 shadow-slate-900/40"
           }`}
         >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-          SUBMIT TO {isHubVetting ? "IRSD HUB" : "DIVISIONAL DEPUTY DIRECTOR"}
+          {loading ? (
+            <Loader2 className="w-7 h-7 animate-spin" />
+          ) : (
+            <>
+              <CheckCircle2 className="w-7 h-7" /> 
+              SUBMIT TO {isHubVetting ? "IRSD HUB" : "DIVISIONAL DEPUTY DIRECTOR"}
+            </>
+          )}
         </button>
       </div>
 

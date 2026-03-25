@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, users, riskAssessments } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm"; // Added and
 import { notFound } from "next/navigation";
 import DirectorReviewClient from "./DirectorReviewClient";
 import { supabase } from "@/lib/supabase";
@@ -18,16 +18,23 @@ export default async function DirectorReviewPage({
   const appId = parseInt(id);
   if (isNaN(appId)) return notFound();
 
-  const app = await db.query.applications.findFirst({
-    where: eq(applications.id, appId),
-    with: { localApplicant: true, riskAssessments: true }
-  });
+  // 1. Fetch Application and Director Record in parallel
+  // We look for a user with the role 'Director' to get their real UUID
+  const [app, directorUser] = await Promise.all([
+    db.query.applications.findFirst({
+      where: eq(applications.id, appId),
+      with: { localApplicant: true, riskAssessments: true }
+    }),
+    db.query.users.findFirst({
+      where: eq(users.role, "Director") 
+      // If you have multiple directors, you might need: eq(users.email, "director@nafdac.gov.ng")
+    })
+  ]);
 
-  if (!app) return notFound();
+  if (!app || !directorUser) return notFound();
 
   const appDetails = (app.details as any) || {};
   
-  // DETECTION LOGIC: Swapping to GMP Certificate mode if an inspection report exists
   const isInspection = !!(appDetails.inspectionReportUrl || appDetails.isInspectionFlow);
   const docTitle = isInspection ? "GMP Certificate" : "GMP Clearance Letter";
   const docType = isInspection ? "CERTIFICATE" : "CLEARANCE";
@@ -48,7 +55,6 @@ export default async function DirectorReviewPage({
 
   const activeStream = appDetails.division || "VMD";
 
-  // Priority URL logic: Always favor the Inspection Report for this view if it exists
   let finalPdfUrl = appDetails.inspectionReportUrl || appDetails.poaUrl || appDetails.reportUrl || "";
   if (finalPdfUrl && !finalPdfUrl.startsWith('http')) {
     const { data } = supabase.storage.from('documents').getPublicUrl(finalPdfUrl);
@@ -63,9 +69,8 @@ export default async function DirectorReviewPage({
     company: app.localApplicant, 
     details: appDetails,
     commentsTrail: Array.isArray(appDetails.comments) ? appDetails.comments : [],
-    // Dynamic recommendation text based on type
     dddInstruction: [...(appDetails.comments || [])].reverse().find((c: any) => 
-        c.role === "Divisional Deputy Director" || c.role === "DDD"
+        c.role === "Divisional Deputy Director" || c.role === "Divisional Deputy Director"
     )?.text || `Recommended for ${isInspection ? 'certification' : 'clearance'} based on technical compliance.`,
     complianceRisk 
   };
@@ -76,7 +81,8 @@ export default async function DirectorReviewPage({
     <DirectorReviewClient 
       app={cleanApp} 
       usersList={usersList}
-      currentUserId="DIR-001" 
+      // PASS THE REAL UUID FROM THE DATABASE
+      currentUserId={directorUser.id} 
       stream={activeStream}
       pdfUrl={finalPdfUrl}
     />

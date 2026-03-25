@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
-import { GmpCertificate } from "@/components/documents/GmpCertificate"; // You'll need this component
+import { GmpCertificate } from "@/components/documents/GmpCertificate";
 import { supabase } from "@/lib/supabase";
 import RejectionModal from "@/components/RejectionModal";
 
@@ -68,7 +68,6 @@ function RiskExecutiveSummary({ complianceRisk, isInspection }: { complianceRisk
         <div className={`grid transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
           <div className="overflow-hidden">
             <div className="p-8 pt-2 space-y-8 border-t border-slate-50">
-              
               <div className="flex gap-3 h-32">
                 <div className="w-1/4 bg-slate-900 rounded-[2rem] flex flex-col items-center justify-center p-4 text-center border-b-4 border-blue-500 shadow-xl shadow-slate-900/10">
                   <Activity className="w-5 h-5 text-blue-400 mb-2" />
@@ -80,7 +79,6 @@ function RiskExecutiveSummary({ complianceRisk, isInspection }: { complianceRisk
                   <div className={`p-4 rounded-2xl shrink-0 shadow-lg ${isSra ? 'bg-blue-600 text-white shadow-blue-500/30' : 'bg-amber-500 text-white shadow-amber-500/30'}`}>
                     {isSra ? <Globe2 className="w-6 h-6" /> : <ShieldCheck className="w-6 h-6 opacity-60" />}
                   </div>
-                  
                   <div className="relative z-10">
                     <h4 className={`text-[11px] font-black uppercase tracking-tight leading-none mb-1.5 ${isSra ? 'text-blue-900' : 'text-amber-900'}`}>
                       {isSra ? "SRA Recognized Facility" : "Non-SRA / Local Oversight"}
@@ -112,7 +110,7 @@ function RiskExecutiveSummary({ complianceRisk, isInspection }: { complianceRisk
                 <div className="space-y-3 pb-4">
                   <div className="flex items-center gap-2">
                     <ListFilter className="w-3 h-3 text-slate-400" />
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-slate-500">Observations Ledger</span>
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observations Ledger</span>
                   </div>
                   <div className="space-y-2 max-h-[180px] overflow-y-auto pr-2 custom-scrollbar font-sans">
                     {findings.map((f: any, i: number) => (
@@ -132,7 +130,7 @@ function RiskExecutiveSummary({ complianceRisk, isInspection }: { complianceRisk
   );
 }
 
-export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, currentUserId }: any) {
+export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUserId }: any) {
   const [remarks, setRemarks] = useState("");
   const [isPending, startTransition] = useTransition();
   const [processing, setProcessing] = useState(false);
@@ -146,14 +144,14 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
   const docTitle = app.docTitle;
 
   const trail = useMemo(() => {
-    const comments = app.commentsTrail || details.comments || [];
+    const comments = details.comments || [];
     return [...comments].map(c => ({
       ...c,
       roleDisplay: (c.role === "DDD" || c.role === "Divisional Deputy Director") 
         ? "Divisional Deputy Director" 
         : (c.role === "Director" ? "Executive Director" : c.role)
     })).reverse();
-  }, [app.commentsTrail, details.comments]);
+  }, [details.comments]);
 
   const docConfig = useMemo(() => {
     const mappedProducts = details.productLines?.flatMap((line: any) => 
@@ -170,10 +168,9 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
       products: mappedProducts
     };
 
-    // Swapping the component based on detection
     return { 
       component: isInspection ? <GmpCertificate data={templateData} /> : <ClearanceLetter data={templateData} />, 
-      prefix: isInspection ? "GMP_CERTIFICATE" : "CLEARANCE" 
+      prefix: isInspection ? "GMP_CERTIFICATE" : "GMP_CLEARANCE" 
     };
   }, [app, details, isInspection]);
 
@@ -189,11 +186,20 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
 
       startTransition(async () => {
-        const res = await issueFinalClearance(app.id, remarks, publicUrl);
+        // Disparate Archival logic
+        const metadataUpdate = isInspection 
+          ? { gmp_certificate_url: publicUrl, archived_path: publicUrl } 
+          : { gmp_clearance_url: publicUrl, archived_path: publicUrl };
+
+        const res = await issueFinalClearance(app.id, remarks, publicUrl, metadataUpdate, currentUserId);
+        
         if (res.success) { 
           router.push('/dashboard/director?view=final'); 
           router.refresh(); 
-        } else { alert(res.error); setProcessing(false); }
+        } else { 
+          alert(res.error); 
+          setProcessing(false); 
+        }
       });
     } catch (err: any) { alert(err.message); setProcessing(false); }
   };
@@ -249,7 +255,7 @@ export default function DirectorReviewClient({ app, usersList, stream, pdfUrl, c
             <textarea 
               value={remarks} onChange={(e) => setRemarks(e.target.value)} 
               className="w-full h-40 bg-slate-800/50 border-none rounded-[2rem] p-6 text-sm mb-6 outline-none text-white italic placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500/20 transition-all" 
-              placeholder={`Enter final executive decision remarks and ${isInspection ? 'certification' : 'clearance'} justification...`} 
+              placeholder={`Enter final executive decision remarks...`} 
             />
             <button onClick={handleApprove} disabled={processing || isPending} className="w-full py-5 bg-emerald-500 rounded-3xl font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20 transition-all">
               {processing ? <Loader2 className="animate-spin w-5 h-5" /> : `Authorize & Sign ${docTitle}`}

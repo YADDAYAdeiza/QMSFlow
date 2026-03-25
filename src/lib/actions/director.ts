@@ -217,114 +217,73 @@ export async function assignToDDD(
  * Pass 1: Moves to Registry/Hub for Pass 2 prep.
  * Pass 2: Finalizes Risk and completes the application.
  */
+
+/**
+ * issueFinalClearance
+ * Finalizes the Director's sign-off, handles disparate archival keys,
+ * and dynamically assigns the "from" name based on the actual user.
+ */
+
+/**
+ * issueFinalClearance
+ * Finalizes the Director's sign-off, handles disparate archival keys,
+ * and dynamically assigns the "from" name based on the actual user record.
+ */
 export async function issueFinalClearance(
   appId: number, 
   remarks: string, 
-  storagePath: string
+  publicUrl: string, 
+  metadataUpdate: any,
+  directorId: string 
 ) {
   try {
-    return await db.transaction(async (tx) => {
-      const dbNow = sql`now()`;
-      
-      // 1. Fetch current application state
-      const app = await tx.query.applications.findFirst({
-        where: eq(applications.id, appId),
-      });
+    // 1. Fetch current application and the Director's user record in parallel
+    const [app, directorRecord] = await Promise.all([
+      db.query.applications.findFirst({ where: eq(applications.id, appId) }),
+      db.query.users.findFirst({ where: eq(users.id, directorId) })
+    ]);
 
-      if (!app) throw new Error("Application not found.");
-      
-      const oldDetails = (app.details as any) || { comments: [] };
-      const currentComments = Array.isArray(oldDetails.comments) ? oldDetails.comments : [];
-      
-      // LOGIC CHECK: Are we in Pass 2? 
-      // We check if the application type suggests this is a post-inspection review
-      // or if the current point is specifically the final hub clearance.
-      const isPass2 = app.status === 'AWAITING_HUB_ENDORSEMENT' || app.type === "Inspection Report Review (Foreign)";
+    if (!app) throw new Error("Application not found");
+    if (!directorRecord) throw new Error("Director user record not found");
 
-      // 2. RISK ENGINE LOGIC
-      const currentRisk = await tx.query.riskAssessments.findFirst({
-        where: eq(riskAssessments.applicationId, appId)
-      });
+    const currentDetails = (app.details as any) || {};
+    const currentComments = currentDetails.comments || [];
 
-      if (currentRisk && currentRisk.intrinsicLevel) {
-        // If we are in Pass 2, we have a complianceLevel to work with
-        if (isPass2 && currentRisk.complianceLevel) {
-          const { rating, interval } = calculateORR(
-            currentRisk.intrinsicLevel as any, 
-            currentRisk.complianceLevel as any
-          );
+    // 2. Identify the action for the trail
+    const isPass2 = !!metadataUpdate.gmp_certificate_url;
+    const actionLabel = isPass2 ? "FINAL_CLEARANCE_ISSUED" : "TECHNICAL_PASS_CLEARED";
 
-          const nextDate = new Date();
-          nextDate.setMonth(nextDate.getMonth() + interval);
+    // 3. Create the audit trail entry using the real Director's name
+    const newComment = {
+      from: directorRecord.name, 
+      role: directorRecord.role || "Director",
+      text: remarks,
+      action: actionLabel,
+      timestamp: new Date().toISOString(),
+      attachmentUrl: publicUrl
+    };
 
-          await tx.update(riskAssessments)
-            .set({
-              overallRiskRating: rating,
-              nextInspectionDate: nextDate,
-              status: 'FINALIZED', // Only finalize when both levels are present in Pass 2
-              updatedAt: dbNow
-            })
-            .where(eq(riskAssessments.applicationId, appId));
-        } else {
-          // Pass 1: We just update the timestamp, keep status as PARTIAL/DRAFT
-          await tx.update(riskAssessments)
-            .set({
-              updatedAt: dbNow,
-              status: 'PARTIAL' 
-            })
-            .where(eq(riskAssessments.applicationId, appId));
-        }
-      }
+    // 4. Update the DB with the merged details
+    await db.update(applications)
+      .set({
+        details: {
+          ...currentDetails,
+          ...metadataUpdate, 
+          comments: [...currentComments, newComment]
+        },
+        // Both passes mark status as CLEARED so they appear in the Archive
+        status: "CLEARED",
+        updatedAt: new Date()
+      })
+      .where(eq(applications.id, appId));
 
-      // 3. Update Application Status & Audit Narrative
-      const finalEntry = {
-        from: "Dr. Mrs. Susan Yusuf",
-        role: "Director",
-        text: remarks,
-        timestamp: new Date().toISOString(),
-        action: isPass2 ? "FINAL_CLEARANCE_ISSUED" : "TECHNICAL_PASS_CLEARED",
-        attachmentUrl: storagePath 
-      };
+    revalidatePath('/dashboard/director');
+    revalidatePath('/dashboard/lod');
 
-      await tx.update(applications)
-        .set({
-          status: isPass2 ? 'CLEARED' : 'TECHNICAL_PASSED',
-          currentPoint: 'Registry Archival', 
-          details: {
-            ...oldDetails,
-            archived_path: storagePath,
-            final_approval_date: new Date().toISOString(),
-            comments: [...currentComments, finalEntry]
-          },
-          updatedAt: dbNow,
-        })
-        .where(eq(applications.id, appId));
-
-      // 4. QMS Clock Management
-      // Stop Director Clock (Handles both 'Director Review' and 'Director Final Review')
-      await tx.update(qmsTimelines)
-        .set({ endTime: dbNow })
-        .where(and(
-          eq(qmsTimelines.applicationId, appId),
-          isNull(qmsTimelines.endTime)
-        ));
-
-      // Start Registry Clock
-      await tx.insert(qmsTimelines).values({
-        applicationId: appId,
-        point: 'Registry Archival',
-        division: 'REGISTRY',
-        startTime: dbNow,
-      });
-
-      revalidatePath('/dashboard/director');
-      revalidatePath('/dashboard/registry');
-      
-      return { success: true };
-    });
-  } catch (err: any) {
-    console.error("CLEARANCE_ACTION_ERROR:", err);
-    return { success: false, error: err.message || "Internal Server Error" };
+    return { success: true };
+  } catch (error: any) {
+    console.error("Issuance Error:", error);
+    return { success: false, error: error.message };
   }
 }
 /**
