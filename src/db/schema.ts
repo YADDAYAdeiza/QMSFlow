@@ -64,7 +64,7 @@ export const applications = pgTable("applications", {
       timestamp: string;
       attachmentUrl?: string;
     }>;
-    isComplianceReview?: boolean; // Track Pass 1 vs Pass 2
+    isComplianceReview?: boolean;
   }>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -82,17 +82,18 @@ export const qmsTimelines = pgTable("qms_timelines", {
   details: jsonb("details"), 
 });
 
-// 7. Users
+// 7. Users (MODIFIED)
 export const users = pgTable("users", {
-  id: uuid("id").defaultRandom().primaryKey(),
+  id: uuid("id").primaryKey(), // Removed .defaultRandom()
   name: varchar("name", { length: 255 }).notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   role: varchar("role", { length: 50 }).default('Staff'), 
   division: varchar("division", { length: 100 }),
+  linkedAt: timestamp("linked_at"), // NEW: Presence determines 'Connected' status
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// 8. Product Line Risks (Lookup Table)
+// 8. Product Line Risks
 export const productLineRisks = pgTable("product_line_risks", {
   id: serial("id").primaryKey(),
   lineName: varchar("line_name", { length: 255 }).notNull().unique(),
@@ -105,7 +106,6 @@ export const productLineRisks = pgTable("product_line_risks", {
 export const riskAssessments = pgTable("risk_assessments", {
   id: serial("id").primaryKey(),
   facilityId: integer("facility_id").references(() => companies.id, { onDelete: 'cascade' }),
-  // ✅ FIX: Added .unique() here so "onConflict" has an arbiter
   applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }).unique(), 
   complexityScore: integer("complexity_score"),
   criticalityScore: integer("criticality_score"),
@@ -121,7 +121,6 @@ export const riskAssessments = pgTable("risk_assessments", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => ({
-  // ✅ SECONDARY FIX: Explicit unique index for Postgres
   uniqueAppRisk: uniqueIndex("unique_app_risk").on(table.applicationId),
 }));
 

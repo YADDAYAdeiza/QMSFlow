@@ -11,17 +11,20 @@ import {
   UserPlus, 
   AlertCircle,
   Clock,
-  UserCircle
+  UserCircle,
+  XCircle
 } from "lucide-react";
 
-// Import our new Client Component for the delete action
 import DeleteStaffButton from "./DeleteStaffButton";
 
-export default async function StaffAdminPage() {
+export default async function StaffAdminPage({
+  searchParams,
+}: {
+  searchParams: { error?: string };
+}) {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
 
-  // 1. AUTH & ROLE CHECK
   if (!session) redirect("/login");
 
   const [currentUser] = await db
@@ -30,41 +33,47 @@ export default async function StaffAdminPage() {
     .where(eq(users.id, session.user.id))
     .limit(1);
 
-  // Verification for Admin or DDD access
+  // Authorization Check
   const isAdmin = currentUser?.role === "Admin" || currentUser?.role === "Divisional Deputy Director";
   if (!isAdmin) {
     const div = currentUser?.division?.toLowerCase() || "vmd";
     redirect(`/dashboard/${div}`);
   }
 
-  // 2. DATA FETCHING (Alphabetical for QMS Registry)
   const allStaff = await db.select().from(users).orderBy(asc(users.name));
 
-  // 3. SERVER ACTIONS
+  // --- SERVER ACTIONS ---
   async function addStaff(formData: FormData) {
     "use server";
-    const email = formData.get("email") as string;
+    const email = (formData.get("email") as string).toLowerCase().trim();
     const name = formData.get("name") as string;
     const division = formData.get("division") as string;
     const role = formData.get("role") as string;
 
-    await db.insert(users).values({
-      email,
-      name,
-      division: division.toUpperCase(),
-      role: role || "Staff Technical Reviewer",
-    });
+    try {
+      await db.insert(users).values({
+        id: crypto.randomUUID(), // Generate a placeholder UUID
+        email,
+        name,
+        division: division.toUpperCase(),
+        role: role || "Staff Technical Reviewer",
+        linkedAt: null, // Explicitly null until they sign up
+      });
+    } catch (error: any) {
+      if (error.code === '23505' || error.message?.includes('unique')) {
+        return redirect("/dashboard/admin/staff?error=Email already registered in system");
+      }
+      return redirect("/dashboard/admin/staff?error=Database synchronization failed");
+    }
 
     revalidatePath("/dashboard/admin/staff");
+    redirect("/dashboard/admin/staff");
   }
 
   async function deleteStaff(formData: FormData) {
     "use server";
     const userId = formData.get("userId") as string;
-    
-    // Safety: Prevent self-deletion
     if (userId === session.user.id) return;
-
     await db.delete(users).where(eq(users.id, userId));
     revalidatePath("/dashboard/admin/staff");
   }
@@ -72,20 +81,17 @@ export default async function StaffAdminPage() {
   return (
     <div className="p-10 bg-slate-50 min-h-screen font-sans">
       <div className="max-w-6xl mx-auto">
-        <header className="mb-12 flex justify-between items-end">
-          <div>
-            <h1 className="text-4xl font-black text-slate-900 uppercase tracking-tighter italic">
-              Staff Personnel Registry
-            </h1>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-blue-600" /> 
-              Authorized Admin: {currentUser.name}
-            </p>
-          </div>
+        <header className="mb-12">
+          <h1 className="text-4xl font-black text-slate-900 uppercase tracking-tighter italic">
+            Staff Personnel Registry
+          </h1>
+          <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2 flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-blue-600" /> 
+            Authorized Admin: {currentUser.name}
+          </p>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-          {/* LEFT: ONBOARDING FORM */}
           <section className="lg:col-span-1">
             <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 sticky top-10">
               <div className="flex items-center gap-3 mb-8 text-blue-600">
@@ -95,15 +101,22 @@ export default async function StaffAdminPage() {
                 <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Onboard Personnel</h2>
               </div>
 
+              {searchParams.error && (
+                <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600">
+                  <XCircle className="w-4 h-4 shrink-0" />
+                  <p className="text-[10px] font-bold uppercase leading-tight">{searchParams.error}</p>
+                </div>
+              )}
+
               <form action={addStaff} className="space-y-5">
                 <div className="space-y-1">
                   <label className="text-[9px] font-black uppercase ml-2 text-slate-400">Full Name</label>
-                  <input name="name" required className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Dr. Jane Smith" />
+                  <input name="name" required className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="Dr. Jane Smith" />
                 </div>
 
                 <div className="space-y-1">
                   <label className="text-[9px] font-black uppercase ml-2 text-slate-400">Official Email</label>
-                  <input name="email" type="email" required className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="officer@agency.gov" />
+                  <input name="email" type="email" required className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="officer@agency.gov" />
                 </div>
 
                 <div className="space-y-1">
@@ -132,7 +145,6 @@ export default async function StaffAdminPage() {
             </div>
           </section>
 
-          {/* RIGHT: STAFF LIST */}
           <section className="lg:col-span-2">
             <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
               <table className="w-full text-left">
@@ -146,14 +158,14 @@ export default async function StaffAdminPage() {
                 </thead>
                 <tbody>
                   {allStaff.map((person) => {
-                    // Logic check for Supabase UUID via presence of hyphen
-                    const isConnected = person.id && person.id.includes('-');
+                    // Logic updated to check for linkedAt timestamp
+                    const isConnected = !!person.linkedAt;
                     
                     return (
                       <tr key={person.id} className="border-b border-slate-100 last:border-none group hover:bg-blue-50/30 transition-colors">
                         <td className="p-6">
                           <div className="flex items-center gap-3">
-                            <div className="p-2 bg-slate-100 rounded-full">
+                            <div className="p-2 bg-slate-100 rounded-full group-hover:bg-white transition-colors">
                                 <UserCircle className="w-5 h-5 text-slate-400" />
                             </div>
                             <div>
@@ -171,7 +183,7 @@ export default async function StaffAdminPage() {
 
                         <td className="p-6 text-center">
                           {isConnected ? (
-                            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[8px] font-black uppercase border border-emerald-100">
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[8px] font-black uppercase border border-emerald-100" title={`Connected on ${person.linkedAt?.toLocaleDateString()}`}>
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                               Connected
                             </div>
@@ -189,7 +201,6 @@ export default async function StaffAdminPage() {
                               {person.role === "Staff Technical Reviewer" ? "Reviewer" : person.role}
                             </span>
                             
-                            {/* The Client Component Delete Button */}
                             {person.id !== session.user.id && (
                                 <DeleteStaffButton 
                                     userId={person.id} 
@@ -207,7 +218,7 @@ export default async function StaffAdminPage() {
               {allStaff.length === 0 && (
                 <div className="p-20 text-center">
                     <AlertCircle className="w-10 h-10 text-slate-200 mx-auto mb-4" />
-                    <p className="text-xs font-black text-slate-300 uppercase tracking-widest">Registry Empty</p>
+                    <p className="text-xs font-black text-slate-300 uppercase tracking-widest text-slate-300">Registry Empty</p>
                 </div>
               )}
             </div>
