@@ -1,6 +1,8 @@
 import { db } from "@/db";
 import { qmsTimelines, applications, users } from "@/db/schema";
 import { eq, asc, and, isNull } from "drizzle-orm";
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 import { supabase } from "@/lib/supabase";
 import QMSCountdown from "@/components/QMSCountdown";
 import ReviewSubmissionForm from "@/components/ReviewSubmissionForm";
@@ -29,61 +31,63 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
 
   if (!appData) return notFound();
 
-  // 2. EXTRACT FROM JSONB DETAILS
+  // 2. EXTRACT DETAILS
   const details = (appData.details as any) || {};
-  
-  // Logic: Force Compliance mode if the Inspection Report exists (Pass 2)
   const isComplianceReview = 
     details.isComplianceReview === true || 
     !!details.inspectionReportUrl || 
     appData.currentPoint === "Technical DD Review Return";
 
   const riskData = appData.riskAssessments?.[0] as any;
-  
   const findingsLedger = details.findings_ledger || details.findingsLedger || [];
   const auditTrail = details.comments || [];
   const prevIsSra = details.is_sra || details.isSra || false;
 
-  // 3. Resolve PDF URL
-  // We prioritize inspectionReportUrl (Pass 2) over poaUrl (Pass 1)
-  const rawPath = details.inspectionReportUrl || 
-                  details.reportUrl || 
-                  details.poaUrl || 
-                  details.dossierPath;
+  // 3. AUTHENTICATION HANDSHAKE
+  const authClient = createServerComponentClient({ cookies });
+  const { data: { session } } = await authClient.auth.getSession();
 
+  const isHubVetting = appData.currentPoint === "IRSD Staff Vetting";
+  const staffIdToLookup = isHubVetting ? details.irsd_reviewer_id : details.staff_reviewer_id;
+
+  // SECURITY CHECK: Verify logged-in ID matches assigned ID
+  if (!session || session.user.id !== staffIdToLookup) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-50 text-center p-6">
+        <div className="p-12 bg-white rounded-[3rem] shadow-2xl border border-rose-100 max-w-md">
+          <Lock className="w-12 h-12 text-rose-500 mx-auto mb-4" />
+          <h2 className="text-xl font-black uppercase italic text-slate-900 leading-tight">Access Restricted</h2>
+          <p className="text-[10px] text-slate-400 mt-4 uppercase font-bold tracking-widest leading-relaxed">
+            This dossier is currently locked to another officer's credentials. 
+            If you believe this is an error, contact your Divisional Deputy Director.
+          </p>
+          <div className="mt-6 pt-6 border-t border-slate-50">
+            <span className="text-[8px] font-mono text-slate-300">UID: {session?.user.id}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Fetch the full user record from Drizzle to pass to components
+  const [assignedUser] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+
+  if (!assignedUser) return notFound();
+
+  // 4. Resolve Document URL
+  const rawPath = details.inspectionReportUrl || details.poaUrl || details.dossierPath;
   let publicUrl = "";
   if (rawPath) {
     if (rawPath.startsWith('http')) { 
       publicUrl = rawPath; 
     } else {
-      // Note: Bucket name 'Documents' is case-sensitive in some Supabase configs
       const { data: urlData } = supabase.storage.from('Documents').getPublicUrl(rawPath);
       publicUrl = urlData.publicUrl;
     }
-  }
-
-  // 4. Access Control Handshake
-  const isHubVetting = appData.currentPoint === "IRSD Staff Vetting";
-  const staffIdToLookup = isHubVetting ? details.irsd_reviewer_id : details.staff_reviewer_id;
-
-  const [assignedUser] = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.id, staffIdToLookup), eq(users.division, resolvedDivision)))
-    .limit(1);
-
-  if (!assignedUser) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-50 text-center p-6">
-        <div className="p-12 bg-white rounded-[3rem] shadow-xl border border-rose-100 max-w-md">
-          <Lock className="w-12 h-12 text-rose-500 mx-auto mb-4" />
-          <h2 className="text-xl font-black uppercase italic text-slate-900 leading-tight">Access Denied</h2>
-          <p className="text-[10px] text-slate-400 mt-2 uppercase font-bold tracking-widest">
-            Task not assigned to your credentials.
-          </p>
-        </div>
-      </div>
-    );
   }
 
   // 5. QMS Timing
@@ -110,7 +114,6 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      
       {/* VIEWER PANEL */}
       <div className="w-2/3 h-full border-r border-slate-200 bg-slate-900 relative">
         <div className="absolute top-6 left-6 z-10 flex gap-2">
@@ -139,7 +142,6 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
       <div className="w-1/3 h-full flex flex-col bg-white overflow-y-auto custom-scrollbar">
         <div className="p-8 pb-32">
           
-          {/* HEADER: STATUS & PHASE */}
           <div className="mb-8 flex items-center justify-between bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100">
             <div className="flex flex-col">
               <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">Risk</span>
@@ -161,14 +163,8 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
           {findingsLedger.length > 0 && (
             <div className="mb-10 animate-in fade-in slide-in-from-top-4 duration-700">
               <div className="flex items-center gap-2 mb-4">
-                <ul className="list-none">
-                   <li>
-                     <div className="flex items-center gap-2">
-                        <ListChecks className="w-4 h-4 text-slate-400" />
-                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Compliance Audit Ledger</h3>
-                     </div>
-                   </li>
-                </ul>
+                <ListChecks className="w-4 h-4 text-slate-400" />
+                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Compliance Audit Ledger</h3>
               </div>
               <div className="space-y-3">
                 {findingsLedger.map((finding: any, idx: number) => (
@@ -188,7 +184,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
             </div>
           )}
 
-          {/* AUDIT TRAIL / TIMELINE */}
+          {/* AUDIT TRAIL */}
           {auditTrail.length > 0 && (
             <div className="mb-10 opacity-60 hover:opacity-100 transition-opacity">
               <div className="flex items-center gap-2 mb-4">
@@ -199,12 +195,10 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
                 {auditTrail.map((comment: any, idx: number) => (
                   <div key={idx} className="relative">
                     <div className="absolute -left-[31px] top-1 w-2 h-2 rounded-full bg-slate-200 border-2 border-white" />
-                    <div className="flex flex-col">
-                      <span className="text-[8px] font-black uppercase text-slate-400">
-                        {comment.from} • {new Date(comment.timestamp).toLocaleDateString()}
-                      </span>
-                      <p className="text-[10px] text-slate-500 italic mt-1 line-clamp-2">{comment.text}</p>
-                    </div>
+                    <span className="text-[8px] font-black uppercase text-slate-400">
+                      {comment.from} • {new Date(comment.timestamp).toLocaleDateString()}
+                    </span>
+                    <p className="text-[10px] text-slate-500 italic mt-1 line-clamp-2">{comment.text}</p>
                   </div>
                 ))}
               </div>
@@ -225,6 +219,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
           />
         </div>
         
+        {/* QMS TIMER STICKY BAR */}
         <div className="mt-auto p-6 border-t border-slate-100 bg-white sticky bottom-0 z-20 shadow-2xl">
           <QMSCountdown startTime={activeTask.startTime!} initialRemainingSeconds={remaining} />
         </div>

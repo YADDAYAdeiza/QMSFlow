@@ -2,10 +2,21 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, companies, qmsTimelines } from "@/db/schema";
-import { eq, and, sql, isNull } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
+// NEW: Using the fixed Server Client utility for Next.js 16
+import { createClient } from "@/utils/supabase/server"; 
 import DossierLink from "@/components/DossierLink";
-import { ArrowRightCircle, Activity, Clock, Inbox, Users, Landmark, Factory } from "lucide-react";
+import { 
+  ArrowRightCircle, 
+  Clock, 
+  Inbox, 
+  Users, 
+  Landmark, 
+  Factory, 
+  ShieldCheck 
+} from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export default async function DDDInboxPage({ 
   searchParams 
@@ -13,20 +24,20 @@ export default async function DDDInboxPage({
   searchParams: Promise<{ as?: string; view?: string }> 
 }) {
   const { as, view } = await searchParams;
+
+  // --- NEW AUTH LOGIC (FIXED) ---
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
   
+  if (!session) {
+    redirect("/login");
+  }
+  
+  const loggedInUserId = session.user.id; 
   const actingDivision = as?.toUpperCase() || "VMD";
   const isAssignedView = view === "assigned";
   
-  const userMap: Record<string, string> = {
-    VMD: "9215bf99-489e-4468-b9aa-bcd926d11c08",
-    IRSD: "cfb8ccbd-7753-43f0-aa51-a9c449a52de6",
-    PAD: "da0e45e5-cf4e-49b7-b22e-34e313df899d",
-    AFPD: "e6be1703-3075-4e5c-b07f-8a6f166f74c6"
-  };
-
-  const loggedInUserId = userMap[actingDivision];
-
-  // Fetching raw data with necessary joins
+  // Query for the DDD's oversight
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -50,7 +61,6 @@ export default async function DDDInboxPage({
         : eq(qmsTimelines.staffId, loggedInUserId)
     ));
 
-  // Calculating display time and Round 2 status
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -72,27 +82,14 @@ export default async function DDDInboxPage({
 
   return (
     <div className="p-8 bg-slate-50 min-h-screen font-sans">
-      
-      {/* TESTING SWITCHER (Restored) */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-slate-700">
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Switch Desk:</span>
-        {Object.keys(userMap).map((div) => (
-          <Link 
-            key={div} 
-            href={`?as=${div.toLowerCase()}&view=${view || 'new'}`} 
-            className={`px-4 py-1 rounded-full text-[10px] font-bold transition-all ${actingDivision === div ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
-          >
-            {div}
-          </Link>
-        ))}
-      </div>
-
       <header className="mb-8">
+        <div className="flex items-center gap-3 mb-2 text-blue-600 font-black uppercase tracking-[0.3em] text-[10px]">
+          <ShieldCheck className="w-4 h-4" /> Executive Oversight
+        </div>
         <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tight italic leading-none">
           {actingDivision} Divisional Deputy Director
         </h1>
         
-        {/* VIEW TABS */}
         <div className="flex gap-4 mt-6">
             <Link 
               href={`?as=${actingDivision.toLowerCase()}&view=new`} 
@@ -121,7 +118,13 @@ export default async function DDDInboxPage({
             </tr>
           </thead>
           <tbody>
-            {inbox.map((app) => {
+            {inbox.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="p-20 text-center">
+                  <p className="text-slate-400 text-xs font-black uppercase tracking-[0.2em]">Queue is clear for this division</p>
+                </td>
+              </tr>
+            ) : inbox.map((app) => {
               const details = (app.details as any) || {};
               const lastComment = [...(details.comments || [])].reverse()[0];
 
@@ -148,11 +151,11 @@ export default async function DDDInboxPage({
                     </div>
                   </td>
                   
-                  <td className="p-6">
+                  <td className="p-6 text-xs italic text-slate-400">
                     <div className="flex flex-col gap-2 max-w-md">
                        <DossierLink url={details.inspectionReportUrl || details.poaUrl} />
-                       <p className="text-[10px] text-slate-600 italic line-clamp-1 border-l-2 border-slate-200 pl-2">
-                         {lastComment?.text || "No specific instructions from Directorate."}
+                       <p className="line-clamp-1 border-l-2 border-slate-200 pl-2">
+                         {lastComment?.text || "No specific instructions."}
                        </p>
                     </div>
                   </td>
@@ -170,14 +173,6 @@ export default async function DDDInboxPage({
             })}
           </tbody>
         </table>
-        
-        {inbox.length === 0 && (
-          <div className="p-32 text-center bg-slate-50/50">
-            <p className="text-slate-400 font-bold italic uppercase text-[10px] tracking-[0.3em]">
-              Clean Desk: No files pending in this category
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

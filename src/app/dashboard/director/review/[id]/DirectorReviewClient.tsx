@@ -34,7 +34,7 @@ function RiskExecutiveSummary({ complianceRisk, isInspection }: { complianceRisk
         <div className={`p-8 rounded-[2.5rem] border-4 shadow-2xl flex items-center justify-between transition-all duration-500 ${getRatingColor(overallRating)}`}>
           <div>
             <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70 mb-1 text-white/80">
-                {isInspection ? "Inspection Compliance Rating" : "Final Risk Rating"}
+                {isInspection ? "Inspection Compliance Rating" : "Overall Risk Rating"}
             </p>
             <h2 className="text-6xl font-black tracking-tighter uppercase italic leading-none">{overallRating}</h2>
           </div>
