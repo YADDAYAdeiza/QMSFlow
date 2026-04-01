@@ -3,38 +3,36 @@ export const dynamic = "force-dynamic";
 import { db } from "@/db";
 import { qmsTimelines, applications, companies } from "@/db/schema";
 import { eq, and, isNull, ilike, or } from "drizzle-orm";
-// NEW: Using the fixed server utility instead of auth-helpers
 import { createClient } from "@/utils/supabase/server"; 
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ShieldAlert, FileText, Clock, LayoutDashboard } from 'lucide-react';
 
-export default async function StaffDashboard({ 
-  params 
-}: { 
+export default async function StaffDashboard(props: { 
   params: Promise<{ division: string }> 
 }) {
-  const { division } = await params;
-  const myDivision = division.toUpperCase();
+  // 1. UNWRAP PARAMS (Fixes: Cannot convert undefined or null to object)
+  const { division } = await props.params;
+  const myDivision = (division || "VMD").toUpperCase();
   
-  // 1. Get Logged-in Session using the NEW utility
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (authError || !user) {
     redirect("/login");
   }
 
-  // 2. Fetch Tasks assigned specifically to THIS user's ID
-  const staffTasks = await db
+  // 2. FETCH DATA 
+  // Note: We pull 'details' (JSONB) instead of a non-existent 'isComplianceReview' column
+  const staffTasksRaw = await db
     .select({
       id: qmsTimelines.id,
       applicationId: qmsTimelines.applicationId,
       startTime: qmsTimelines.startTime,
       point: qmsTimelines.point,
       applicationNumber: applications.applicationNumber,
+      applicationDetails: applications.details, // <--- Pull the JSONB object
       companyName: companies.name,
-      isComplianceReview: applications.isComplianceReview 
     })
     .from(qmsTimelines)
     .innerJoin(applications, eq(qmsTimelines.applicationId, applications.id))
@@ -42,7 +40,7 @@ export default async function StaffDashboard({
     .where(
       and(
         ilike(qmsTimelines.division, myDivision),
-        eq(qmsTimelines.staffId, session.user.id), 
+        eq(qmsTimelines.staffId, user.id), 
         or(
           eq(qmsTimelines.point, 'Technical Review'),
           eq(qmsTimelines.point, 'Technical DD Review Return')
@@ -51,12 +49,26 @@ export default async function StaffDashboard({
       )
     );
 
+  // 3. DATA HARDENING
+  // We process the raw DB rows to extract JSONB keys safely before rendering
+  const safeTasks = (staffTasksRaw ?? []).map(task => {
+    const details = (task.applicationDetails as any) || {};
+    
+    return {
+      ...task,
+      // Logic: It's a compliance review if the flag is true OR if an inspection report exists
+      isComplianceReview: details.isComplianceReview === true || !!details.inspectionReportUrl,
+      displayCompanyName: task.companyName || "Unknown Entity",
+      displayAppNumber: task.applicationNumber || "No Reference"
+    };
+  });
+
   return (
-    <div className="p-8 bg-slate-50 min-h-screen">
+    <div className="p-8 bg-slate-50 min-h-screen text-slate-900">
       <div className="max-w-5xl mx-auto">
         <header className="mb-10 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-black text-slate-900 mb-2 uppercase tracking-tight flex items-center gap-3 italic">
+            <h1 className="text-3xl font-black mb-2 uppercase tracking-tight flex items-center gap-3 italic text-slate-900">
               <LayoutDashboard className="w-8 h-8 text-blue-600" />
               {myDivision} Specialist Workspace
             </h1>
@@ -68,7 +80,7 @@ export default async function StaffDashboard({
         </header>
         
         <div className="grid gap-6">
-          {staffTasks.length > 0 ? staffTasks.map((task) => (
+          {safeTasks.length > 0 ? safeTasks.map((task) => (
             <div key={task.id} className="group bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex justify-between items-center transition-all hover:shadow-xl hover:border-blue-100">
               <div className="flex gap-6 items-center">
                 <div className={`p-4 rounded-3xl ${task.isComplianceReview ? 'bg-purple-50' : 'bg-blue-50'}`}>
@@ -80,11 +92,11 @@ export default async function StaffDashboard({
                       {task.isComplianceReview ? 'Compliance Audit' : 'Dossier Review'}
                     </span>
                     <span className="flex items-center gap-1 text-[8px] font-bold text-slate-400 uppercase">
-                      <Clock className="w-3 h-3" /> {task.startTime ? new Date(task.startTime).toLocaleDateString() : 'Pending'}
+                      <Clock className="w-3 h-3" /> {task.startTime ? new Date(task.startTime).toLocaleDateString() : 'New Assignment'}
                     </span>
                   </div>
-                  <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase italic">{task.companyName}</h2>
-                  <p className="text-xs font-mono text-slate-400 uppercase tracking-tighter">REF: {task.applicationNumber}</p>
+                  <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase italic">{task.displayCompanyName}</h2>
+                  <p className="text-xs font-mono text-slate-400 uppercase tracking-tighter">REF: {task.displayAppNumber}</p>
                 </div>
               </div>
 

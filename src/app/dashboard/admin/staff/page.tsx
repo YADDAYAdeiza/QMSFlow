@@ -17,20 +17,24 @@ import {
 
 import DeleteStaffButton from "./DeleteStaffButton";
 
-export default async function StaffAdminPage({
-  searchParams,
-}: {
-  searchParams: { error?: string };
+// FIX: searchParams must be a Promise in the type definition
+export default async function StaffAdminPage(props: {
+  searchParams: Promise<{ error?: string }>;
 }) {
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  
+  // FIX: You MUST await searchParams before using it
+  const searchParams = await props.searchParams;
 
-  if (!session) redirect("/login");
+  // FIX: Use getUser() for security (replaces getSession)
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) redirect("/login");
 
   const [currentUser] = await db
     .select()
     .from(users)
-    .where(eq(users.id, session.user.id))
+    .where(eq(users.id, user.id))
     .limit(1);
 
   // Authorization Check
@@ -52,18 +56,15 @@ export default async function StaffAdminPage({
 
     try {
       await db.insert(users).values({
-        id: crypto.randomUUID(), // Generate a placeholder UUID
+        id: crypto.randomUUID(),
         email,
         name,
         division: division.toUpperCase(),
         role: role || "Staff Technical Reviewer",
-        linkedAt: null, // Explicitly null until they sign up
+        linkedAt: null,
       });
     } catch (error: any) {
-      if (error.code === '23505' || error.message?.includes('unique')) {
-        return redirect("/dashboard/admin/staff?error=Email already registered in system");
-      }
-      return redirect("/dashboard/admin/staff?error=Database synchronization failed");
+       return redirect("/dashboard/admin/staff?error=Email already registered in system");
     }
 
     revalidatePath("/dashboard/admin/staff");
@@ -73,21 +74,22 @@ export default async function StaffAdminPage({
   async function deleteStaff(formData: FormData) {
     "use server";
     const userId = formData.get("userId") as string;
-    if (userId === session.user.id) return;
+    // user.id comes from the secure getUser() call
+    if (userId === user.id) return; 
     await db.delete(users).where(eq(users.id, userId));
     revalidatePath("/dashboard/admin/staff");
   }
 
   return (
-    <div className="p-10 bg-slate-50 min-h-screen font-sans">
+    <div className="p-10 bg-slate-50 min-h-screen font-sans text-slate-900">
       <div className="max-w-6xl mx-auto">
         <header className="mb-12">
-          <h1 className="text-4xl font-black text-slate-900 uppercase tracking-tighter italic">
+          <h1 className="text-4xl font-black uppercase tracking-tighter italic">
             Staff Personnel Registry
           </h1>
           <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2 flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-blue-600" /> 
-            Authorized Admin: {currentUser.name}
+            Authorized Admin: {currentUser?.name}
           </p>
         </header>
 
@@ -147,43 +149,37 @@ export default async function StaffAdminPage({
 
           <section className="lg:col-span-2">
             <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
-              <table className="w-full text-left">
+              <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-900 text-white">
                   <tr>
                     <th className="p-6 text-[9px] font-black uppercase tracking-widest">Personnel</th>
                     <th className="p-6 text-[9px] font-black uppercase tracking-widest text-center">Unit</th>
                     <th className="p-6 text-[9px] font-black uppercase tracking-widest text-center">Status</th>
-                    <th className="p-6 text-[9px] font-black uppercase tracking-widest text-right">Action</th>
+                    <th className="p-6 text-[9px] font-black uppercase tracking-widest text-right pr-10">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {allStaff.map((person) => {
-                    // Logic updated to check for linkedAt timestamp
                     const isConnected = !!person.linkedAt;
-                    
                     return (
                       <tr key={person.id} className="border-b border-slate-100 last:border-none group hover:bg-blue-50/30 transition-colors">
                         <td className="p-6">
                           <div className="flex items-center gap-3">
-                            <div className="p-2 bg-slate-100 rounded-full group-hover:bg-white transition-colors">
-                                <UserCircle className="w-5 h-5 text-slate-400" />
-                            </div>
+                            <UserCircle className="w-8 h-8 text-slate-300" />
                             <div>
-                                <p className="font-bold text-slate-800 text-sm uppercase italic tracking-tight">{person.name}</p>
-                                <p className="text-[10px] text-slate-400 font-medium font-mono lowercase">{person.email}</p>
+                                <p className="font-bold text-slate-800 text-sm uppercase italic">{person.name}</p>
+                                <p className="text-[10px] text-slate-400 lowercase">{person.email}</p>
                             </div>
                           </div>
                         </td>
-
                         <td className="p-6 text-center">
-                          <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-[9px] font-black uppercase tracking-tighter border border-blue-100">
+                          <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-[9px] font-black uppercase">
                             {person.division}
                           </span>
                         </td>
-
                         <td className="p-6 text-center">
                           {isConnected ? (
-                            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[8px] font-black uppercase border border-emerald-100" title={`Connected on ${person.linkedAt?.toLocaleDateString()}`}>
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[8px] font-black uppercase border border-emerald-100">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                               Connected
                             </div>
@@ -194,33 +190,20 @@ export default async function StaffAdminPage({
                             </div>
                           )}
                         </td>
-
-                        <td className="p-6 text-right">
-                          <div className="flex items-center justify-end gap-4">
-                            <span className={`text-[9px] font-black uppercase tracking-tighter ${person.role === 'Admin' ? 'text-rose-600' : 'text-slate-400'}`}>
-                              {person.role === "Staff Technical Reviewer" ? "Reviewer" : person.role}
-                            </span>
-                            
-                            {person.id !== session.user.id && (
-                                <DeleteStaffButton 
-                                    userId={person.id} 
-                                    userName={person.name} 
-                                    deleteAction={deleteStaff} 
-                                />
-                            )}
-                          </div>
+                        <td className="p-6 text-right pr-10">
+                          {person.id !== user.id && (
+                            <DeleteStaffButton 
+                                userId={person.id} 
+                                userName={person.name} 
+                                deleteAction={deleteStaff} 
+                            />
+                          )}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              {allStaff.length === 0 && (
-                <div className="p-20 text-center">
-                    <AlertCircle className="w-10 h-10 text-slate-200 mx-auto mb-4" />
-                    <p className="text-xs font-black text-slate-300 uppercase tracking-widest text-slate-300">Registry Empty</p>
-                </div>
-              )}
             </div>
           </section>
         </div>

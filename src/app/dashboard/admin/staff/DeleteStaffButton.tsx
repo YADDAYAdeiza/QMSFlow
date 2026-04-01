@@ -13,6 +13,7 @@ export default function DeleteStaffButton({ userId, userName, deleteAction }: De
     <form 
       action={deleteAction} 
       onSubmit={(e) => {
+        // Confirmation dialog to prevent accidental deletion
         if (!confirm(`Are you sure you want to revoke access for ${userName}?`)) {
           e.preventDefault();
         }

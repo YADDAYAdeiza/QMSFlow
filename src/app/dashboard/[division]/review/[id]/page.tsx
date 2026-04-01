@@ -1,12 +1,12 @@
+export const dynamic = "force-dynamic";
+
 import { db } from "@/db";
 import { qmsTimelines, applications, users } from "@/db/schema";
-import { eq, asc, and, isNull } from "drizzle-orm";
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
-import { supabase } from "@/lib/supabase";
+import { eq, asc, isNull } from "drizzle-orm";
+import { createClient } from "@/utils/supabase/server"; 
 import QMSCountdown from "@/components/QMSCountdown";
 import ReviewSubmissionForm from "@/components/ReviewSubmissionForm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Lock, ShieldAlert, FileText, Activity, History, ListChecks } from "lucide-react"; 
 
 interface PageProps {
@@ -14,16 +14,23 @@ interface PageProps {
   searchParams: Promise<{ division?: string }>;
 }
 
-export default async function TechnicalReviewPage({ params, searchParams }: PageProps) {
-  const { division: pathDiv, id } = await params;
-  const sParams = await searchParams;
-
+export default async function TechnicalReviewPage(props: PageProps) {
+  // 1. UNWRAP PROMISES (Fixes: Cannot convert undefined or null to object)
+  const { id } = await props.params;
+  const sParams = await props.searchParams;
+  
   const applicationId = parseInt(id);
   if (isNaN(applicationId)) return notFound();
 
-  const resolvedDivision = (sParams.division || pathDiv).toUpperCase();
+  // 2. AUTH HANDSHAKE (Using getUser for Next.js 16/Turbopack stability)
+  const supabase = createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  // 1. Fetch Application with Risk Data
+  if (authError || !user) {
+    redirect("/login");
+  }
+
+  // 3. FETCH DATA
   const appData = await db.query.applications.findFirst({
     where: eq(applications.id, applicationId),
     with: { riskAssessments: true }
@@ -31,7 +38,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
 
   if (!appData) return notFound();
 
-  // 2. EXTRACT DETAILS
+  // 4. EXTRACT JSONB & LOGIC
   const details = (appData.details as any) || {};
   const isComplianceReview = 
     details.isComplianceReview === true || 
@@ -43,15 +50,11 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
   const auditTrail = details.comments || [];
   const prevIsSra = details.is_sra || details.isSra || false;
 
-  // 3. AUTHENTICATION HANDSHAKE
-  const authClient = createServerComponentClient({ cookies });
-  const { data: { session } } = await authClient.auth.getSession();
-
   const isHubVetting = appData.currentPoint === "IRSD Staff Vetting";
   const staffIdToLookup = isHubVetting ? details.irsd_reviewer_id : details.staff_reviewer_id;
 
-  // SECURITY CHECK: Verify logged-in ID matches assigned ID
-  if (!session || session.user.id !== staffIdToLookup) {
+  // 5. SECURITY CHECK
+  if (user.id !== staffIdToLookup) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50 text-center p-6">
         <div className="p-12 bg-white rounded-[3rem] shadow-2xl border border-rose-100 max-w-md">
@@ -59,26 +62,25 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
           <h2 className="text-xl font-black uppercase italic text-slate-900 leading-tight">Access Restricted</h2>
           <p className="text-[10px] text-slate-400 mt-4 uppercase font-bold tracking-widest leading-relaxed">
             This dossier is currently locked to another officer's credentials. 
-            If you believe this is an error, contact your Divisional Deputy Director.
           </p>
           <div className="mt-6 pt-6 border-t border-slate-50">
-            <span className="text-[8px] font-mono text-slate-300">UID: {session?.user.id}</span>
+            <span className="text-[8px] font-mono text-slate-300 uppercase">Secure Auth ID: {user.id.slice(0, 8)}...</span>
           </div>
         </div>
       </div>
     );
   }
 
-  // Fetch the full user record from Drizzle to pass to components
+  // 6. FETCH USER RECORD
   const [assignedUser] = await db
     .select()
     .from(users)
-    .where(eq(users.id, session.user.id))
+    .where(eq(users.id, user.id))
     .limit(1);
 
   if (!assignedUser) return notFound();
 
-  // 4. Resolve Document URL
+  // 7. RESOLVE DOCUMENT URL (Supabase 'Documents' Bucket)
   const rawPath = details.inspectionReportUrl || details.poaUrl || details.dossierPath;
   let publicUrl = "";
   if (rawPath) {
@@ -90,12 +92,12 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
     }
   }
 
-  // 5. QMS Timing
-  const allSegments = await db
+  // 8. QMS TIMING LOGIC (Safeguarded against null segments)
+  const allSegments = (await db
     .select()
     .from(qmsTimelines)
     .where(eq(qmsTimelines.applicationId, applicationId))
-    .orderBy(asc(qmsTimelines.startTime));
+    .orderBy(asc(qmsTimelines.startTime))) || [];
 
   const activeTask = allSegments.find(s => isNull(s.endTime) && s.staffId === assignedUser.id);
   
@@ -114,7 +116,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      {/* VIEWER PANEL */}
+      {/* VIEWER PANEL (LEFT 2/3) */}
       <div className="w-2/3 h-full border-r border-slate-200 bg-slate-900 relative">
         <div className="absolute top-6 left-6 z-10 flex gap-2">
             <div className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase shadow-2xl flex items-center gap-2 border transition-colors ${
@@ -138,10 +140,11 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
         )}
       </div>
 
-      {/* SUBMISSION & HISTORY PANEL */}
+      {/* SUBMISSION & HISTORY PANEL (RIGHT 1/3) */}
       <div className="w-1/3 h-full flex flex-col bg-white overflow-y-auto custom-scrollbar">
         <div className="p-8 pb-32">
           
+          {/* RISK & COMPANY HEADER */}
           <div className="mb-8 flex items-center justify-between bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100">
             <div className="flex flex-col">
               <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">Risk</span>
@@ -184,7 +187,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
             </div>
           )}
 
-          {/* AUDIT TRAIL */}
+          {/* AUDIT TRAIL (HISTORY) */}
           {auditTrail.length > 0 && (
             <div className="mb-10 opacity-60 hover:opacity-100 transition-opacity">
               <div className="flex items-center gap-2 mb-4">
@@ -205,7 +208,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
             </div>
           )}
 
-          {/* MAIN SUBMISSION FORM */}
+          {/* FORM INTERFACE */}
           <ReviewSubmissionForm 
             appId={applicationId} 
             staffId={assignedUser.id} 
@@ -219,7 +222,7 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
           />
         </div>
         
-        {/* QMS TIMER STICKY BAR */}
+        {/* QMS TIMER (STICKY) */}
         <div className="mt-auto p-6 border-t border-slate-100 bg-white sticky bottom-0 z-20 shadow-2xl">
           <QMSCountdown startTime={activeTask.startTime!} initialRemainingSeconds={remaining} />
         </div>
@@ -227,5 +230,3 @@ export default async function TechnicalReviewPage({ params, searchParams }: Page
     </div>
   );
 }
-
-export const dynamic = "force-dynamic";

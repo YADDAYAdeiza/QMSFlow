@@ -21,7 +21,8 @@ if (!isConfirming) {
     return ( 
     <button onClick={() => setIsConfirming(true)} className="bg-blue-600 text-white px-4 py-2 rounded font-bold" > 
     Assign to Staff 
-    </button> ); }
+    </button> ); 
+}
 
 return ( 
 <div className="flex flex-col gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded"> 
