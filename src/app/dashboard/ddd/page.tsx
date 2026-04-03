@@ -2,8 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, companies, qmsTimelines } from "@/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
-// NEW: Using the fixed Server Client utility for Next.js 16
+import { eq, and, isNull, or } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server"; 
 import DossierLink from "@/components/DossierLink";
 import { 
@@ -23,9 +22,10 @@ export default async function DDDInboxPage({
 }: { 
   searchParams: Promise<{ as?: string; view?: string }> 
 }) {
+  // 1. Resolve Search Params
   const { as, view } = await searchParams;
 
-  // --- NEW AUTH LOGIC (FIXED) ---
+  // 2. Authentication Check
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   
@@ -34,10 +34,20 @@ export default async function DDDInboxPage({
   }
   
   const loggedInUserId = session.user.id; 
+  console.log('This is logged in user: ', loggedInUserId);
+
+  /**
+   * 3. Division Logic:
+   * Maps to VMD, PAD, AFPD, or IRSD based on the 'as' URL parameter.
+   */
   const actingDivision = as?.toUpperCase() || "VMD";
   const isAssignedView = view === "assigned";
   
-  // Query for the DDD's oversight
+  /**
+   * 4. Universal Query for all Divisional Deputy Directors
+   * - Technical Divisions (VMD, PAD, AFPD) look for 'Technical DD Review'
+   * - IRSD looks for 'IRSD Hub Clearance'
+   */
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -52,15 +62,27 @@ export default async function DDDInboxPage({
     .leftJoin(companies, eq(applications.companyId, companies.id))
     .innerJoin(qmsTimelines, eq(qmsTimelines.applicationId, applications.id))
     .where(and(
+      // Ensure we are looking at an active timeline step
       isNull(qmsTimelines.endTime),
+      
+      // Filter by the division specified in the URL toggle
+      eq(qmsTimelines.division, actingDivision),
+      
       isAssignedView 
-        ? and(
-            eq(applications.currentPoint, 'Staff Technical Review'),
-            eq(qmsTimelines.division, actingDivision)
+        ? eq(applications.currentPoint, 'Staff Technical Review') // Items assigned to staff
+        : or(
+            // Item is personally on the DDD's desk
+            eq(qmsTimelines.staffId, loggedInUserId),
+            
+            // Workflow Step: Standard Technical Divisions
+            eq(applications.currentPoint, 'Technical DD Review'),
+            
+            // Workflow Step: IRSD Specific Hub
+            eq(applications.currentPoint, 'IRSD Hub Clearance')
           )
-        : eq(qmsTimelines.staffId, loggedInUserId)
     ));
 
+  // 5. Format Time and Metadata for the View
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -75,7 +97,8 @@ export default async function DDDInboxPage({
         : `${minutes}m`;
 
     const details = (app.details as any) || {};
-    const isRound2 = details.type === "Inspection Report Review (Foreign)" || !!details.inspectionReportUrl;
+    // Round 2 is typically Compliance/Post-Reg (e.g., Facility Verification)
+    const isRound2 = details.isComplianceReview === true || !!details.inspectionReportUrl;
 
     return { ...app, displayTime, isRound2 };
   });
@@ -90,6 +113,7 @@ export default async function DDDInboxPage({
           {actingDivision} Divisional Deputy Director
         </h1>
         
+        {/* Navigation Toggles */}
         <div className="flex gap-4 mt-6">
             <Link 
               href={`?as=${actingDivision.toLowerCase()}&view=new`} 
@@ -111,9 +135,9 @@ export default async function DDDInboxPage({
           <thead className="bg-slate-900 text-white">
             <tr>
               <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">File Reference</th>
-              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Type / Round</th>
+              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Type / Stage</th>
               <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Desk Time</th>
-              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Status & Links</th>
+              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Status & Source</th>
               <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right text-slate-300">Action</th>
             </tr>
           </thead>
@@ -121,7 +145,7 @@ export default async function DDDInboxPage({
             {inbox.length === 0 ? (
               <tr>
                 <td colSpan={5} className="p-20 text-center">
-                  <p className="text-slate-400 text-xs font-black uppercase tracking-[0.2em]">Queue is clear for this division</p>
+                  <p className="text-slate-400 text-xs font-black uppercase tracking-[0.2em]">Queue is clear for {actingDivision}</p>
                 </td>
               </tr>
             ) : inbox.map((app) => {
@@ -136,12 +160,17 @@ export default async function DDDInboxPage({
                   </td>
 
                   <td className="p-6">
-                    <span className={`text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border ${
-                      app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
-                    }`}>
-                      {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
-                      {app.isRound2 ? 'Round 2: Compliance' : 'Round 1: Technical'}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className={`text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border ${
+                        app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
+                      }`}>
+                        {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
+                        {app.isRound2 ? 'Post-Registration' : 'Pre-Registration'}
+                      </span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase italic">
+                        {app.currentPoint}
+                      </span>
+                    </div>
                   </td>
 
                   <td className="p-6">
@@ -155,7 +184,7 @@ export default async function DDDInboxPage({
                     <div className="flex flex-col gap-2 max-w-md">
                        <DossierLink url={details.inspectionReportUrl || details.poaUrl} />
                        <p className="line-clamp-1 border-l-2 border-slate-200 pl-2">
-                         {lastComment?.text || "No specific instructions."}
+                         {lastComment?.text || "New assignment."}
                        </p>
                     </div>
                   </td>
@@ -165,7 +194,7 @@ export default async function DDDInboxPage({
                       href={`/dashboard/ddd/review/${app.id}?as=${actingDivision.toLowerCase()}`}
                       className="inline-flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 transition-all shadow-md group-hover:-translate-x-1"
                     >
-                      {isAssignedView ? 'Manage' : 'Assign Specialist'} <ArrowRightCircle className="w-4 h-4" />
+                      {isAssignedView ? 'Manage' : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
                     </Link>
                   </td>
                 </tr>

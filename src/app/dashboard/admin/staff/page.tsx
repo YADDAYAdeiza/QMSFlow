@@ -125,9 +125,10 @@ export default async function StaffAdminPage(props: {
                   <label className="text-[9px] font-black uppercase ml-2 text-slate-400">Division</label>
                   <select name="division" className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none">
                     <option value="VMD">VMD (Veterinary Medicine)</option>
-                    <option value="PAD">PAD (Post-Registration)</option>
-                    <option value="AFPD">AFPD (Animal Feed)</option>
+                    <option value="PAD">PAD (Pesticides and Agrochemicals)</option>
+                    <option value="AFPD">AFPD (Animal Feed and Premixes)</option>
                     <option value="IRSD">IRSD (Inspection)</option>
+                    <option value="VMAP">VMAP (Directorate)</option>
                   </select>
                 </div>
 
@@ -137,6 +138,8 @@ export default async function StaffAdminPage(props: {
                     <option value="Staff Technical Reviewer">Staff Technical Reviewer</option>
                     <option value="Divisional Deputy Director">Divisional Deputy Director</option>
                     <option value="Admin">System Administrator</option>
+                    <option value="LOD">LOD</option>
+                    <option value="Director">Director</option>
                   </select>
                 </div>
 

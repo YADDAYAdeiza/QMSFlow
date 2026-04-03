@@ -3,12 +3,12 @@ export const dynamic = "force-dynamic";
 import { db } from "@/db";
 import { applications, users } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
-// NEW: Added Supabase Auth imports
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+// Corrected: Use your local helper instead of the deprecated auth-helpers
+import { createClient } from "@/utils/supabase/server"; 
 import DeputyDirectorReviewClient from "@/components/DeputyDirectorReviewClient";
 import Link from "next/link";
 import { Landmark, Factory, ShieldCheck } from "lucide-react";
+import { redirect } from "next/navigation";
 
 export default async function Page({ 
   params,
@@ -21,20 +21,17 @@ export default async function Page({
   const { as } = await searchParams;
   const appId = parseInt(id);
 
-  // --- OLD SIMULATION MAP (REPLACED) ---
-  /*
-  const DD_VMD = "9215bf99-489e-4468-b9aa-bcd926d11c08"; 
-  const DD_IRSD = "cfb8ccbd-7753-43f0-aa51-a9c449a52de6"; 
-  const loggedInUserId = as === "irsd" ? DD_IRSD : DD_VMD;
-  */
-
-  // --- NEW AUTH LOGIC ---
-  const supabase = createServerComponentClient({ cookies });
+  // 1. Initialize Supabase and Auth
+  const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   
-  if (!session) return null; // Safety redirect
-  const loggedInUserId = session.user.id; // The real UUID from the current user
+  if (!session) {
+    redirect("/login");
+  }
+  
+  const loggedInUserId = session.user.id; 
 
+  // 2. Fetch Application Data
   const app = await db.query.applications.findFirst({
     where: eq(applications.id, appId),
     with: { 
@@ -46,6 +43,7 @@ export default async function Page({
 
   if (!app) return <div className="p-20 text-center font-bold text-slate-400">Application Not Found</div>;
 
+  // 3. Logic for Division and Staff
   const currentDiv = as?.toUpperCase() || "VMD";
   const staffList = await db.select().from(users).where(eq(sql`UPPER(${users.division})`, currentDiv));
   
@@ -71,7 +69,9 @@ export default async function Page({
       <div className="fixed top-4 right-8 z-[200] flex items-center gap-2 bg-white/90 backdrop-blur p-2 rounded-full border border-slate-200 shadow-2xl">
         <div className="flex items-center gap-2 px-3 py-1">
           <ShieldCheck className="w-3 h-3 text-blue-600" />
-          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Officer: {session.user.email?.split('@')[0]}</span>
+          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+            Officer: {session.user.email?.split('@')[0]}
+          </span>
         </div>
         <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-2 ${isComplianceReview ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
             {isComplianceReview ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}

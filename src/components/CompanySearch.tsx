@@ -26,13 +26,22 @@ interface CompanySearchProps {
 }
 
 export function CompanySearch({ onSelect, placeholder, category }: CompanySearchProps) {
+  const [mounted, setMounted] = React.useState(false) // FIX: Hydration Guard
   const [open, setOpen] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [results, setResults] = React.useState<any[]>([])
   const [searchTerm, setSearchTerm] = React.useState("")
   const [selectedName, setSelectedName] = React.useState("")
 
+  // 1. Handle Mounting to prevent Hydration Mismatch
   React.useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  // 2. Debounced Search Logic
+  React.useEffect(() => {
+    if (!mounted) return;
+
     const delayDebounceFn = setTimeout(async () => {
       if (searchTerm.length < 2) {
         setResults([]);
@@ -41,11 +50,6 @@ export function CompanySearch({ onSelect, placeholder, category }: CompanySearch
       
       setLoading(true);
       
-      /**
-       * UPDATED QUERY: 
-       * We now fetch Companies -> Product Lines -> Products 
-       * This allows the LODEntryForm to suggest products specifically for a selected line.
-       */
       const { data, error } = await supabase
         .from('companies') 
         .select(`
@@ -72,7 +76,18 @@ export function CompanySearch({ onSelect, placeholder, category }: CompanySearch
     }, 300);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm, category]);
+  }, [searchTerm, category, mounted]);
+
+  // FIX: Return a placeholder that matches the SSR "shell" 
+  // This prevents the Radix IDs from ever mismatching.
+  if (!mounted) {
+    return (
+      <div className="w-full h-[54px] bg-white border border-slate-100 rounded-xl animate-pulse flex items-center px-4">
+        <Search className="w-3.5 h-3.5 text-slate-200 mr-2" />
+        <div className="h-2 w-32 bg-slate-50 rounded" />
+      </div>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -117,7 +132,6 @@ export function CompanySearch({ onSelect, placeholder, category }: CompanySearch
                   value={item.name}
                   onSelect={() => {
                     setSelectedName(item.name);
-                    // This now includes the full nested tree: company -> lines -> products
                     onSelect(item); 
                     setOpen(false);
                   }}
