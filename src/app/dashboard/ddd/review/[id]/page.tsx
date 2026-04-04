@@ -3,11 +3,10 @@ export const dynamic = "force-dynamic";
 import { db } from "@/db";
 import { applications, users } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
-// Corrected: Use your local helper instead of the deprecated auth-helpers
 import { createClient } from "@/utils/supabase/server"; 
 import DeputyDirectorReviewClient from "@/components/DeputyDirectorReviewClient";
 import Link from "next/link";
-import { Landmark, Factory, ShieldCheck } from "lucide-react";
+import { Landmark, Factory, ShieldCheck, User } from "lucide-react";
 import { redirect } from "next/navigation";
 
 export default async function Page({ 
@@ -21,7 +20,6 @@ export default async function Page({
   const { as } = await searchParams;
   const appId = parseInt(id);
 
-  // 1. Initialize Supabase and Auth
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   
@@ -31,7 +29,7 @@ export default async function Page({
   
   const loggedInUserId = session.user.id; 
 
-  // 2. Fetch Application Data
+  // 1. Fetch Application Data
   const app = await db.query.applications.findFirst({
     where: eq(applications.id, appId),
     with: { 
@@ -43,7 +41,8 @@ export default async function Page({
 
   if (!app) return <div className="p-20 text-center font-bold text-slate-400">Application Not Found</div>;
 
-  // 3. Logic for Division and Staff
+  // 2. Logic for Division and Staff
+  // Explicitly support all 4 divisions via the 'as' param
   const currentDiv = as?.toUpperCase() || "VMD";
   const staffList = await db.select().from(users).where(eq(sql`UPPER(${users.division})`, currentDiv));
   
@@ -65,21 +64,32 @@ export default async function Page({
 
   return (
     <div className="relative font-sans min-h-screen bg-slate-50">
-      {/* HUD: Acting Division Switcher */}
+      {/* HUD: Acting Division Switcher - Supports all 4 Technical Divisions */}
       <div className="fixed top-4 right-8 z-[200] flex items-center gap-2 bg-white/90 backdrop-blur p-2 rounded-full border border-slate-200 shadow-2xl">
         <div className="flex items-center gap-2 px-3 py-1">
-          <ShieldCheck className="w-3 h-3 text-blue-600" />
+          <User className="w-3 h-3 text-blue-600" />
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-            Officer: {session.user.email?.split('@')[0]}
+            DD: {session.user.email?.split('@')[0]}
           </span>
         </div>
-        <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-2 ${isComplianceReview ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-            {isComplianceReview ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
-            {isComplianceReview ? "Round 2: Compliance" : "Round 1: Technical"}
-        </div>
+        
         <div className="h-4 w-[1px] bg-slate-200 mx-1" />
-        <Link href={`?as=vmd`} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all ${as !== 'irsd' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}>VMD</Link>
-        <Link href={`?as=irsd`} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all ${as === 'irsd' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}>IRSD</Link>
+        
+        <div className="flex gap-1">
+          {["VMD", "AFPD", "PAD", "IRSD"].map((div) => (
+            <Link 
+              key={div}
+              href={`?as=${div.toLowerCase()}`} 
+              className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all ${
+                currentDiv === div 
+                  ? 'bg-slate-900 text-white shadow-lg' 
+                  : 'text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              {div}
+            </Link>
+          ))}
+        </div>
       </div>
 
       <DeputyDirectorReviewClient 

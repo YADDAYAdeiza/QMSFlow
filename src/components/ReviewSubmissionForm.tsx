@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/client"; // Ensure this matches your project structure
 
 const GMP_SYSTEMS = [
   "Quality Management System",
@@ -25,6 +25,7 @@ interface Props {
   appId: number;
   staffId: string;
   staffName: string;
+  currentDivision: string; // CRITICAL: Added for divisional redirect
   comments: any[];
   isHubVetting: boolean;
   isComplianceReview: boolean; 
@@ -34,15 +35,15 @@ interface Props {
 }
 
 export default function ReviewSubmissionForm({
-  appId, staffId, staffName, comments, isHubVetting, isComplianceReview, riskId, 
+  appId, staffId, staffName, currentDivision, comments, isHubVetting, isComplianceReview, riskId, 
   previousFindings = [], 
   previousIsSra = false 
 }: Props) {
   const router = useRouter();
+  const supabase = createClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   
-  // FIXED: Default to true so you can see the ledger immediately
   const [isLedgerVisible, setIsLedgerVisible] = useState(true);
   const [isSra, setIsSra] = useState(previousIsSra);
   const [justification, setJustification] = useState("");
@@ -83,7 +84,10 @@ export default function ReviewSubmissionForm({
         const fileExt = evidenceFile.name.split('.').pop();
         const fileName = `${appId}_evidence_${Date.now()}.${fileExt}`;
         const filePath = `verification_evidence/${fileName}`;
+        
+        // Using your 'Documents' bucket name
         const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, evidenceFile);
+        
         if (uploadError) throw uploadError;
         const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
         uploadedUrl = data.publicUrl;
@@ -105,7 +109,8 @@ export default function ReviewSubmissionForm({
       const res = await submitToDDD(appId, staffId, justification, isHubVetting, uploadedUrl, complianceData);
       
       if (res.success) {
-        router.push('/dashboard/staff');
+        // Redirect back with the division parameter to maintain context
+        router.push(`/dashboard/staff?as=${currentDivision.toLowerCase()}`);
         router.refresh();
       } else { throw new Error(res.error); }
     } catch (err: any) {

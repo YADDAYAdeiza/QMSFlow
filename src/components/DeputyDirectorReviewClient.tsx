@@ -1,20 +1,24 @@
 "use client"
 
 import React, { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
-  History, UserPlus, Gavel, FileText, Eye, Zap, AlertCircle, ClipboardList,
-  ExternalLink, Building2, Landmark, Factory, Users
+  History, UserPlus, Gavel, FileText, Zap, AlertCircle, ClipboardList,
+  Building2, Landmark, Factory
 } from 'lucide-react';
 import { approveToDirector, assignToStaff, forwardToHub } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
 
 export default function DeputyDirectorReviewClient({ app, staffList = [], loggedInUserId }: any) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [isReworkModalOpen, setIsReworkModalOpen] = useState(false);
   const [showAllStaff, setShowAllStaff] = useState(false);
+
+  // Capture current division from URL to maintain state after redirect
+  const currentActingAs = searchParams.get('as') || 'vmd';
 
   const [assignmentRemarks, setAssignmentRemarks] = useState(""); 
   const [endorsementRemarks, setEndorsementRemarks] = useState(""); 
@@ -23,28 +27,19 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const appDetails = app?.details || {};
   const history = app?.narrativeHistory || [];
 
-  // --- PHASE DETECTION ---
   const isRound2 = app?.isComplianceReview === true;
-  
-  // --- URL LOGIC ---
   const dossierUrl = appDetails?.poaUrl || "";
   const technicalReportUrl = appDetails?.inspectionReportUrl || "";
   const verificationReportUrl = appDetails?.verificationReportUrl || "";
 
-  // If in Round 2, the "Staff Report" is either the Verification (IRSD) or Technical (VMD)
   const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
   const staffReportUrl = isIRSDStaffReturn ? verificationReportUrl : technicalReportUrl;
-  
   const hasStaffSubmission = !!staffReportUrl;
   
-  // --- SMART DEFAULT VIEW ---
-  // If it's Round 1, always start with Dossier/PoA. 
-  // If Round 2 and a report exists, show the report.
   const [viewMode, setViewMode] = useState<'dossier' | 'report'>(
     (isRound2 && hasStaffSubmission) ? 'report' : 'dossier'
   );
 
-  // FINAL SAFETY: Guard against empty strings causing iframe recursion
   const iframeSrc = viewMode === 'report' ? staffReportUrl : dossierUrl;
 
   const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
@@ -64,11 +59,15 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
 
+  // REDIRECT LOGIC: Appends ?as=division to the redirect URL
   const handleAssign = async () => {
     if (!selectedStaffId) return alert(`Please select an officer.`);
     startTransition(async () => {
       const res = await assignToStaff(app.id, selectedStaffId, assignmentRemarks);
-      if (res.success) { router.push('/dashboard/ddd'); router.refresh(); }
+      if (res.success) { 
+        router.push(`/dashboard/ddd?as=${currentActingAs.toLowerCase()}`); 
+        router.refresh(); 
+      }
     });
   };
 
@@ -81,7 +80,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
       } else if (isIRSDStaffReturn) {
         result = await approveToDirector(app.id, endorsementRemarks, loggedInUserId);
       }
-      if (result?.success) { router.push('/dashboard/ddd'); router.refresh(); }
+      if (result?.success) { 
+        router.push(`/dashboard/ddd?as=${currentActingAs.toLowerCase()}`); 
+        router.refresh(); 
+      }
     });
   };
 
@@ -94,7 +96,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   return (
     <div className="grid grid-cols-12 gap-6 p-8 bg-slate-50 min-h-screen font-sans">
       
-      {/* LEFT: VIEWER PANEL */}
+      {/* VIEWER PANEL */}
       <div className="col-span-7 space-y-4">
         <div className="flex items-center justify-between bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex gap-1">
@@ -143,7 +145,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         </div>
       </div>
 
-      {/* RIGHT: ACTION PANEL */}
+      {/* ACTION PANEL */}
       <div className="col-span-5 space-y-6 overflow-y-auto max-h-[90vh] pr-2 custom-scrollbar pb-10">
         
         {/* FINDINGS LEDGER */}
@@ -173,7 +175,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
           </div>
         )}
 
-        {/* WORKFLOW NARRATIVE */}
+        {/* AUDIT NARRATIVE */}
         <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
             <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900 mb-6 flex items-center gap-2">
               <History className="w-4 h-4 text-slate-500" /> Audit Narrative
@@ -232,7 +234,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                 placeholder="Specific instructions for vetting..."
                 className="w-full h-24 bg-black/10 border border-white/10 rounded-2xl p-4 text-xs text-white outline-none placeholder:text-white/40"
               />
-              <button onClick={handleAssign} disabled={isPending || !selectedStaffId} className="w-full py-5 bg-white text-slate-900 rounded-3xl font-black uppercase text-[10px] disabled:opacity-50">
+              <button onClick={handleAssign} disabled={isPending || !selectedStaffId} className="w-full py-5 bg-white text-slate-900 rounded-3xl font-black uppercase text-[10px] disabled:opacity-50 transition-all hover:bg-slate-100 active:scale-95">
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `Dispatch for Vetting`}
               </button>
             </div>
@@ -255,7 +257,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
               placeholder={isTechnicalReturn ? "Notes for Hub Clearance..." : "Final concurrence for the Director..."}
             />
             <div className="space-y-3">
-              <button onClick={handleEndorse} disabled={isPending} className={`w-full py-5 rounded-[2rem] font-black uppercase text-[11px] flex items-center justify-center gap-3 transition-all ${isTechnicalReturn ? 'bg-blue-600' : 'bg-emerald-600'}`}>
+              <button onClick={handleEndorse} disabled={isPending} className={`w-full py-5 rounded-[2rem] font-black uppercase text-[11px] flex items-center justify-center gap-3 transition-all active:scale-95 ${isTechnicalReturn ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : (
                   <>
                     {isTechnicalReturn ? 'Send to Hub' : 'Approve to Director'} 
@@ -276,7 +278,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         onClose={() => setIsReworkModalOpen(false)} 
         appId={app.id} 
         staffList={staffList} 
-        onSuccess={() => { router.push('/dashboard/ddd'); router.refresh(); }} 
+        onSuccess={() => { 
+          router.push(`/dashboard/ddd?as=${currentActingAs.toLowerCase()}`); 
+          router.refresh(); 
+        }} 
       />
     </div>
   );

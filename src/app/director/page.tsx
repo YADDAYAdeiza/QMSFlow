@@ -20,7 +20,6 @@ export default async function DirectorPage({
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
-  // Fetch available Divisional Deputy Directors
   const availableHeads = await db
     .select({
       id: users.id,
@@ -46,7 +45,6 @@ export default async function DirectorPage({
         isNull(qmsTimelines.endTime)
     ));
 
-  // QMS Limit: 48 Hours for Director Point
   const QMS_LIMIT_SECONDS = 48 * 3600;
 
   return (
@@ -86,13 +84,13 @@ export default async function DirectorPage({
           const remaining = Math.max(0, QMS_LIMIT_SECONDS - elapsed);
 
           const details = app.details as any;
-          const savedUrl = details?.poaUrl || details?.inspectionReportUrl;
-          
+
           /**
-           * ✅ ROUND 2 DETECTION
-           * Identifying if this is a Foreign Compliance Review
+           * ✅ PASS 2 DETECTION & DOCUMENT RESOLUTION
+           * Priority: Inspection Report (Pass 2) > POA/Dossier (Pass 1)
            */
           const isInspectionReview = details?.type === "Inspection Report Review (Foreign)" || !!details?.inspectionReportUrl;
+          const savedUrl = details?.inspectionReportUrl || details?.poaUrl;
           const appTypeLabel = isInspectionReview ? "Compliance Review (Foreign)" : "Facility Verification (Local)";
 
           const firstProduct = details?.productLines?.[0]?.products?.[0]?.name || "Product info pending";
@@ -142,6 +140,7 @@ export default async function DirectorPage({
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* Now dynamically loads Inspection Report if in Pass 2 */}
                   <DossierLink url={savedUrl} />
                   
                   {currentView === "Director Review" ? (
@@ -149,7 +148,7 @@ export default async function DirectorPage({
                       appId={app.id} 
                       defaultDivision={lodSuggestedDiv} 
                       availableHeads={availableHeads as any}
-                      isCompliance={isInspectionReview} // Trigger Round 2 UI state
+                      isCompliance={isInspectionReview} 
                     />
                   ) : (
                     <Link 
