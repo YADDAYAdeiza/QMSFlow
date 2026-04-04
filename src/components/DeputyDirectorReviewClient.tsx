@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
   History, UserPlus, Gavel, FileText, Zap, AlertCircle, ClipboardList,
-  Building2, Landmark, Factory
+  Building2, Landmark, Factory, FileCheck
 } from 'lucide-react';
 import { approveToDirector, assignToStaff, forwardToHub } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
@@ -17,7 +17,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const [isReworkModalOpen, setIsReworkModalOpen] = useState(false);
   const [showAllStaff, setShowAllStaff] = useState(false);
 
-  // Capture current division from URL to maintain state after redirect
   const currentActingAs = searchParams.get('as') || 'vmd';
 
   const [assignmentRemarks, setAssignmentRemarks] = useState(""); 
@@ -27,22 +26,32 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const appDetails = app?.details || {};
   const history = app?.narrativeHistory || [];
 
-  const isRound2 = app?.isComplianceReview === true;
-  const dossierUrl = appDetails?.poaUrl || "";
-  const technicalReportUrl = appDetails?.inspectionReportUrl || "";
+  // --- PASS LOGIC START ---
+  
+  // Identify if we are in Pass 2 (Compliance/Inspection Phase)
+  const isPass2 = app?.isComplianceReview === true;
+  
+  const poaUrl = appDetails?.poaUrl || "";
   const verificationReportUrl = appDetails?.verificationReportUrl || "";
+  const inspectionReportUrl = appDetails?.inspectionReportUrl || "";
 
-  const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
-  const staffReportUrl = isIRSDStaffReturn ? verificationReportUrl : technicalReportUrl;
+  // Define which report is relevant for the CURRENT Pass
+  // Pass 2 PRIORITIZES Inspection; Pass 1 PRIORITIZES Verification.
+  const staffReportUrl = isPass2 ? inspectionReportUrl : verificationReportUrl;
+  
   const hasStaffSubmission = !!staffReportUrl;
   
+  // Default to showing the report if one has been submitted for this pass
   const [viewMode, setViewMode] = useState<'dossier' | 'report'>(
-    (isRound2 && hasStaffSubmission) ? 'report' : 'dossier'
+    hasStaffSubmission ? 'report' : 'dossier'
   );
 
-  const iframeSrc = viewMode === 'report' ? staffReportUrl : dossierUrl;
+  const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
+
+  // --- PASS LOGIC END ---
 
   const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
+  const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
   const isHubEntry = app?.currentPoint === 'IRSD Hub Clearance';
   const isAssignmentPhase = app?.currentPoint === 'Technical DD Review' || isHubEntry;
   const isReviewPhase = isTechnicalReturn || isIRSDStaffReturn;
@@ -59,7 +68,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
 
-  // REDIRECT LOGIC: Appends ?as=division to the redirect URL
   const handleAssign = async () => {
     if (!selectedStaffId) return alert(`Please select an officer.`);
     startTransition(async () => {
@@ -100,12 +108,19 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
       <div className="col-span-7 space-y-4">
         <div className="flex items-center justify-between bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex gap-1">
-                <button onClick={() => setViewMode('dossier')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'dossier' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
+                <button 
+                  onClick={() => setViewMode('dossier')} 
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'dossier' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
                   <FileText className="w-3.5 h-3.5" /> Company Dossier / PoA
                 </button>
                 {hasStaffSubmission && (
-                  <button onClick={() => setViewMode('report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'report' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
-                    <ShieldCheck className="w-3.5 h-3.5" /> Assessment Report
+                  <button 
+                    onClick={() => setViewMode('report')} 
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'report' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    <FileCheck className="w-3.5 h-3.5" /> 
+                    {isPass2 ? 'Inspection Report' : 'Verification Report'}
                   </button>
                 )}
             </div>
@@ -138,7 +153,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
             <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-3">
               <FileSearch className="w-12 h-12 opacity-20" />
               <p className="text-xs font-bold uppercase tracking-widest text-center px-10">
-                The requested {viewMode === 'report' ? 'Assessment Report' : 'PoA/Dossier'} URL is missing.
+                The requested {viewMode === 'report' ? (isPass2 ? 'Inspection Report' : 'Verification Report') : 'PoA/Dossier'} URL is missing.
               </p>
             </div>
           )}
@@ -185,7 +200,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                 <div key={idx} className="group relative pl-6 border-l-2 border-slate-100 pb-2">
                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-4 border-slate-100" />
                    <div className="flex justify-between items-center mb-1 font-mono text-[8px] text-slate-400 uppercase font-black">
-                     <span>{note?.from}</span>
+                     <span>{note?.from === 'DDD' ? 'Divisional Deputy Director' : note?.from}</span>
                      <span>{note?.timestamp ? new Date(note.timestamp).toLocaleTimeString() : ''}</span>
                    </div>
                    <div className="p-4 rounded-2xl bg-slate-50">

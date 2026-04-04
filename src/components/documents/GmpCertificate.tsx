@@ -8,6 +8,7 @@ const styles = StyleSheet.create({
   subject: { fontWeight: 'bold', textDecoration: 'underline', marginVertical: 15, textAlign: 'center' },
   body: { marginBottom: 15, textAlign: 'justify' },
   signature: { marginTop: 40, fontWeight: 'bold' },
+  listItem: { marginBottom: 4, marginLeft: 10 }
 });
 
 export const GmpCertificate = ({ data }: { data: any }) => (
@@ -18,28 +19,36 @@ export const GmpCertificate = ({ data }: { data: any }) => (
       </View>
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text>Ref: {data.refNumber || 'NAFDAC/DER/HQ/...'}</Text>
+        <Text>Ref: {data.appNumber || 'NAFDAC/DER/HQ/...'}</Text>
         <Text>Date: {new Date().toLocaleDateString('en-GB')}</Text>
       </View>
 
       <Text style={styles.subject}>NOTIFICATION OF OUTCOME OF GOOD MANUFACTURING PRACTICE (GMP) AUDIT</Text>
 
       <Text style={styles.body}>
-        This is to inform you that the Good Manufacturing Practice (GMP) audit of your factory, {data.factoryName} at {data.factoryAddress}, complied with NAFDAC's current GMP for Medicinal Products Regulations[cite: 36, 37].
+        This is to inform you that the Good Manufacturing Practice (GMP) audit of your factory, {data.facilityName} at {data.facilityAddress}, complied with NAFDAC's current GMP for Medicinal Products Regulations.
       </Text>
 
-      <Text style={{ fontWeight: 'bold', marginBottom: 5 }}>Product lines inspected and approved were:</Text>
-      {data.productLines?.map((line: string, i: number) => (
-        <Text key={i}>• {line}</Text>
-      ))}
+      <View style={{ marginBottom: 10 }}>
+        <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>
+          Product lines inspected and approved were:
+        </Text>
+        
+        {/* Updated Mapping Logic */}
+        {data.productLines?.map((line: any, i: number) => (
+          <Text key={i} style={styles.listItem}>
+            • {line.lineName} ({line.riskCategory})
+          </Text>
+        ))}
+      </View>
 
       <Text style={[styles.body, { marginTop: 10 }]}>
-        This notification is valid for three (3) years from the date of inspection[cite: 43].
+        This notification is valid for three (3) years from the date of inspection.
       </Text>
 
       <View style={styles.signature}>
-        <Text>Temitatyo Stephanie Adeoye</Text>
-        <Text>Director (Veterinary Medicine and Allied Product Directorate)</Text>
+        <Text>Mudashir Idayat</Text>
+        <Text>Deputy Director-in-charge (Veterinary Medicine and Allied Product Directorate)</Text>
         <Text>For: Director-General (NAFDAC)</Text>
       </View>
     </Page>

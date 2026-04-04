@@ -4,11 +4,11 @@ import React, { useState, useRef } from "react";
 import { 
   ShieldAlert, CheckCircle2, FileText, 
   Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
-  Info
+  Info, Activity, History
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/utils/supabase/client"; // Ensure this matches your project structure
+import { createClient } from "@/utils/supabase/client";
 
 const GMP_SYSTEMS = [
   "Quality Management System",
@@ -25,7 +25,7 @@ interface Props {
   appId: number;
   staffId: string;
   staffName: string;
-  currentDivision: string; // CRITICAL: Added for divisional redirect
+  currentDivision: string;
   comments: any[];
   isHubVetting: boolean;
   isComplianceReview: boolean; 
@@ -42,13 +42,12 @@ export default function ReviewSubmissionForm({
   const router = useRouter();
   const supabase = createClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [loading, setLoading] = useState(false);
   
+  const [loading, setLoading] = useState(false);
   const [isLedgerVisible, setIsLedgerVisible] = useState(true);
   const [isSra, setIsSra] = useState(previousIsSra);
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
-  
   const [findings, setFindings] = useState<Array<{ system: string; severity: string; text: string }>>(
     previousFindings.length > 0 ? previousFindings : []
   );
@@ -72,55 +71,111 @@ export default function ReviewSubmissionForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // REMOVED: Mandatory file check (now optional)
+
     if (isComplianceReview && findings.length === 0 && !confirm("You are submitting a Compliance Audit with zero recorded deficiencies. Proceed?")) {
         return;
     }
 
     setLoading(true);
 
-    let uploadedUrl = "";
     try {
+      let publicUrl = "";
+      
+      // Upload only if file exists
       if (evidenceFile) {
         const fileExt = evidenceFile.name.split('.').pop();
-        const fileName = `${appId}_evidence_${Date.now()}.${fileExt}`;
-        const filePath = `verification_evidence/${fileName}`;
+        const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
         
-        // Using your 'Documents' bucket name
-        const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, evidenceFile);
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(filePath, evidenceFile);
         
         if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
-        uploadedUrl = data.publicUrl;
+
+        const { data: { publicUrl: url } } = supabase.storage
+          .from('documents')
+          .getPublicUrl(filePath);
+          
+        publicUrl = url;
       }
 
       const complianceData = {
         riskId,
         isSra,
         isComplianceReview,
-        summary: isLedgerVisible ? { 
+        summary: { 
           criticalCount: counts.critical, 
           majorCount: counts.major, 
           otherCount: counts.other 
-        } : { criticalCount: 0, majorCount: 0, otherCount: 0 },
-        findings: isLedgerVisible ? findings.filter(f => f.text.trim() !== "") : [],
-        evidenceUrl: uploadedUrl
+        },
+        findings: findings.filter(f => f.text.trim() !== ""),
       };
 
-      const res = await submitToDDD(appId, staffId, justification, isHubVetting, uploadedUrl, complianceData);
+      const res = await submitToDDD(
+        appId, 
+        staffId, 
+        justification, 
+        isHubVetting, 
+        publicUrl, 
+        complianceData
+      );
       
       if (res.success) {
-        // Redirect back with the division parameter to maintain context
         router.push(`/dashboard/staff?as=${currentDivision.toLowerCase()}`);
         router.refresh();
-      } else { throw new Error(res.error); }
+      } else { 
+        throw new Error(res.error); 
+      }
     } catch (err: any) {
       alert(err.message || "Submission failed");
-    } finally { setLoading(false); }
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-12 pb-20 max-w-4xl mx-auto">
       
+      {/* 0. REGULATORY AUDIT TRAIL */}
+      <div className="space-y-6">
+        <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-amber-500">
+          <History className="w-6 h-6 text-amber-600" />
+          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Workflow History</h4>
+        </div>
+        
+        <div className="bg-slate-50 border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-inner">
+          {comments && comments.length > 0 ? (
+            <div className="divide-y divide-slate-200">
+              {comments.map((comment, idx) => (
+                <div key={idx} className="p-6 flex gap-5 items-start hover:bg-white transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-sm">
+                    <Activity className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] font-black uppercase text-slate-900 tracking-tight">
+                        {comment.from === 'DDD' ? 'Divisional Deputy Director' : (comment.from || 'System Staff')}
+                      </span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded-md">
+                        {new Date(comment.timestamp).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed italic">
+                      "{comment.text}"
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-10 text-center text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">
+              No previous trail entries found
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* 1. DEFICIENCY / AUDIT LEDGER */}
       <div className="space-y-6">
         <div 
@@ -142,7 +197,7 @@ export default function ReviewSubmissionForm({
                 {isComplianceReview ? "Compliance Audit Ledger" : "Deficiency Ledger"}
               </h4>
               <p className={`text-[11px] font-bold uppercase tracking-widest mt-1 ${isLedgerVisible ? "text-purple-300" : "text-slate-500"}`}>
-                {isComplianceReview ? "Mandatory Analysis & Scoring" : "Optional Observations"}
+                {isComplianceReview ? "Mandatory Analysis & Scoring" : "Observations recorded during review"}
               </p>
             </div>
           </div>
@@ -202,7 +257,7 @@ export default function ReviewSubmissionForm({
                   <textarea 
                     value={f.text} 
                     onChange={(e) => updateFinding(i, 'text', e.target.value)} 
-                    placeholder="Describe specific observation from the inspection report..." 
+                    placeholder="Describe specific observation..." 
                     className="w-full bg-slate-50/50 p-5 rounded-2xl border border-slate-100 focus:border-blue-300 focus:bg-white text-sm text-slate-800 italic focus:outline-none min-h-[100px] resize-none transition-all shadow-inner placeholder:text-slate-400" 
                   />
                 </div>
@@ -235,11 +290,11 @@ export default function ReviewSubmissionForm({
         )}
       </div>
 
-      {/* 2. EVIDENCE UPLOAD */}
+      {/* 2. EVIDENCE UPLOAD (OPTIONAL) */}
       <div className="space-y-6">
         <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
           <Upload className="w-6 h-6 text-blue-600" />
-          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Supporting Evidence</h4>
+          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Verification Report (Optional)</h4>
         </div>
         
         <div 
@@ -250,7 +305,13 @@ export default function ReviewSubmissionForm({
               : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
           }`}
         >
-          <input type="file" ref={fileInputRef} onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} className="hidden" accept=".pdf,.jpg,.png" />
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} 
+            className="hidden" 
+            accept=".pdf" 
+          />
           {evidenceFile ? (
             <>
               <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
@@ -258,7 +319,7 @@ export default function ReviewSubmissionForm({
               </div>
               <div className="text-center">
                 <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
-                <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to change selection</span>
+                <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to replace PDF</span>
               </div>
             </>
           ) : (
@@ -266,7 +327,7 @@ export default function ReviewSubmissionForm({
               <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
                 <Upload className="w-10 h-10 text-slate-400" />
               </div>
-              <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select Verification Document</span>
+              <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select PDF if available</span>
             </>
           )}
         </div>
@@ -283,7 +344,7 @@ export default function ReviewSubmissionForm({
           required
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
-          placeholder={isComplianceReview ? "Provide a final compliance verdict based on the inspection report audit..." : "Final assessment summary for the DDD..."}
+          placeholder="Final assessment summary for the Divisional Deputy Director..."
           className="w-full p-10 rounded-[3.5rem] border-2 border-slate-200 bg-white text-base text-slate-800 min-h-[220px] shadow-xl shadow-slate-200/30 focus:ring-8 focus:ring-blue-500/5 focus:border-blue-500 outline-none transition-all leading-relaxed placeholder:text-slate-400"
         />
 
@@ -306,7 +367,6 @@ export default function ReviewSubmissionForm({
           )}
         </button>
       </div>
-
     </form>
   );
 }

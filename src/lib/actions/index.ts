@@ -27,7 +27,7 @@ export async function submitLODApplication(
 ) {
   const validated = lodFormSchema.safeParse(rawData);
   if (!validated.success) return { success: false, error: "Validation Failed" };
-console.log('This is userId: ', userId);
+
   const data = validated.data;
   const normalizedAppNumber = normalize(data.appNumber);
 
@@ -45,7 +45,6 @@ console.log('This is userId: ', userId);
       const isUpdate = !!existingApp;
       const userDivision = submittingUser?.division || "LOD";
       
-      // Determine if this is a Round 2 (Compliance) update or Pass 1
       const isActuallyRound2 = isUpdate && (existingApp.status === 'TECHNICAL_PASSED' || existingApp.isComplianceReview === true);
 
       // 2. Upsert Companies
@@ -151,7 +150,7 @@ console.log('This is userId: ', userId);
         appId = newApp.id;
       }
 
-      // 5. Risk Assessment Upsert (Strictly Intrinsic in Pass 1)
+      // 5. Risk Assessment Upsert
       const score = maxComp * maxCrit;
       const level = score <= 2 ? "Low" : score <= 4 ? "Medium" : "High";
 
@@ -175,6 +174,7 @@ console.log('This is userId: ', userId);
         });
 
       revalidatePath("/dashboard/director");
+      revalidatePath("/dashboard/lod");
       return { success: true, id: appId };
     });
   } catch (e: any) {
