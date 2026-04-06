@@ -30,7 +30,7 @@ export const ClearanceLetter = ({ data }: { data: any }) => (
       </View>
 
       <View style={styles.refDateRow}>
-        <Text>Ref: {data.appNumber || 'NAFDAC/VMAP/2895/VOL.III/69'}</Text>
+        <Text>Ref: {data.appNumber || 'NAFDAC/VMAP/...'}</Text>
         <Text>Date: {data.date}</Text>
       </View>
 
@@ -45,7 +45,7 @@ export const ClearanceLetter = ({ data }: { data: any }) => (
       <Text style={styles.body}>The above refers, please.</Text>
       <Text style={styles.body}>
         We refer to your letter requesting the verification of your overseas manufacturing facility; 
-        {" "}{data.factoryName}, {data.factoryAddress} for the purpose of registration of the following products:
+        {" "}<Text style={{ fontWeight: 'bold' }}>{data.factoryName}</Text>, {data.factoryAddress} for the purpose of registration of the following products:
       </Text>
 
       <View style={styles.productList}>
@@ -62,9 +62,9 @@ export const ClearanceLetter = ({ data }: { data: any }) => (
       <View style={{ marginTop: 20 }}>
         <Text>Thank you.</Text>
         <View style={styles.signatureBlock}>
-          {/* <Image src="/Signature-removebg-preview.png" style={{ width: 100, height: 80 }} /> */}
           <Text style={styles.signatureName}>Dr. Idayat Mudashir</Text>
-          <Text>Deputy Director in-charge, Veterinary Medicine & Allied Products</Text>
+          <Text>Divisional Deputy Director, Veterinary Medicine & Allied Products</Text>
+          <Text>For: Director-General (NAFDAC)</Text>
         </View>
       </View>
 

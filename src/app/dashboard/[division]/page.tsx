@@ -8,7 +8,6 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import DossierLink from "@/components/DossierLink";
 import { 
-  ShieldAlert, 
   Clock, 
   LayoutDashboard, 
   User, 
@@ -23,26 +22,40 @@ export default async function StaffDashboard({
 }: { 
   params: Promise<{ division: string }> 
 }) {
-  const { division } = await params;
-  const myDivision = (division || "VMD").toUpperCase();
+  const { division: urlDivision } = await params;
   
   const supabase = createClient();
   const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
+  // 1. SESSION & PROFILE SECURITY
   if (authError || !authUser) {
     redirect("/login");
   }
 
-  // 1. Fetch Staff Profile
   const profileResult = await db
-    .select({ name: users.name })
+    .select()
     .from(users)
     .where(eq(users.id, authUser.id))
     .limit(1);
 
-  const staffName = profileResult[0]?.name || "Specialist";
+  const profile = profileResult[0];
 
-  // 2. Fetch Tasks with QMS Timeline Data
+  if (!profile) {
+    console.error("❌ REGISTRY FAIL: UUID not found in 'users' table:", authUser.id);
+    redirect("/login?error=unregistered");
+  }
+
+  const userDivision = (profile.division || "VMD").toUpperCase();
+  const requestedDivision = urlDivision.toUpperCase();
+
+  // Enforce Zoned Access
+  if (userDivision !== requestedDivision && profile.role !== "Admin") {
+    redirect(`/dashboard/${userDivision.toLowerCase()}`);
+  }
+
+  const staffName = profile.name || "Specialist";
+
+  // 2. FETCH TASKS (Scoped to Staff ID and Division)
   const staffTasksRaw = await db
     .select({
       id: qmsTimelines.id,
@@ -58,7 +71,7 @@ export default async function StaffDashboard({
     .leftJoin(companies, eq(applications.companyId, companies.id))
     .where(
       and(
-        ilike(qmsTimelines.division, myDivision),
+        ilike(qmsTimelines.division, userDivision),
         eq(qmsTimelines.staffId, authUser.id),
         or(
           eq(qmsTimelines.point, 'Technical Review'),
@@ -72,7 +85,7 @@ export default async function StaffDashboard({
       )
     );
 
-  // 3. Format Time and Metadata (QMS Timer Logic)
+  // 3. QMS TIMER & WORKFLOW LOGIC
   const safeTasks = (staffTasksRaw ?? []).map(task => {
     const details = (task.applicationDetails as any) || {};
     
@@ -89,10 +102,20 @@ export default async function StaffDashboard({
         ? `${hours}h ${minutes % 60}m` 
         : `${minutes}m`;
 
+    /**
+     * LOGIC FIX: 
+     * If it's a Facility Verification but has no inspection report yet, 
+     * we treat it as a Dossier Review (Administrative phase).
+     */
+    const isComplianceReview = 
+      details.isComplianceReview === true || 
+      (details.type === "Facility Verification" && !!details.inspectionReportUrl) ||
+      !!details.inspectionReportUrl;
+
     return {
       ...task,
       displayTime,
-      isComplianceReview: details.isComplianceReview === true || details.type === "Facility Verification" || !!details.inspectionReportUrl,
+      isComplianceReview,
       displayCompanyName: task.companyName || "Unknown Entity",
       displayAppNumber: task.applicationNumber || "No Reference",
       dossierUrl: details.inspectionReportUrl || details.poaUrl
@@ -109,7 +132,7 @@ export default async function StaffDashboard({
             </div>
             <h1 className="text-3xl font-black mb-2 uppercase tracking-tight flex items-center gap-3 italic text-slate-900 leading-none">
               <LayoutDashboard className="w-8 h-8 text-blue-600" />
-              {myDivision} Specialist Workspace
+              {userDivision} Specialist Workspace
             </h1>
             <p className="text-slate-500 text-sm font-medium">Manage your active regulatory assessments and dossiers.</p>
           </div>
@@ -178,7 +201,7 @@ export default async function StaffDashboard({
 
                   <td className="p-6 text-right">
                     <Link 
-                      href={`/dashboard/${division.toLowerCase()}/review/${task.applicationId}`}
+                      href={`/dashboard/${userDivision.toLowerCase()}/review/${task.applicationId}`}
                       className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-md group-hover:-translate-x-1 text-white ${
                         task.isComplianceReview ? 'bg-purple-600 hover:bg-purple-700' : 'bg-slate-900 hover:bg-blue-600'
                       }`}

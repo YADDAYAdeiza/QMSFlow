@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
   Loader2, RotateCcw, Activity, ShieldCheck, 
-  FileText, CheckCircle2, ChevronDown, Beaker, ListFilter, Globe2, Award
+  FileText, CheckCircle2, ChevronDown, Beaker, ListFilter, Globe2
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
@@ -116,7 +116,7 @@ function RiskExecutiveSummary({ complianceRisk, isInspection }: { complianceRisk
                     {findings.map((f: any, i: number) => (
                       <div key={f.id || `obs-${i}`} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-[11px] text-slate-600 italic leading-relaxed shadow-inner">
                         <span className="text-blue-500 font-black mr-2 uppercase">Obs {i+1}</span>
-                        {typeof f === 'string' ? f : f.text}
+                        {typeof f === 'string' ? f : (f.text || f.finding)}
                       </div>
                     ))}
                   </div>
@@ -139,9 +139,27 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   const router = useRouter();
 
   const details = app.details || {};
-  const complianceRisk = app?.complianceRisk;
   const isInspection = app.isInspection;
   const docTitle = app.docTitle;
+
+  const complianceRisk = useMemo(() => {
+    const baseRisk = app?.complianceRisk || {};
+    const ledger = details.findings_ledger || [];
+    const summarySource = details.compliance_summary || baseRisk.summary || {};
+
+    return {
+      ...baseRisk,
+      summary: {
+        criticalCount: summarySource.criticalCount ?? 0,
+        majorCount: summarySource.majorCount ?? 0,
+        otherCount: summarySource.otherCount ?? 0,
+      },
+      findings: baseRisk.findings?.length > 0 ? baseRisk.findings : ledger,
+      intrinsicLevel: baseRisk.intrinsicLevel || details.intrinsic_level || "N/A",
+      overallRating: baseRisk.overallRating || details.overall_risk_rating || "N/A",
+      isSra: baseRisk.isSra ?? (details.sra_status === "TRUE" || details.is_sra === true)
+    };
+  }, [app, details]);
 
   const trail = useMemo(() => {
     const comments = details.comments || [];
@@ -154,24 +172,35 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   }, [details.comments]);
 
   const docConfig = useMemo(() => {
-    const mappedProducts = details.productLines?.flatMap((line: any) => 
-      line.products?.map((p: any) => `${p.name} (${line.lineName})`)
-    ) || [];
+    const appNumber = app.applicationNumber;
+    const date = new Date().toLocaleDateString('en-GB');
 
-    const templateData = { 
-      appNumber: app.applicationNumber, 
-      localApplicantName: details.companyName || app.localApplicant?.name || "N/A", 
-      localApplicantAddress: details.companyAddress || app.localApplicant?.address,
-      factoryName: details.facilityName, 
-      factoryAddress: details.facilityAddress, 
-      date: new Date().toLocaleDateString('en-GB'),
-      products: mappedProducts
-    };
-
-    return { 
-      component: isInspection ? <GmpCertificate data={templateData} /> : <ClearanceLetter data={templateData} />, 
-      prefix: isInspection ? "GMP_CERTIFICATE" : "GMP_CLEARANCE" 
-    };
+    if (isInspection) {
+      // PASS 2 DATA MAPPING
+      const certData = {
+        appNumber,
+        date,
+        facilityName: details.factory_name || details.facilityName || "N/A",
+        facilityAddress: details.factory_address || details.facilityAddress || "N/A",
+        productLines: details.productLines || (details.products || []).map((p: string) => ({
+          lineName: p,
+          riskCategory: "Compliant"
+        }))
+      };
+      return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
+    } else {
+      // PASS 1 DATA MAPPING
+      const clearanceData = {
+        appNumber,
+        date,
+        factoryName: details.factory_name || details.facilityName || "N/A",
+        factoryAddress: details.factory_address || details.facilityAddress || "N/A",
+        localApplicantName: details.companyName || details.applicant_name || "N/A",
+        localApplicantAddress: details.companyAddress || details.applicant_address || "N/A",
+        products: details.products || []
+      };
+      return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
+    }
   }, [app, details, isInspection]);
 
   const handleApprove = async () => {
@@ -180,13 +209,13 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     try {
       const blob = await pdf(docConfig.component).toBlob();
       const path = `Final_Outputs/${app.applicationNumber}/${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
+      
       const { error: uploadError } = await supabase.storage.from('documents').upload(path, blob);
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
 
       startTransition(async () => {
-        // Disparate Archival logic
         const metadataUpdate = isInspection 
           ? { gmp_certificate_url: publicUrl, archived_path: publicUrl } 
           : { gmp_clearance_url: publicUrl, archived_path: publicUrl };
@@ -201,7 +230,10 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
           setProcessing(false); 
         }
       });
-    } catch (err: any) { alert(err.message); setProcessing(false); }
+    } catch (err: any) { 
+      alert(err.message); 
+      setProcessing(false); 
+    }
   };
 
   return (

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
   History, UserPlus, Gavel, FileText, Zap, AlertCircle, ClipboardList,
-  Building2, Landmark, Factory, FileCheck
+  Building2, Landmark, Factory, FileCheck, Globe
 } from 'lucide-react';
 import { approveToDirector, assignToStaff, forwardToHub } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
@@ -58,6 +58,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
   const intrinsicLevel = app?.intrinsicLevel || "Low";
   const complianceLevel = app?.complianceLevel;
+  const isSRA = appDetails?.is_sra === true;
   const findings = app?.findingsLedger || [];
   const summary = app?.complianceSummary || {};
 
@@ -127,9 +128,16 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
             <div className="flex items-center gap-4 pr-4">
               <div className="flex flex-col items-end">
+                <span className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">SRA Status</span>
+                <div className={`flex items-center gap-1 px-3 py-1 rounded-full border text-[9px] font-bold uppercase shadow-sm ${isSRA ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                   <Globe className={`w-2.5 h-2.5 ${isSRA ? 'animate-pulse' : ''}`} />
+                   {isSRA ? "SRA Facility" : "Non-SRA"}
+                </div>
+              </div>
+              <div className="flex flex-col items-end">
                 <span className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">Intrinsic Risk</span>
                 <div className={`px-3 py-1 rounded-full border text-[9px] font-bold uppercase ${getRiskStyles(intrinsicLevel)}`}>
-                   {intrinsicLevel}
+                    {intrinsicLevel}
                 </div>
               </div>
               <div className="flex flex-col items-end">

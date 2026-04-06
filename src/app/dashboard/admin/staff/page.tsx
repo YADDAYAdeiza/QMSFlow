@@ -9,26 +9,18 @@ import { createClient } from "@/utils/supabase/server";
 import { 
   ShieldCheck, 
   UserPlus, 
-  AlertCircle,
-  Clock,
-  UserCircle,
   XCircle
 } from "lucide-react";
 
-import DeleteStaffButton from "./DeleteStaffButton";
+import StaffTableBody from "./StaffTableBody";
 
-// FIX: searchParams must be a Promise in the type definition
 export default async function StaffAdminPage(props: {
   searchParams: Promise<{ error?: string }>;
 }) {
   const supabase = createClient();
-  
-  // FIX: You MUST await searchParams before using it
   const searchParams = await props.searchParams;
 
-  // FIX: Use getUser() for security (replaces getSession)
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-
   if (authError || !user) redirect("/login");
 
   const [currentUser] = await db
@@ -37,8 +29,8 @@ export default async function StaffAdminPage(props: {
     .where(eq(users.id, user.id))
     .limit(1);
 
-  // Authorization Check
   const isAdmin = currentUser?.role === "Admin" || currentUser?.role === "Divisional Deputy Director";
+  
   if (!isAdmin) {
     const div = currentUser?.division?.toLowerCase() || "vmd";
     redirect(`/dashboard/${div}`);
@@ -74,8 +66,9 @@ export default async function StaffAdminPage(props: {
   async function deleteStaff(formData: FormData) {
     "use server";
     const userId = formData.get("userId") as string;
-    // user.id comes from the secure getUser() call
-    if (userId === user.id) return; 
+    const { data: { user } } = await createClient().auth.getUser();
+    if (!user || userId === user.id) return; 
+    
     await db.delete(users).where(eq(users.id, userId));
     revalidatePath("/dashboard/admin/staff");
   }
@@ -84,7 +77,7 @@ export default async function StaffAdminPage(props: {
     <div className="p-10 bg-slate-50 min-h-screen font-sans text-slate-900">
       <div className="max-w-6xl mx-auto">
         <header className="mb-12">
-          <h1 className="text-4xl font-black uppercase tracking-tighter italic">
+          <h1 className="text-4xl font-black uppercase tracking-tighter italic leading-none">
             Staff Personnel Registry
           </h1>
           <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2 flex items-center gap-2">
@@ -96,7 +89,7 @@ export default async function StaffAdminPage(props: {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
           <section className="lg:col-span-1">
             <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 sticky top-10">
-              <div className="flex items-center gap-3 mb-8 text-blue-600">
+              <div className="flex items-center gap-3 mb-8">
                 <div className="p-2 bg-blue-600 rounded-lg">
                     <UserPlus className="w-4 h-4 text-white" />
                 </div>
@@ -161,51 +154,12 @@ export default async function StaffAdminPage(props: {
                     <th className="p-6 text-[9px] font-black uppercase tracking-widest text-right pr-10">Action</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {allStaff.map((person) => {
-                    const isConnected = !!person.linkedAt;
-                    return (
-                      <tr key={person.id} className="border-b border-slate-100 last:border-none group hover:bg-blue-50/30 transition-colors">
-                        <td className="p-6">
-                          <div className="flex items-center gap-3">
-                            <UserCircle className="w-8 h-8 text-slate-300" />
-                            <div>
-                                <p className="font-bold text-slate-800 text-sm uppercase italic">{person.name}</p>
-                                <p className="text-[10px] text-slate-400 lowercase">{person.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-6 text-center">
-                          <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-[9px] font-black uppercase">
-                            {person.division}
-                          </span>
-                        </td>
-                        <td className="p-6 text-center">
-                          {isConnected ? (
-                            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[8px] font-black uppercase border border-emerald-100">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              Connected
-                            </div>
-                          ) : (
-                            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-[8px] font-black uppercase border border-amber-100">
-                              <Clock className="w-3 h-3" />
-                              Pending
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-6 text-right pr-10">
-                          {person.id !== user.id && (
-                            <DeleteStaffButton 
-                                userId={person.id} 
-                                userName={person.name} 
-                                deleteAction={deleteStaff} 
-                            />
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
+                {/* SAFE INJECTION OF CLIENT CONTENT */}
+                <StaffTableBody 
+                  allStaff={allStaff} 
+                  currentUserId={user.id} 
+                  deleteStaff={deleteStaff} 
+                />
               </table>
             </div>
           </section>

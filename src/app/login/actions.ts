@@ -58,7 +58,7 @@ export async function getRedirectPath(userId: string) {
       return "/dashboard/lod";
     }
     if (role === "Director") {
-      return "/director";
+      return "/dashboard/director";
     }
 
     /** * D. TECHNICAL STAFF / SPECIALISTS
