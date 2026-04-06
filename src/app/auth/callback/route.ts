@@ -1,5 +1,5 @@
 import { createClient } from "@/utils/supabase/server";
-import { NextResponse } from "next/next";
+import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
