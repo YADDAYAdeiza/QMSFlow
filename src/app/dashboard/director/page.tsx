@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, qmsTimelines, users } from "@/db/schema";
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq, and, isNull, sql, count } from "drizzle-orm";
 import QMSCountdown from "@/components/QMSCountdown";
 import AssignToDDDButton from "@/components/AssignToDDDButton"; 
 import DossierLink from "@/components/DossierLink"; 
@@ -20,6 +20,23 @@ export default async function DirectorPage({
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
+  // 1. Fetch counts for the badges independently of the list
+  const reviewCountResult = await db
+    .select({ value: count() })
+    .from(applications)
+    .where(eq(applications.currentPoint, "Director Review"));
+
+  const finalCountResult = await db
+    .select({ value: count() })
+    .from(applications)
+    .where(eq(applications.currentPoint, "Director Final Review"));
+
+  const counts = {
+    review: reviewCountResult[0]?.value || 0,
+    final: finalCountResult[0]?.value || 0,
+  };
+
+  // 2. Fetch heads for assignment
   const availableHeads = await db
     .select({
       id: users.id,
@@ -29,6 +46,7 @@ export default async function DirectorPage({
     .from(users)
     .where(eq(users.role, 'Divisional Deputy Director'));
 
+  // 3. Fetch the actual list for the current view
   const inbox = await db
     .select({
       id: applications.id,
@@ -65,13 +83,13 @@ export default async function DirectorPage({
               href="?view=review" 
               className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Review' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
-              <ClipboardList className="w-3 h-3" /> New Reviews ({currentView === 'Director Review' ? inbox.length : '0'})
+              <ClipboardList className="w-3 h-3" /> New Reviews ({counts.review})
             </Link>
             <Link 
               href="?view=final" 
               className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Final Review' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
-              <CheckCircle2 className="w-3 h-3" /> Final Approvals ({currentView === 'Director Final Review' ? inbox.length : '0'})
+              <CheckCircle2 className="w-3 h-3" /> Final Approvals ({counts.final})
             </Link>
           </div>
         </div>
@@ -140,7 +158,6 @@ export default async function DirectorPage({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* Now dynamically loads Inspection Report if in Pass 2 */}
                   <DossierLink url={savedUrl} />
                   
                   {currentView === "Director Review" ? (
