@@ -214,7 +214,8 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
 
             <div className="grid grid-cols-1 gap-4 pt-4">
               <button 
-                onClick={() => handleGracefulExit("/dashboard/lod/daily-status")} 
+                // onClick={() => handleGracefulExit("/dashboard/lod/daily-status")} 
+                onClick={() => handleGracefulExit("/dashboard/applications")} 
                 className="w-full py-6 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all"
               >
                 <Activity className="w-4 h-4" /> View Live Status

@@ -4,8 +4,8 @@ import React, { useState, useTransition, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
-  Loader2, RotateCcw, Activity, ShieldCheck, 
-  FileText, CheckCircle2, ChevronDown, Beaker, ListFilter, Globe2
+  Loader2, RotateCcw, ShieldCheck, 
+  FileText, CheckCircle2
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
@@ -13,7 +13,8 @@ import { GmpCertificate } from "@/components/documents/GmpCertificate";
 import { supabase } from "@/lib/supabase";
 import RejectionModal from "@/components/RejectionModal";
 
-// ... RiskExecutiveSummary component stays the same ...
+// Import the newly created component
+import { RiskExecutiveSummary } from "@/components/analytics/RiskExecutiveSummary";
 
 export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUserId }: any) {
   const [remarks, setRemarks] = useState("");
@@ -24,98 +25,86 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   const router = useRouter();
 
   const details = app.details || {};
-  const isInspection = app.isInspection; // This is our primary switch
-  const docTitle = isInspection ? "GMP Certificate" : "Clearance Letter";
+  const isInspection = app.isInspection;
+  const docTitle = app.docTitle;
 
-  // 1. ROBUST DATA MAPPING FOR PDF GENERATION
+  const complianceRisk = useMemo(() => {
+    const baseRisk = app?.complianceRisk || {};
+    const ledger = details.findings_ledger || [];
+    const summarySource = details.compliance_summary || baseRisk.summary || {};
+
+    return {
+      ...baseRisk,
+      summary: {
+        criticalCount: summarySource.criticalCount ?? 0,
+        majorCount: summarySource.majorCount ?? 0,
+        otherCount: summarySource.otherCount ?? 0,
+      },
+      findings: baseRisk.findings?.length > 0 ? baseRisk.findings : ledger,
+      intrinsicLevel: baseRisk.intrinsicLevel || details.intrinsic_level || "N/A",
+      overallRating: baseRisk.overallRating || details.overall_risk_rating || "N/A",
+      isSra: baseRisk.isSra ?? (details.sra_status === "TRUE" || details.is_sra === true)
+    };
+  }, [app, details]);
+
+  const trail = useMemo(() => {
+    const comments = details.comments || [];
+    return [...comments].map(c => ({
+      ...c,
+      roleDisplay: (c.role === "DDD" || c.role === "Divisional Deputy Director") 
+        ? "Divisional Deputy Director" 
+        : (c.role === "Director" ? "Executive Director" : c.role)
+    })).reverse();
+  }, [details.comments]);
+
   const docConfig = useMemo(() => {
-    const appNumber = app.applicationNumber || details.appNumber;
-    const today = new Date().toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric'
-    });
+    const appNumber = app.applicationNumber;
+    const date = new Date().toLocaleDateString('en-GB');
 
     if (isInspection) {
-      /** * PASS 2: GMP CERTIFICATE 
-       * Requires: facilityName, facilityAddress, productLines [{lineName, riskCategory}]
-       */
       const certData = {
         appNumber,
-        date: today,
-        facilityName: details.facilityName || details.factory_name || "N/A",
-        facilityAddress: details.facilityAddress || details.factory_address || "N/A",
-        productLines: details.productLines || [] 
+        date,
+        facilityName: details.factory_name || details.facilityName || "N/A",
+        facilityAddress: details.factory_address || details.facilityAddress || "N/A",
+        productLines: details.productLines || (details.products || []).map((p: string) => ({
+          lineName: p,
+          riskCategory: "Compliant"
+        }))
       };
-      return { 
-        component: <GmpCertificate data={certData} />, 
-        prefix: "GMP_CERTIFICATE",
-        storageFolder: "Final_Certificates" 
-      };
+      return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
     } else {
-      /** * PASS 1: CLEARANCE LETTER 
-       * Requires: localApplicantName, localApplicantAddress, products (flattened string array)
-       */
-      // Flatten productLines to simple string array for ClearanceLetter
-      const flattenedProducts = details.productLines 
-        ? details.productLines.flatMap((lp: any) => lp.products?.map((p: any) => p.name) || [lp.lineName])
-        : (details.products || []);
-
       const clearanceData = {
         appNumber,
-        date: today,
-        factoryName: details.facilityName || details.factory_name || "N/A",
-        factoryAddress: details.facilityAddress || details.factory_address || "N/A",
+        date,
+        factoryName: details.factory_name || details.facilityName || "N/A",
+        factoryAddress: details.factory_address || details.facilityAddress || "N/A",
         localApplicantName: details.companyName || details.applicant_name || "N/A",
         localApplicantAddress: details.companyAddress || details.applicant_address || "N/A",
-        products: flattenedProducts
+        products: details.products || []
       };
-      return { 
-        component: <ClearanceLetter data={clearanceData} />, 
-        prefix: "GMP_CLEARANCE",
-        storageFolder: "Clearance_Letters"
-      };
+      return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
     }
   }, [app, details, isInspection]);
 
-  // 2. ROBUST APPROVAL LOGIC
   const handleApprove = async () => {
-    if (!remarks.trim()) return alert("Executive remarks required for authorization.");
+    if (!remarks.trim()) return alert("Executive remarks required.");
     setProcessing(true);
-    
     try {
-      // Generate the PDF blob based on the active config
       const blob = await pdf(docConfig.component).toBlob();
-      const filename = `${docConfig.prefix}_${app.applicationNumber.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
-      const path = `Final_Outputs/${app.applicationNumber}/${filename}`;
+      const path = `Final_Outputs/${app.applicationNumber}/${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
       
-      // Upload to Supabase 'Documents' bucket
-      const { error: uploadError } = await supabase.storage.from('Documents').upload(path, blob);
+      const { error: uploadError } = await supabase.storage.from('documents').upload(path, blob);
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage.from('Documents').getPublicUrl(path);
+      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
 
       startTransition(async () => {
-        // Construct metadata updates specific to the Pass Type
         const metadataUpdate = isInspection 
-          ? { 
-              gmp_certificate_url: publicUrl, 
-              archived_path: publicUrl,
-              status: "CERTIFIED" 
-            } 
-          : { 
-              gmp_clearance_url: publicUrl, 
-              archived_path: publicUrl,
-              status: "CLEARED_FOR_INSPECTION"
-            };
+          ? { gmp_certificate_url: publicUrl, archived_path: publicUrl } 
+          : { gmp_clearance_url: publicUrl, archived_path: publicUrl };
 
-        const res = await issueFinalClearance(
-          app.id, 
-          remarks, 
-          publicUrl, 
-          metadataUpdate, 
-          currentUserId
-        );
+        const res = await issueFinalClearance(app.id, remarks, publicUrl, metadataUpdate, currentUserId);
         
         if (res.success) { 
           router.push('/dashboard/director?view=final'); 
@@ -126,14 +115,10 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         }
       });
     } catch (err: any) { 
-      console.error("Approval Error:", err);
-      alert(`Deployment Error: ${err.message}`); 
+      alert(err.message); 
       setProcessing(false); 
     }
   };
-
-  // ... Rest of the JSX (View Toggles & Sidebar) ...
-  // Ensure "Authorize & Sign" button uses the dynamic docTitle
 
   return (
     <div className="fixed inset-0 flex bg-slate-100 overflow-hidden font-sans">
