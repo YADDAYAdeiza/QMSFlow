@@ -4,13 +4,18 @@ import { desc } from "drizzle-orm";
 import Link from "next/link";
 import { Factory, Globe, FileSearch } from "lucide-react";
 
-export default async function ApplicationsOverview() {
-  // Fetch all applications with their related company data
+// We pass the "basePath" as a prop so the "Open" button 
+// links to the correct review screen for that specific role.
+interface TrackerProps {
+  rolePath: "lod" | "director";
+}
+
+export default async function ApplicationsTracker({ rolePath }: TrackerProps) {
   const allApps = await db.query.applications.findMany({
     orderBy: [desc(applications.id)],
     with: {
-      localApplicant: true, // Joins the local company
-      foreignFactory: true, // Joins the manufacturing site
+      localApplicant: true,
+      foreignFactory: true,
     },
   });
 
@@ -48,12 +53,8 @@ export default async function ApplicationsOverview() {
               {allApps.map((app) => (
                 <tr key={app.id} className="hover:bg-blue-50/50 transition-colors group">
                   <td className="p-6">
-                    <p className="font-mono font-black text-blue-600 text-lg">
-                      #{app.applicationNumber}
-                    </p>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">
-                      {app.type}
-                    </span>
+                    <p className="font-mono font-black text-blue-600 text-lg">#{app.applicationNumber}</p>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">{app.type}</span>
                   </td>
                   
                   <td className="p-6">
@@ -87,7 +88,7 @@ export default async function ApplicationsOverview() {
 
                   <td className="p-6 text-right">
                     <Link 
-                      href={`/dashboard/director/review/${app.id}`}
+                      href={`/dashboard/${rolePath}/review/${app.id}`}
                       className="inline-flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg shadow-slate-200 group-hover:-translate-y-1"
                     >
                       <FileSearch className="w-4 h-4" /> Open
@@ -101,9 +102,7 @@ export default async function ApplicationsOverview() {
 
         {allApps.length === 0 && (
           <div className="mt-10 p-20 text-center bg-slate-100 rounded-[3rem] border-4 border-dashed border-slate-200">
-            <p className="text-slate-400 font-black uppercase italic tracking-[0.3em]">
-              No applications found in database.
-            </p>
+            <p className="text-slate-400 font-black uppercase italic tracking-[0.3em]">No applications found.</p>
           </div>
         )}
       </div>

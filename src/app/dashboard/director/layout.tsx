@@ -9,7 +9,8 @@ import {
   BarChart3, 
   ShieldCheck, 
   UserCircle,
-  Timer 
+  Timer,
+  Globe 
 } from "lucide-react";
 
 export default async function DirectorLayout({
@@ -57,6 +58,7 @@ export default async function DirectorLayout({
         <div className="max-w-7xl mx-auto px-8 h-20 flex items-center justify-between">
           
           <div className="flex items-center gap-8">
+            {/* BRANDING SECTION */}
             <div className="flex items-center gap-3">
               <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-200">
                 <ShieldCheck className="w-5 h-5 text-white" />
@@ -82,6 +84,14 @@ export default async function DirectorLayout({
                 <LayoutDashboard className="w-4 h-4" /> Workspace
               </Link>
 
+              {/* MASTER TRACKER - NEW LINK */}
+              <Link 
+                href="/dashboard/director/applications" 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+              >
+                <Globe className="w-4 h-4" /> Master Tracker
+              </Link>
+
               <Link 
                 href="/dashboard/director/performance" 
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
@@ -98,9 +108,12 @@ export default async function DirectorLayout({
             </div>
           </div>
 
+          {/* USER PROFILE SECTION */}
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
-              <p className="text-[10px] font-black text-slate-900 uppercase">{profile.name}</p>
+              <p className="text-[10px] font-black text-slate-900 uppercase">
+                {profile.name}
+              </p>
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">
                 {profile.role === 'Admin' ? 'System Administrator' : 'Divisional Deputy Director'}
               </p>

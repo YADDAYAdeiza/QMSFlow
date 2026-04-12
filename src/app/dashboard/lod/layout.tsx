@@ -10,7 +10,8 @@ import {
   BarChart4, 
   ShieldAlert,
   ShieldCheck,
-  UserCircle 
+  UserCircle,
+  Globe
 } from "lucide-react";
 
 export default async function LODHorizontalLayout({
@@ -41,6 +42,7 @@ export default async function LODHorizontalLayout({
 
   const navItems = [
     { name: 'LOD Inbox', href: '/dashboard/lod', icon: ClipboardCheck },
+    {name: 'Master Tracker', href:'/dashboard/lod/applications', icon:Globe},
     { name: 'Performance', href: '/dashboard/lod/performance', icon: Timer },
     { name: 'Risk Management', href: '/dashboard/lod/risk-management', icon: ShieldCheck },
     { name: 'Analytics', href: '/dashboard/lod/analytics', icon: BarChart4 },
