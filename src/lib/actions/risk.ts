@@ -8,20 +8,22 @@ export async function getRiskInventory() {
   try {
     const inventory = await db.select({
       id: riskAssessments.id,
-      applicationId: riskAssessments.applicationId, // <--- ADD THIS
+      applicationId: riskAssessments.applicationId,
       facilityName: companies.name,
       facilityId: companies.id,
       appNumber: applications.applicationNumber,
       intrinsicLevel: riskAssessments.intrinsicLevel,
       complianceLevel: riskAssessments.complianceLevel,
       orr: riskAssessments.overallRiskRating,
-      status: riskAssessments.status, 
+      status: riskAssessments.status, // Risk assessment lifecycle (PARTIAL/FINALIZED)
+      applicationStatus: applications.status, // The actual workflow status (CLEARED/REJECTED etc)
       nextInspection: riskAssessments.nextInspectionDate,
       updatedAt: riskAssessments.updatedAt,
     })
     .from(riskAssessments)
     .innerJoin(companies, eq(riskAssessments.facilityId, companies.id))
-    .leftJoin(applications, eq(riskAssessments.applicationId, applications.id))
+    .innerJoin(applications, eq(riskAssessments.applicationId, applications.id)) // Changed to innerJoin for strictness
+    .where(eq(applications.status, 'CLEARED')) // <--- THE FIX: Only show fully processed Pass 1 apps
     .orderBy(desc(riskAssessments.updatedAt));
 
     return { success: true, data: inventory };
