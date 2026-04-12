@@ -39,7 +39,7 @@ export default async function DirectorLayout({
 
   /**
    * 3. ZONED ACCESS LOCK (Director Level)
-   * Only 'Director' or 'Admin' roles are permitted in this directory.
+   * Ensures only authorized personnel access this administrative tier.
    */
   const isAuthorized = profile.role === "Director" || profile.role === "Admin";
   
@@ -53,9 +53,11 @@ export default async function DirectorLayout({
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      
       {/* SHARED DIRECTOR NAVIGATION BAR */}
-      <nav className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-8 h-20 flex items-center justify-between">
+      {/* h-20 (80px) height. z-50 ensures it stays above 'fixed' child components */}
+      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 h-20 shadow-sm">
+        <div className="max-w-7xl mx-auto px-8 h-full flex items-center justify-between">
           
           <div className="flex items-center gap-8">
             {/* BRANDING SECTION */}
@@ -73,7 +75,7 @@ export default async function DirectorLayout({
               </div>
             </div>
 
-            <div className="h-8 w-[1px] bg-slate-100 mx-2 hidden md:block" />
+            <div className="h-10 w-[1px] bg-slate-100 mx-2 hidden md:block" />
 
             {/* NAVIGATION TABS */}
             <div className="flex items-center gap-1">
@@ -84,7 +86,6 @@ export default async function DirectorLayout({
                 <LayoutDashboard className="w-4 h-4" /> Workspace
               </Link>
 
-              {/* MASTER TRACKER - NEW LINK */}
               <Link 
                 href="/dashboard/director/applications" 
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
@@ -127,12 +128,17 @@ export default async function DirectorLayout({
       </nav>
 
       {/* PAGE CONTENT */}
-      <main className="flex-1 overflow-y-auto">
-        {children}
+      {/* pt-20 provides the offset for non-fixed pages. 
+          flex-1 ensures the main area expands to fill the screen.
+      */}
+      <main className="flex-1 pt-20">
+        <div className="max-w-7xl mx-auto h-full px-8">
+          {children}
+        </div>
       </main>
 
       {/* FOOTER STATUS */}
-      <footer className="bg-white border-t border-slate-200 py-4 px-8">
+      <footer className="bg-white border-t border-slate-200 py-4 px-8 mt-auto z-10">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-300">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />

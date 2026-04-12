@@ -1,7 +1,6 @@
 "use client";
 
 import React from 'react';
-// NEW: Using our fixed browser client
 import { createClient } from '@/utils/supabase/client'; 
 import { useRouter, usePathname } from 'next/navigation';
 import { 
@@ -38,10 +37,10 @@ export default function DashboardLayout({
   ];
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans">
-      {/* SIDEBAR */}
-      <aside className="w-72 bg-slate-900 text-white flex flex-col border-r border-slate-800">
-        <div className="p-8">
+    <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
+      {/* SIDEBAR - Locked to screen height */}
+      <aside className="w-72 bg-slate-900 text-white flex flex-col border-r border-slate-800 h-screen sticky top-0">
+        <div className="p-8 flex-1 overflow-y-auto custom-scrollbar">
           <div className="flex items-center gap-3 mb-8">
             <div className="p-2 bg-blue-600 rounded-xl shadow-lg shadow-blue-500/20">
               <ShieldCheck className="w-6 h-6 text-white" />
@@ -76,7 +75,8 @@ export default function DashboardLayout({
           </nav>
         </div>
 
-        <div className="mt-auto p-8 border-t border-slate-800">
+        {/* SIGN OUT SECTION - Now always visible at the bottom of the sidebar */}
+        <div className="p-8 border-t border-slate-800 bg-slate-900">
           <button 
             onClick={handleSignOut}
             className="flex items-center gap-3 w-full p-4 rounded-2xl text-slate-400 hover:bg-rose-500/10 hover:text-rose-500 transition-all group"
@@ -87,8 +87,8 @@ export default function DashboardLayout({
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 overflow-y-auto">
+      {/* MAIN CONTENT - Only this area scrolls */}
+      <main className="flex-1 overflow-y-auto p-10">
         {children}
       </main>
     </div>

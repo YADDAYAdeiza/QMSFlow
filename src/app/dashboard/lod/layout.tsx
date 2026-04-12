@@ -42,7 +42,7 @@ export default async function LODHorizontalLayout({
 
   const navItems = [
     { name: 'LOD Inbox', href: '/dashboard/lod', icon: ClipboardCheck },
-    {name: 'Master Tracker', href:'/dashboard/lod/applications', icon:Globe},
+    { name: 'Master Tracker', href: '/dashboard/lod/applications', icon: Globe },
     { name: 'Performance', href: '/dashboard/lod/performance', icon: Timer },
     { name: 'Risk Management', href: '/dashboard/lod/risk-management', icon: ShieldCheck },
     { name: 'Analytics', href: '/dashboard/lod/analytics', icon: BarChart4 },
@@ -104,14 +104,15 @@ export default async function LODHorizontalLayout({
       </nav>
 
       {/* PAGE CONTENT */}
-      <main className="flex-1 overflow-y-auto">
+      {/* pt-20 added to match the h-20 nav height and prevent occlusion */}
+      <main className="flex-1 overflow-y-auto pt-20">
         <div className="max-w-7xl mx-auto p-10">
           {children}
         </div>
       </main>
 
       {/* FOOTER STATUS */}
-      <footer className="bg-white border-t border-slate-200 py-4 px-10">
+      <footer className="bg-white border-t border-slate-200 py-4 px-10 mt-auto">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-400">
             <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
