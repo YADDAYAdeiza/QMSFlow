@@ -7,37 +7,55 @@ import { eq } from "drizzle-orm";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  // if "next" is in search params, use it as the redirection URL
+  
+  // 'next' allows you to pass a specific return path, default to root if not found
   const next = searchParams.get("next") ?? "/";
 
   if (code) {
     const supabase = createClient();
     
-    // 1. Swap the code for a Session
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    // 1. Swap the temporary code for a secure Session
+    const { error: authError } = await supabase.auth.exchangeCodeForSession(code);
     
-    if (!error) {
-      const { data: { user } } = await supabase.auth.getUser();
+    if (!authError) {
+      // 2. Fetch the authenticated user's metadata
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-      if (user) {
-        // 2. Final QMS Check: Ensure the user is in our public.users table
+      if (user && !userError) {
+        // 3. QMS HANDSHAKE: Cross-reference with our internal users table
         const [userProfile] = await db
           .select()
           .from(users)
           .where(eq(users.id, user.id))
           .limit(1);
 
-        // 3. Teleport them to their specific dashboard based on role
-        if (userProfile?.role === "Admin" || userProfile?.role === "Divisional Deputy Director") {
-          return NextResponse.redirect(`${origin}/dashboard/admin/staff`);
-        }
+        /**
+         * 4. DYNAMIC ROUTING ENGINE
+         * High-level officials go to the Directorate Portal.
+         * Technical staff go to their specific Division Hub.
+         */
         
-        const division = userProfile?.division?.toLowerCase() || "vmd";
+        // If profile hasn't been created yet (Edge case), send to a generic onboarding or root
+        if (!userProfile) {
+          console.warn(`⚠️ Profile missing for user ${user.id} during callback.`);
+          return NextResponse.redirect(`${origin}/login?error=profile-not-found`);
+        }
+
+        // Routing for High-Level Access
+        if (userProfile.role === "Admin" || userProfile.role === "Director") {
+          return NextResponse.redirect(`${origin}/dashboard/director`);
+        }
+
+        // Routing for Division Staff
+        // We normalize to lowercase to match the folder structure (e.g., /dashboard/vmd)
+        const division = userProfile.division?.toLowerCase() || "vmd";
         return NextResponse.redirect(`${origin}/dashboard/${division}`);
       }
     }
   }
 
-  // If something goes wrong, send them back to login with an error
-  return NextResponse.redirect(`${origin}/login?error=Could not verify authentication code`);
+  // 5. ERROR HANDLING
+  // If code exchange fails or user isn't found, return to login with a clear error
+  console.error("❌ Auth Callback Failure: Invalid code or session exchange error.");
+  return NextResponse.redirect(`${origin}/login?error=authentication_failed`);
 }

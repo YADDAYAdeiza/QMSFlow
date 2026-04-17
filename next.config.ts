@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
     // @ts-ignore - this ignores the type error if your Next version is < 15
     reactCompiler: true,
   },
+  reactStrictMode: false, // This stops the double-mount behavior
 };
 
 export default nextConfig;

@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useTransition } from 'react';
+import React, { useState, useEffect, useTransition } from 'react';
 import { 
   X, RotateCcw, AlertTriangle, Loader2, 
   UserCircle2, MessageSquare 
@@ -11,7 +11,7 @@ interface RejectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   appId: number;
-  currentDDId: string; // Added to identify the acting Divisional Deputy Director
+  currentDDId: string; 
   currentStaffId?: string; 
   staffList: any[];
   onSuccess: () => void;
@@ -21,17 +21,30 @@ export default function RejectionModal({
   isOpen, onClose, appId, currentDDId, currentStaffId, staffList, onSuccess 
 }: RejectionModalProps) {
   const [remarks, setRemarks] = useState("");
-  const [targetStaffId, setTargetStaffId] = useState(currentStaffId || "");
+  // Initialize with currentStaffId if provided
+  const [targetStaffId, setTargetStaffId] = useState("");
   const [isPending, startTransition] = useTransition();
+
+  // Reset or set target whenever modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setTargetStaffId(currentStaffId || "");
+    }
+  }, [isOpen, currentStaffId]);
 
   if (!isOpen) return null;
 
   const handleReturn = () => {
-    if (!remarks.trim()) return alert("QMS Requirement: Please provide specific reasons for return.");
-    if (!targetStaffId) return alert("Please select a recipient for the rework.");
+    // QMS Requirement validation
+    if (!remarks.trim()) {
+      return alert("QMS Requirement: Please provide specific reasons for return.");
+    }
+    if (!targetStaffId) {
+      return alert("Please select a recipient for the rework.");
+    }
 
     startTransition(async () => {
-      // Logic: App ID, Target Recipient, The Remarks, and current DD ID
+      // Execute the return action with DD context
       const res = await returnToStaff(appId, targetStaffId, remarks, currentDDId);
       
       if (res.success) {
@@ -54,11 +67,11 @@ export default function RejectionModal({
               <RotateCcw className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xs font-black uppercase tracking-widest">Return for Rework</h3>
+              <h3 className="text-xs font-black uppercase tracking-widest text-white">Return for Rework</h3>
               <p className="text-[10px] text-rose-100 font-bold uppercase opacity-80">Divisional Deputy Director Action</p>
             </div>
           </div>
-          <button onClick={onClose} className="hover:rotate-90 transition-transform">
+          <button onClick={onClose} className="hover:rotate-90 transition-transform text-white">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -69,18 +82,23 @@ export default function RejectionModal({
             <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">
               <UserCircle2 className="w-3 h-3" /> Assign To (For Correction)
             </label>
-            <select 
-              value={targetStaffId}
-              onChange={(e) => setTargetStaffId(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-500 transition-all appearance-none"
-            >
-              <option value="">Select recipient...</option>
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} — {s.role} ({s.division || 'Technical'})
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select 
+                value={targetStaffId}
+                onChange={(e) => setTargetStaffId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-500 transition-all appearance-none cursor-pointer"
+              >
+                <option value="">Select recipient...</option>
+                {staffList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} — {s.role} ({s.division || 'Technical'})
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                <RotateCcw className="w-3 h-3 text-slate-400" />
+              </div>
+            </div>
           </div>
 
           {/* REMARKS */}
@@ -96,7 +114,7 @@ export default function RejectionModal({
             />
           </div>
 
-          {/* QMS NOTE */}
+          {/* QMS CLOCK NOTE */}
           <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
             <p className="text-[10px] text-amber-700 leading-relaxed italic">
@@ -117,7 +135,7 @@ export default function RejectionModal({
             <button 
               onClick={handleReturn}
               disabled={isPending}
-              className="py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-black uppercase text-[10px] shadow-lg shadow-rose-900/20 flex items-center justify-center gap-2 transition-all active:scale-95"
+              className="py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-black uppercase text-[10px] shadow-lg shadow-rose-900/20 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
             >
               {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm Return"}
             </button>

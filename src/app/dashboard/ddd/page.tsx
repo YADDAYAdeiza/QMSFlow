@@ -5,17 +5,15 @@ import { applications, companies, qmsTimelines } from "@/db/schema";
 import { eq, and, isNull, or } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server"; 
 import DossierLink from "@/components/DossierLink";
+import { recallApplication } from "@/lib/actions/ddd";  
+ 
 import { 
-  ArrowRightCircle, 
-  Clock, 
-  Inbox, 
-  Users, 
-  Landmark, 
-  Factory, 
-  ShieldCheck 
+  ArrowRightCircle, Clock, Inbox, Users, 
+  Landmark, Factory, ShieldCheck, RotateCcw 
 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 export default async function DDDInboxPage({ 
   searchParams 
@@ -34,20 +32,11 @@ export default async function DDDInboxPage({
   }
   
   const loggedInUserId = session.user.id; 
-  console.log('This is logged in user: ', loggedInUserId);
-
-  /**
-   * 3. Division Logic:
-   * Maps to VMD, PAD, AFPD, or IRSD based on the 'as' URL parameter.
-   */
   const actingDivision = as?.toUpperCase() || "VMD";
   const isAssignedView = view === "assigned";
   
-  /**
-   * 4. Universal Query for all Divisional Deputy Directors
-   * - Technical Divisions (VMD, PAD, AFPD) look for 'Technical DD Review'
-   * - IRSD looks for 'IRSD Hub Clearance'
-   */
+  // 3. Database Query
+  // 3. Database Query
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -62,27 +51,20 @@ export default async function DDDInboxPage({
     .leftJoin(companies, eq(applications.companyId, companies.id))
     .innerJoin(qmsTimelines, eq(qmsTimelines.applicationId, applications.id))
     .where(and(
-      // Ensure we are looking at an active timeline step
       isNull(qmsTimelines.endTime),
-      
-      // Filter by the division specified in the URL toggle
       eq(qmsTimelines.division, actingDivision),
-      
       isAssignedView 
-        ? eq(applications.currentPoint, 'Staff Technical Review') // Items assigned to staff
+        ? or(
+            eq(applications.currentPoint, 'Staff Technical Review'),
+            eq(applications.currentPoint, 'IRSD Staff Vetting') // Added this for IRSD support
+          )
         : or(
-            // Item is personally on the DDD's desk
             eq(qmsTimelines.staffId, loggedInUserId),
-            
-            // Workflow Step: Standard Technical Divisions
             eq(applications.currentPoint, 'Technical DD Review'),
-            
-            // Workflow Step: IRSD Specific Hub
             eq(applications.currentPoint, 'IRSD Hub Clearance')
           )
     ));
-
-  // 5. Format Time and Metadata for the View
+  // 4. Formatting Logic
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -97,7 +79,6 @@ export default async function DDDInboxPage({
         : `${minutes}m`;
 
     const details = (app.details as any) || {};
-    // Round 2 is typically Compliance/Post-Reg (e.g., Facility Verification)
     const isRound2 = details.isComplianceReview === true || !!details.inspectionReportUrl;
 
     return { ...app, displayTime, isRound2 };
@@ -113,17 +94,22 @@ export default async function DDDInboxPage({
           {actingDivision} Divisional Deputy Director
         </h1>
         
-        {/* Navigation Toggles */}
         <div className="flex gap-4 mt-6">
             <Link 
               href={`?as=${actingDivision.toLowerCase()}&view=new`} 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${!isAssignedView ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all",
+                !isAssignedView ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-slate-400 border border-slate-200'
+              )}
             >
               <Inbox className="w-3 h-3" /> Incoming for Assignment
             </Link>
             <Link 
               href={`?as=${actingDivision.toLowerCase()}&view=assigned`} 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${isAssignedView ? 'bg-purple-600 text-white shadow-lg shadow-purple-100' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all",
+                isAssignedView ? 'bg-purple-600 text-white shadow-lg shadow-purple-100' : 'bg-white text-slate-400 border border-slate-200'
+              )}
             >
               <Users className="w-3 h-3" /> Monitoring Staff Reviews
             </Link>
@@ -161,11 +147,12 @@ export default async function DDDInboxPage({
 
                   <td className="p-6">
                     <div className="flex flex-col gap-1">
-                      <span className={`text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border ${
+                      <span className={cn(
+                        "text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border",
                         app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
-                      }`}>
+                      )}>
                         {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
-                        {app.isRound2 ? 'Post-Registration' : 'Pre-Registration'}
+                        {app.isRound2 ? 'Pass 2: Compliance' : 'Pass 1: Facility'}
                       </span>
                       <span className="text-[9px] font-bold text-slate-400 uppercase italic">
                         {app.currentPoint}
@@ -189,13 +176,33 @@ export default async function DDDInboxPage({
                     </div>
                   </td>
 
-                  <td className="p-6 text-right">
-                    <Link 
-                      href={`/dashboard/ddd/review/${app.id}?as=${actingDivision.toLowerCase()}`}
-                      className="inline-flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 transition-all shadow-md group-hover:-translate-x-1"
-                    >
-                      {isAssignedView ? 'Manage' : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
-                    </Link>
+                  <td className="p-6">
+                    <div className="flex justify-end gap-2">
+                      {isAssignedView && (
+                        <form action={async () => {
+                          "use server";
+                          // Convert ID to string to ensure it matches the server action expectations
+                          await recallApplication(String(app.id), actingDivision);
+                        }}>
+                          <button 
+                            type="submit" 
+                            className="flex items-center gap-2 px-4 py-3 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-black uppercase hover:bg-amber-600 hover:text-white transition-all shadow-sm"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Recall
+                          </button>
+                        </form>
+                      )}
+
+                      <Link 
+                        href={`/dashboard/ddd/review/${app.id}?as=${actingDivision.toLowerCase()}`}
+                        className={cn(
+                          "inline-flex items-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-md group-hover:-translate-x-1",
+                          isAssignedView ? "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50" : "bg-slate-900 text-white hover:bg-blue-600"
+                        )}
+                      >
+                        {isAssignedView ? 'Track' : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               );

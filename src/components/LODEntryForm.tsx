@@ -208,7 +208,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             </div>
             
             <div className="space-y-4">
-              <h2 className="text-4xl font-black text-slate-900 uppercase italic tracking-tighter leading-tight">Registration Complete</h2>
+              <h2 className="text-4xl font-black text-slate-900 uppercase italic tracking-tighter leading-tight">Submission Complete</h2>
               <p className="text-slate-500 text-[13px] font-medium px-6">Application <span className="text-blue-600 font-bold">#{watch("appNumber")}</span> has been successfully logged.</p>
             </div>
 
