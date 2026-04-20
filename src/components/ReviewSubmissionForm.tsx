@@ -148,25 +148,31 @@ export default function ReviewSubmissionForm({
           {comments && comments.length > 0 ? (
             <div className="divide-y divide-slate-200">
               {comments.map((comment, idx) => (
-                <div key={idx} className="p-6 flex gap-5 items-start hover:bg-white transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-sm">
-                    <Activity className="w-4 h-4 text-slate-400" />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] font-black uppercase text-slate-900 tracking-tight">
-                        {comment.from === 'DDD' ? 'Divisional Deputy Director' : (comment.from || 'System Staff')}
-                      </span>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded-md">
-                        {new Date(comment.timestamp).toLocaleDateString()}
-                      </span>
+                  <div key={idx} className={`p-6 flex gap-5 items-start transition-colors ${comment.action === 'REWORK_REQUIRED' ? 'bg-rose-50/50 border-l-4 border-rose-500' : 'hover:bg-white'}`}>
+                    <div className={`w-10 h-10 rounded-full bg-white border flex items-center justify-center shrink-0 shadow-sm ${comment.action === 'REWORK_REQUIRED' ? 'border-rose-200' : 'border-slate-200'}`}>
+                      {/* Change icon based on action */}
+                      {comment.action === 'REWORK_REQUIRED' ? (
+                        <ShieldAlert className="w-4 h-4 text-rose-500" />
+                      ) : (
+                        <Activity className="w-4 h-4 text-slate-400" />
+                      )}
                     </div>
-                    <p className="text-xs text-slate-600 leading-relaxed italic">
-                      "{comment.text}"
-                    </p>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] font-black uppercase text-slate-900 tracking-tight">
+                          {comment.from}
+                          {comment.action === 'REWORK_REQUIRED' && (
+                            <span className="ml-2 text-[9px] bg-rose-600 text-white px-2 py-0.5 rounded-full">REWORK REQUIRED</span>
+                          )}
+                        </span>
+                        {/* ... rest of your timestamp code */}
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed italic">
+                        "{comment.text}"
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           ) : (
             <div className="p-10 text-center text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">
