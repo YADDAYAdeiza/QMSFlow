@@ -1,81 +1,9 @@
-// import { createServerClient, type CookieOptions } from '@supabase/ssr'
-// import { NextResponse, type NextRequest } from 'next/server'
-
-// export async function middleware(request: NextRequest) {
-//   let response = NextResponse.next({
-//     request: {
-//       headers: request.headers,
-//     },
-//   })
-
-//   const supabase = createServerClient(
-//     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-//     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-//     {
-//       cookies: {
-//         get(name: string) {
-//           return request.cookies.get(name)?.value
-//         },
-//         set(name: string, value: string, options: CookieOptions) {
-//           request.cookies.set({
-//             name,
-//             value,
-//             ...options,
-//           })
-//           response = NextResponse.next({
-//             request: {
-//               headers: request.headers,
-//             },
-//           })
-//           response.cookies.set({
-//             name,
-//             value,
-//             ...options,
-//           })
-//         },
-//         remove(name: string, options: CookieOptions) {
-//           request.cookies.set({
-//             name,
-//             value: '',
-//             ...options,
-//           })
-//           response = NextResponse.next({
-//             request: {
-//               headers: request.headers,
-//             },
-//           })
-//           response.cookies.set({
-//             name,
-//             value: '',
-//             ...options,
-//           })
-//         },
-//       },
-//     }
-//   )
-
-//   const { data: { session } } = await supabase.auth.getSession()
-
-//   // 1. Protect Dashboard Routes
-//   if (!session && request.nextUrl.pathname.startsWith('/dashboard')) {
-//     return NextResponse.redirect(new URL('/login', request.url))
-//   }
-
-//   return response
-// }
-
-// export const config = {
-//   matcher: ['/dashboard/:path*', '/auth/callback'],
-// }
-
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
+    request: { headers: request.headers },
   })
 
   const supabase = createServerClient(
@@ -83,31 +11,27 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
+        getAll() {
+          return request.cookies.getAll()
         },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({ name, value, ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
-          response.cookies.set({ name, value, ...options })
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({ name, value: '', ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
-          response.cookies.set({ name, value: '', ...options })
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            request.cookies.set(name, value)
+          )
+          response = NextResponse.next({ request })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          )
         },
       },
     }
   )
 
-  const { data: { session } } = await supabase.auth.getSession()
+  // This line is CRITICAL: it refreshes the session before the route handles it
+  const { data: { user } } = await supabase.auth.getUser()
 
-  // 1. Basic Auth Guard
-  if (!session && request.nextUrl.pathname.startsWith('/dashboard')) {
+  // Auth Guard
+  if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 

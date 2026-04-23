@@ -18,15 +18,9 @@ export default function FactoryStream() {
 
     const config = new PSLib.Config({
         signalling: {
-            address: "ws://127.0.0.1:8888"
-        },
-        // ADD THIS: This disables the strict origin check that is likely
-        // causing your Transport Error in a Next.js/Turbopack environment
-        featureFlags: {
-            peerConnectionOptions: {
-                disableAutoPlayVideo: true 
+            // Hardcode the IP and Port. Do not use relative paths.
+            address: "ws://127.0.0.1:8888" 
             }
-        }
     } as any);
 
     pixelStreaming = new PSLib.PixelStreaming(config);

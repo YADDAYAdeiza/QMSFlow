@@ -17,7 +17,7 @@ import StaffTableBody from "./StaffTableBody";
 export default async function StaffAdminPage(props: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const searchParams = await props.searchParams;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();

@@ -71,8 +71,6 @@ export default function ReviewSubmissionForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // REMOVED: Mandatory file check (now optional)
-
     if (isComplianceReview && findings.length === 0 && !confirm("You are submitting a Compliance Audit with zero recorded deficiencies. Proceed?")) {
         return;
     }
@@ -82,8 +80,8 @@ export default function ReviewSubmissionForm({
     try {
       let publicUrl = "";
       
-      // Upload only if file exists
-      if (evidenceFile) {
+      // Upload only if file exists and not in Compliance Review
+      if (evidenceFile && !isComplianceReview) {
         const fileExt = evidenceFile.name.split('.').pop();
         const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
         
@@ -122,9 +120,11 @@ export default function ReviewSubmissionForm({
       );
       
       if (res.success) {
-        router.push(`/dashboard/staff?as=${currentDivision.toLowerCase()}`);
+        // Redirect to the review page for that specific application
+        // The structure follows: /dashboard/[division]/review/[appId]
+        router.push(`/dashboard/${currentDivision.toLowerCase()}/review/${appId}`);
         router.refresh();
-      } else { 
+      } else {
         throw new Error(res.error); 
       }
     } catch (err: any) {
@@ -150,7 +150,6 @@ export default function ReviewSubmissionForm({
               {comments.map((comment, idx) => (
                   <div key={idx} className={`p-6 flex gap-5 items-start transition-colors ${comment.action === 'REWORK_REQUIRED' ? 'bg-rose-50/50 border-l-4 border-rose-500' : 'hover:bg-white'}`}>
                     <div className={`w-10 h-10 rounded-full bg-white border flex items-center justify-center shrink-0 shadow-sm ${comment.action === 'REWORK_REQUIRED' ? 'border-rose-200' : 'border-slate-200'}`}>
-                      {/* Change icon based on action */}
                       {comment.action === 'REWORK_REQUIRED' ? (
                         <ShieldAlert className="w-4 h-4 text-rose-500" />
                       ) : (
@@ -165,7 +164,6 @@ export default function ReviewSubmissionForm({
                             <span className="ml-2 text-[9px] bg-rose-600 text-white px-2 py-0.5 rounded-full">REWORK REQUIRED</span>
                           )}
                         </span>
-                        {/* ... rest of your timestamp code */}
                       </div>
                       <p className="text-xs text-slate-600 leading-relaxed italic">
                         "{comment.text}"
@@ -296,48 +294,50 @@ export default function ReviewSubmissionForm({
         )}
       </div>
 
-      {/* 2. EVIDENCE UPLOAD (OPTIONAL) */}
-      <div className="space-y-6">
-        <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
-          <Upload className="w-6 h-6 text-blue-600" />
-          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Verification Report (Optional)</h4>
+      {/* 2. EVIDENCE UPLOAD (Conditional: Hidden for Compliance) */}
+      {!isComplianceReview && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
+            <Upload className="w-6 h-6 text-blue-600" />
+            <h4 className="text-sm font-black uppercase tracking-[0.25em]">Verification Report (Optional)</h4>
+          </div>
+          
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className={`p-14 rounded-[3.5rem] border-2 border-dashed cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-5 shadow-sm ${
+              evidenceFile 
+                ? "border-emerald-500 bg-emerald-50/50 shadow-inner shadow-emerald-100" 
+                : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
+            }`}
+          >
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} 
+              className="hidden" 
+              accept=".pdf" 
+            />
+            {evidenceFile ? (
+              <>
+                <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
+                  <FileCheck className="w-10 h-10 text-white" />
+                </div>
+                <div className="text-center">
+                  <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
+                  <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to replace PDF</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
+                  <Upload className="w-10 h-10 text-slate-400" />
+                </div>
+                <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select PDF if available</span>
+              </>
+            )}
+          </div>
         </div>
-        
-        <div 
-          onClick={() => fileInputRef.current?.click()}
-          className={`p-14 rounded-[3.5rem] border-2 border-dashed cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-5 shadow-sm ${
-            evidenceFile 
-              ? "border-emerald-500 bg-emerald-50/50 shadow-inner shadow-emerald-100" 
-              : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
-          }`}
-        >
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} 
-            className="hidden" 
-            accept=".pdf" 
-          />
-          {evidenceFile ? (
-            <>
-              <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
-                <FileCheck className="w-10 h-10 text-white" />
-              </div>
-              <div className="text-center">
-                <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
-                <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to replace PDF</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
-                <Upload className="w-10 h-10 text-slate-400" />
-              </div>
-              <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select PDF if available</span>
-            </>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* 3. EXECUTIVE SUMMARY & SUBMIT */}
       <div className="space-y-6">

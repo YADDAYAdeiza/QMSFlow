@@ -132,7 +132,7 @@ export default async function StaffDashboard({
             </div>
             <h1 className="text-3xl font-black mb-2 uppercase tracking-tight flex items-center gap-3 italic text-slate-900 leading-none">
               <LayoutDashboard className="w-8 h-8 text-blue-600" />
-              {userDivision} Specialist Workspace
+              {userDivision} Staff Workspace
             </h1>
             <p className="text-slate-500 text-sm font-medium">Manage your active regulatory assessments and dossiers.</p>
           </div>

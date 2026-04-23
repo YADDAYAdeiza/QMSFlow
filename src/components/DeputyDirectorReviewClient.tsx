@@ -28,19 +28,28 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
   const currentActingAs = searchParams.get('as') || 'vmd';
   const [assignmentRemarks, setAssignmentRemarks] = useState(""); 
-  const [endorsementRemarks, setEndorsementRemarks] = useState(""); 
+  const [endorsementRemarks, setEndorsementRemarks] = useState("");
   const [selectedStaffId, setSelectedStaffId] = useState("");
 
   const appDetails = app?.details || {};
   const history = app?.narrativeHistory || [];
 
- // 1. Find the name of the person who submitted the vetting
-const lastSubmitterName = [...history]
-  .reverse()
-  .find(h => h.action === 'TECHNICAL_VETTING_SUBMITTED')?.from;
+ // Define the actions that signify a staff member has completed their task
+  const submissionActions = [
+    'TECHNICAL_VETTING_SUBMITTED', 
+    'COMPLIANCE_AUDIT_COMPLETED'
+  ];
 
-// 2. Map that name to the ID found in your staffList
-const lastAssignedStaffId = staffList.find(s => s.name === lastSubmitterName)?.id || "";
+  // 1. Find the history entry of the person who last worked on the application
+  // We look for any action in our defined list
+  const lastWorkEntry = [...history]
+    .reverse()
+    .find(h => submissionActions.includes(h.action));
+
+  // 2. Extract the name and map to ID
+  const lastSubmitterName = lastWorkEntry?.from;
+  const lastAssignedStaffId = staffList.find(s => s.name === lastSubmitterName)?.id || "";
+console.log('This is the last staff id: ', lastAssignedStaffId);
 
   // --- DELTA DATA EXTRACTION ---
   const lastRework = [...history].reverse().find(h => h.action === "REWORK_REQUIRED");
