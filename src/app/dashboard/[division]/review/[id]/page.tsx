@@ -21,7 +21,7 @@ export default async function TechnicalReviewPage(props: PageProps) {
   const applicationId = parseInt(id);
   if (isNaN(applicationId)) return notFound();
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
   if (authError || !authUser) redirect("/login");

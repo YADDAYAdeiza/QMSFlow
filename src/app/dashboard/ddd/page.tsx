@@ -24,7 +24,7 @@ export default async function DDDInboxPage({
   const { as, view } = await searchParams;
 
   // 2. Authentication Check
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   
   if (!session) {

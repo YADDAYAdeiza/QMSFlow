@@ -19,7 +19,7 @@ export default async function StaffLayout({
   params: Promise<{ division: string }>;
 }) {
   const { division: urlDivision } = await params;
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user: authUser } } = await supabase.auth.getUser();
 
   if (!authUser) redirect("/login");

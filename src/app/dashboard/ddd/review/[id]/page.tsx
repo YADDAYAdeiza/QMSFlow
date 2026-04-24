@@ -20,7 +20,7 @@ export default async function Page({
   const { as } = await searchParams;
   const appId = parseInt(id);
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   
   if (!session) {

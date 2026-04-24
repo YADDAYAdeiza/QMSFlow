@@ -17,7 +17,7 @@ export default async function DDDNestedLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user: authUser } } = await supabase.auth.getUser();
 
   if (!authUser) redirect("/login");

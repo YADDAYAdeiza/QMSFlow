@@ -48,8 +48,8 @@ export default function ReviewSubmissionForm({
   const [isSra, setIsSra] = useState(previousIsSra);
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
-  const [findings, setFindings] = useState<Array<{ system: string; severity: string; text: string }>>(
-    previousFindings.length > 0 ? previousFindings : []
+  const [findings, setFindings] = useState<Array<{ id: string; system: string; severity: string; text: string }>>(
+    previousFindings.length > 0 ? previousFindings.map(f => ({ ...f, id: Math.random().toString(36).substr(2, 9) })) : []
   );
 
   const counts = {
@@ -58,15 +58,13 @@ export default function ReviewSubmissionForm({
     other: findings.filter(f => f.severity === "Other" && f.text.trim()).length,
   };
 
-  const addFinding = () => setFindings([...findings, { system: GMP_SYSTEMS[0], severity: "Other", text: "" }]);
+  const addFinding = () => setFindings([...findings, { id: Math.random().toString(36).substr(2, 9), system: GMP_SYSTEMS[0], severity: "Other", text: "" }]);
   
-  const updateFinding = (index: number, field: string, value: string) => {
-    const next = [...findings];
-    (next[index] as any)[field] = value;
-    setFindings(next);
+  const updateFinding = (id: string, field: string, value: string) => {
+    setFindings(findings.map(f => f.id === id ? { ...f, [field]: value } : f));
   };
 
-  const removeFinding = (index: number) => setFindings(findings.filter((_, i) => i !== index));
+  const removeFinding = (id: string) => setFindings(findings.filter(f => f.id !== id));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +78,6 @@ export default function ReviewSubmissionForm({
     try {
       let publicUrl = "";
       
-      // Upload only if file exists and not in Compliance Review
       if (evidenceFile && !isComplianceReview) {
         const fileExt = evidenceFile.name.split('.').pop();
         const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
@@ -120,9 +117,8 @@ export default function ReviewSubmissionForm({
       );
       
       if (res.success) {
-        // Redirect to the review page for that specific application
-        // The structure follows: /dashboard/[division]/review/[appId]
-        router.push(`/dashboard/${currentDivision.toLowerCase()}/review/${appId}`);
+        // router.push(`/dashboard/${currentDivision.toLowerCase()}/review/${appId}`);
+        router.push(`/dashboard/${currentDivision.toLowerCase()}`);
         router.refresh();
       } else {
         throw new Error(res.error); 
@@ -137,7 +133,6 @@ export default function ReviewSubmissionForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-12 pb-20 max-w-4xl mx-auto">
       
-      {/* 0. REGULATORY AUDIT TRAIL */}
       <div className="space-y-6">
         <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-amber-500">
           <History className="w-6 h-6 text-amber-600" />
@@ -180,7 +175,6 @@ export default function ReviewSubmissionForm({
         </div>
       </div>
 
-      {/* 1. DEFICIENCY / AUDIT LEDGER */}
       <div className="space-y-6">
         <div 
           onClick={() => setIsLedgerVisible(!isLedgerVisible)}
@@ -227,45 +221,51 @@ export default function ReviewSubmissionForm({
             </div>
 
             <div className="space-y-6">
-              {findings.map((f, i) => (
-                <div key={i} className="p-7 rounded-[2.5rem] border border-slate-200 bg-white shadow-md space-y-5 relative transition-all hover:border-blue-300 group">
-                  <div className="flex wrap gap-4 items-center">
-                    <select 
-                      value={f.system} 
-                      onChange={(e) => updateFinding(i, 'system', e.target.value)} 
-                      className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all cursor-pointer"
-                    >
-                      {GMP_SYSTEMS.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    
-                    <select 
-                      value={f.severity} 
-                      onChange={(e) => updateFinding(i, 'severity', e.target.value)}
-                      className={`border-none rounded-2xl px-6 py-2.5 text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer ${
-                        f.severity === 'Critical' ? 'bg-rose-600 text-white hover:bg-rose-700' : 
-                        f.severity === 'Major' ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-200 text-slate-800 hover:bg-slate-300'
-                      }`}
-                    >
-                      {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    
-                    <button 
-                      type="button" 
-                      onClick={() => removeFinding(i)} 
-                      className="ml-auto p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <textarea 
-                    value={f.text} 
-                    onChange={(e) => updateFinding(i, 'text', e.target.value)} 
-                    placeholder="Describe specific observation..." 
-                    className="w-full bg-slate-50/50 p-5 rounded-2xl border border-slate-100 focus:border-blue-300 focus:bg-white text-sm text-slate-800 italic focus:outline-none min-h-[100px] resize-none transition-all shadow-inner placeholder:text-slate-400" 
-                  />
+              {findings.map((f) => (
+              <div key={f.id} className="p-7 rounded-[2.5rem] border border-slate-200 bg-white shadow-md space-y-5 transition-all hover:border-blue-300">
+                {/* Header area */}
+                <div className="flex flex-row items-center gap-4">
+                  <select 
+                    value={f.system} 
+                    onChange={(e) => updateFinding(f.id, 'system', e.target.value)} 
+                    className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all cursor-pointer flex-grow"
+                  >
+                    {GMP_SYSTEMS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  
+                  <select 
+                    value={f.severity} 
+                    onChange={(e) => updateFinding(f.id, 'severity', e.target.value)}
+                    className={`rounded-2xl px-6 py-2.5 text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer ${
+                      f.severity === 'Critical' ? 'bg-rose-600 text-white' : 
+                      f.severity === 'Major' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-800'
+                    }`}
+                  >
+                    {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
                 </div>
-              ))}
+
+                {/* Textarea remains the primary focus */}
+                <textarea 
+                  value={f.text} 
+                  onChange={(e) => updateFinding(f.id, 'text', e.target.value)} 
+                  placeholder="Describe specific observation..." 
+                  className="w-full bg-slate-50/50 p-5 rounded-2xl border border-slate-100 focus:border-blue-300 focus:bg-white text-sm text-slate-800 italic focus:outline-none min-h-[100px] resize-none transition-all shadow-inner placeholder:text-slate-400" 
+                />
+
+                {/* Centralized footer area for the delete button */}
+                <div className="flex justify-center pt-2">
+                  <button 
+                    type="button" 
+                    onClick={() => removeFinding(f.id)} 
+                    className="flex items-center gap-2 text-[10px] font-black text-slate-400 hover:text-rose-600 uppercase tracking-widest transition-colors duration-200"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Remove Entry
+                  </button>
+                </div>
+              </div>
+            ))}
 
               <button 
                 type="button" 
@@ -294,7 +294,6 @@ export default function ReviewSubmissionForm({
         )}
       </div>
 
-      {/* 2. EVIDENCE UPLOAD (Conditional: Hidden for Compliance) */}
       {!isComplianceReview && (
         <div className="space-y-6">
           <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
@@ -339,7 +338,6 @@ export default function ReviewSubmissionForm({
         </div>
       )}
 
-      {/* 3. EXECUTIVE SUMMARY & SUBMIT */}
       <div className="space-y-6">
         <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
           <FileText className="w-6 h-6 text-blue-600" />

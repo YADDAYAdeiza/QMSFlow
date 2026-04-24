@@ -24,7 +24,7 @@ export default async function StaffDashboard({
 }) {
   const { division: urlDivision } = await params;
   
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
   // 1. SESSION & PROFILE SECURITY
