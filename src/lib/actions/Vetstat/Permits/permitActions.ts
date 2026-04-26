@@ -204,3 +204,31 @@ export async function savePermitEdits(permit_id: string, substances: any[]) {
   
   return { success: true };
 }
+
+export async function createAmendment(permitId: string, substances: any[]) {
+  const supabase = await createClient();
+
+  // 1. Calculate new totals and prepare amendment log
+  // We only care about rows where additional_qty > 0
+  const amendments = substances.filter(s => s.additional_qty > 0);
+
+  // 2. Perform database updates (Additive logic)
+  for (const sub of amendments) {
+    const newTotal = Number(sub.quantity_kg) + Number(sub.additional_qty);
+    
+    // Update the existing permit substance record
+    await supabase
+      .from('permit_substances')
+      .update({ quantity_kg: newTotal })
+      .eq('id', sub.id);
+      
+    // Optional: Insert into an 'audit_logs' or 'permit_amendments' table 
+    // to track the history of the extension
+    await supabase.from('permit_amendments').insert({
+      permit_id: permitId,
+      substance_id: sub.substance_id,
+      added_qty: sub.additional_qty,
+      previous_qty: sub.quantity_kg
+    });
+  }
+}

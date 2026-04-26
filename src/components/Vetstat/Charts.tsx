@@ -41,20 +41,40 @@ export function BarChart({ labels, values }: { labels: string[], values: number[
   return <Bar data={chartData} options={{ responsive: true }} />;
 }
 
-export function LineChart({ labels, values }: { labels: string[], values: number[] }) {
-  const chartData = {
-    labels: labels,
-    datasets: [{
-      label: 'Consumption Trend (DDD)',
-      data: values,
-      borderColor: '#2563eb',
-      backgroundColor: 'rgba(37, 99, 235, 0.1)',
-      tension: 0.3,
-      fill: true,
-    }],
-  };
-  
-  return <Line data={chartData} options={{ responsive: true, scales: { y: { beginAtZero: true } } }} />;
+export function LineChart({ 
+  labels, 
+  values, 
+  datasets 
+    }: { 
+    labels: string[], 
+    values?: number[], 
+    datasets?: any[] 
+}) {
+    const chartData = {
+        labels: labels,
+        datasets: datasets || [{
+        label: 'Consumption Trend (DDD)',
+        data: values,
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+        tension: 0.3, // This is fine here, but the error relates to 'options' below
+        fill: true,
+        }],
+    };
+
+    const options = {
+        responsive: true,
+        elements: {
+        line: {
+            tension: 0.3, // MOVED HERE: This is where Chart.js v4 expects it
+        },
+        },
+        scales: {
+        y: { beginAtZero: true }
+        }
+    };
+    
+    return <Line data={chartData} options={options} />;
 }
 
 export function PieChart({ labels, values }: { labels: string[], values: number[] }) {
