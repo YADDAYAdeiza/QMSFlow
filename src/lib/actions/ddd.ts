@@ -5,6 +5,7 @@ import { applications, qmsTimelines, users, riskAssessments } from "@/db/schema"
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { calculateORR } from "@/lib/actions/riskEngine"; 
+import { createClient } from "@/utils/supabase/server";
 
 // import { getDirectorId } from "./utils";
 
@@ -285,6 +286,18 @@ export async function returnToStaff(
       const oldComments = oldDetails.comments || [];
       const nextRound = (oldDetails.currentRound || 1) + 1;
 
+      /**
+       * ✅ DYNAMIC POINT & STATUS SELECTION
+       */
+      const isIRSD = ddUser.division === "IRSD";
+      const targetPoint = isIRSD ? "IRSD Staff Vetting" : "Staff Technical Review";
+      const targetStatus = isIRSD ? "HUB_VETTING_REWORK" : "PENDING_REWORK";
+
+      /**
+       * ✅ QMS DELTA TRACKING: SNAPSHOT CURRENT FINDINGS
+       * We capture the findings_ledger and the report URL as they exist 
+       * at the moment of rejection.
+       */
       const reworkEntry = {
         from: ddUser.name,
         role: "Divisional Deputy Director",
@@ -292,39 +305,49 @@ export async function returnToStaff(
         text: rejectionReason,
         timestamp: new Date().toISOString(),
         round: nextRound,
-        action: "REWORK_REQUIRED"
+        action: "REWORK_REQUIRED",
+        // The Snapshot:
+        frozenFindings: oldDetails.findings_ledger || [],
+        frozenReport: oldDetails.inspectionReportUrl || oldDetails.verificationReportUrl
       };
 
       // 1. Update Application State
+      const updatedDetails = {
+        ...oldDetails,
+        currentRound: nextRound,
+        comments: [...oldComments, reworkEntry]
+      };
+
+      // Ensure the correct reviewer key is updated
+      if (isIRSD) {
+        updatedDetails.irsd_reviewer_id = targetStaffId;
+      } else {
+        updatedDetails.staff_reviewer_id = targetStaffId;
+      }
+
       await tx.update(applications)
         .set({
-          currentPoint: 'Staff Technical Review', 
-          status: 'PENDING_REWORK',
-          details: {
-            ...oldDetails,
-            currentRound: nextRound,
-            staff_reviewer_id: targetStaffId,
-            comments: [...oldComments, reworkEntry]
-          } as any,
+          currentPoint: targetPoint, 
+          status: targetStatus,
+          details: updatedDetails as any,
           updatedAt: timestamp
         })
         .where(eq(applications.id, appId));
 
-      // 2. QMS Timing: End current Divisional Deputy Director clock
+      // 2. QMS Timing: End current DD clock (Stopping the DD's turnaround time)
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
           eq(qmsTimelines.applicationId, appId),
-          eq(qmsTimelines.staffId, currentDDId),
           isNull(qmsTimelines.endTime)
         ));
 
-      // 3. QMS Timing: Start new Staff Technical Review clock
+      // 3. QMS Timing: Start new Staff clock (Specific to the division's point)
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         staffId: targetStaffId,
         division: ddUser.division,
-        point: 'Staff Technical Review',
+        point: targetPoint,
         startTime: timestamp,
       });
 
@@ -337,6 +360,7 @@ export async function returnToStaff(
     return { success: false, error: error.message };
   }
 }
+
 
 /**
  * DD IRSD -> IRSD Staff (Internal Hub Vetting)
@@ -477,5 +501,106 @@ export async function forwardToHub(appId: number, remarks: string) {
   } catch (error: any) {
     console.error("FORWARD_TO_HUB_ERROR:", error);
     return { success: false, error: error.message };
+  }
+}
+
+
+
+/**
+ * RECALL PROTOCOL
+ * Transitions an application from a staff member's desk back to the DDD.
+ */
+
+export async function recallApplication(applicationId: string, actingDivision: string) {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session) {
+    throw new Error("Unauthorized: Executive credentials required.");
+  }
+
+  const loggedInUserId = session.user.id;
+  const numericAppId = Number(applicationId);
+  const divisionKey = actingDivision.toUpperCase();
+  console.log('This is the division: ', divisionKey);
+
+  // Determine the "Home Desk" point based on the division
+  // IRSD recalls to Hub Clearance; Technical Divisions recall to DD Review
+  const recallPoint = divisionKey === "IRSD" 
+    ? "IRSD Hub Clearance" 
+    : "Technical DD Review";
+
+  try {
+    await db.transaction(async (tx) => {
+      // 1. Identify the active staff timeline entry to be terminated
+      const [activeTimeline] = await tx
+        .select()
+        .from(qmsTimelines)
+        .where(
+          and(
+            eq(qmsTimelines.applicationId, numericAppId),
+            eq(qmsTimelines.division, divisionKey),
+            isNull(qmsTimelines.endTime)
+          )
+        )
+        .limit(1);
+
+      if (!activeTimeline) {
+        throw new Error("Recall Handshake Failed: No active staff review found.");
+      }
+
+      // 2. Fetch dossier for the Audit Trail update
+      const [app] = await tx
+        .select()
+        .from(applications)
+        .where(eq(applications.id, numericAppId))
+        .limit(1);
+
+      const details = (app.details as any) || {};
+      const updatedComments = [
+        ...(details.comments || []),
+        {
+          from: divisionKey === "IRSD" ? "DD IRSD" : "Divisional Deputy Director",
+          role: divisionKey === "IRSD" ? "DD_IRSD" : "DDD",
+          text: `QMS RECALL: File retrieved from staff (Staff ID: ${activeTimeline.staffId}) and returned to ${recallPoint}.`,
+          action: "RECALL_TO_DESK",
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      // 3. Terminate the Staff's timed session (QMS Compliance)
+      await tx
+        .update(qmsTimelines)
+        .set({ endTime: new Date() })
+        .where(eq(qmsTimelines.id, activeTimeline.id));
+
+      // 4. Reset the Application's point to the Executive Desk
+      await tx
+        .update(applications)
+        .set({
+          currentPoint: recallPoint,
+          details: { ...details, comments: updatedComments },
+        })
+        .where(eq(applications.id, numericAppId));
+
+      // 5. Start the new timed session for the DD
+      await tx.insert(qmsTimelines).values({
+        applicationId: numericAppId,
+        staffId: loggedInUserId,
+        division: divisionKey,
+        startTime: new Date(),
+      });
+    });
+
+    // Revalidate the inbox path to refresh the UI immediately
+    revalidatePath("/dashboard/ddd/inbox");
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Critical Recall Error:", error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : "Handshake failed during recall." 
+    };
   }
 }

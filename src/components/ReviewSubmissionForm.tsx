@@ -4,11 +4,11 @@ import React, { useState, useRef } from "react";
 import { 
   ShieldAlert, CheckCircle2, FileText, 
   Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
-  Info
+  Info, Activity, History
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/client";
 
 const GMP_SYSTEMS = [
   "Quality Management System",
@@ -25,6 +25,7 @@ interface Props {
   appId: number;
   staffId: string;
   staffName: string;
+  currentDivision: string;
   comments: any[];
   isHubVetting: boolean;
   isComplianceReview: boolean; 
@@ -34,22 +35,21 @@ interface Props {
 }
 
 export default function ReviewSubmissionForm({
-  appId, staffId, staffName, comments, isHubVetting, isComplianceReview, riskId, 
+  appId, staffId, staffName, currentDivision, comments, isHubVetting, isComplianceReview, riskId, 
   previousFindings = [], 
   previousIsSra = false 
 }: Props) {
   const router = useRouter();
+  const supabase = createClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [loading, setLoading] = useState(false);
   
-  // FIXED: Default to true so you can see the ledger immediately
+  const [loading, setLoading] = useState(false);
   const [isLedgerVisible, setIsLedgerVisible] = useState(true);
   const [isSra, setIsSra] = useState(previousIsSra);
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
-  
-  const [findings, setFindings] = useState<Array<{ system: string; severity: string; text: string }>>(
-    previousFindings.length > 0 ? previousFindings : []
+  const [findings, setFindings] = useState<Array<{ id: string; system: string; severity: string; text: string }>>(
+    previousFindings.length > 0 ? previousFindings.map(f => ({ ...f, id: Math.random().toString(36).substr(2, 9) })) : []
   );
 
   const counts = {
@@ -58,15 +58,13 @@ export default function ReviewSubmissionForm({
     other: findings.filter(f => f.severity === "Other" && f.text.trim()).length,
   };
 
-  const addFinding = () => setFindings([...findings, { system: GMP_SYSTEMS[0], severity: "Other", text: "" }]);
+  const addFinding = () => setFindings([...findings, { id: Math.random().toString(36).substr(2, 9), system: GMP_SYSTEMS[0], severity: "Other", text: "" }]);
   
-  const updateFinding = (index: number, field: string, value: string) => {
-    const next = [...findings];
-    (next[index] as any)[field] = value;
-    setFindings(next);
+  const updateFinding = (id: string, field: string, value: string) => {
+    setFindings(findings.map(f => f.id === id ? { ...f, [field]: value } : f));
   };
 
-  const removeFinding = (index: number) => setFindings(findings.filter((_, i) => i !== index));
+  const removeFinding = (id: string) => setFindings(findings.filter(f => f.id !== id));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,46 +75,106 @@ export default function ReviewSubmissionForm({
 
     setLoading(true);
 
-    let uploadedUrl = "";
     try {
-      if (evidenceFile) {
+      let publicUrl = "";
+      
+      if (evidenceFile && !isComplianceReview) {
         const fileExt = evidenceFile.name.split('.').pop();
-        const fileName = `${appId}_evidence_${Date.now()}.${fileExt}`;
-        const filePath = `verification_evidence/${fileName}`;
-        const { error: uploadError } = await supabase.storage.from('Documents').upload(filePath, evidenceFile);
+        const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(filePath, evidenceFile);
+        
         if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from('Documents').getPublicUrl(filePath);
-        uploadedUrl = data.publicUrl;
+
+        const { data: { publicUrl: url } } = supabase.storage
+          .from('documents')
+          .getPublicUrl(filePath);
+          
+        publicUrl = url;
       }
 
       const complianceData = {
         riskId,
         isSra,
         isComplianceReview,
-        summary: isLedgerVisible ? { 
+        summary: { 
           criticalCount: counts.critical, 
           majorCount: counts.major, 
           otherCount: counts.other 
-        } : { criticalCount: 0, majorCount: 0, otherCount: 0 },
-        findings: isLedgerVisible ? findings.filter(f => f.text.trim() !== "") : [],
-        evidenceUrl: uploadedUrl
+        },
+        findings: findings.filter(f => f.text.trim() !== ""),
       };
 
-      const res = await submitToDDD(appId, staffId, justification, isHubVetting, uploadedUrl, complianceData);
+      const res = await submitToDDD(
+        appId, 
+        staffId, 
+        justification, 
+        isHubVetting, 
+        publicUrl, 
+        complianceData
+      );
       
       if (res.success) {
-        router.push('/dashboard/staff');
+        // router.push(`/dashboard/${currentDivision.toLowerCase()}/review/${appId}`);
+        router.push(`/dashboard/${currentDivision.toLowerCase()}`);
         router.refresh();
-      } else { throw new Error(res.error); }
+      } else {
+        throw new Error(res.error); 
+      }
     } catch (err: any) {
       alert(err.message || "Submission failed");
-    } finally { setLoading(false); }
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-12 pb-20 max-w-4xl mx-auto">
       
-      {/* 1. DEFICIENCY / AUDIT LEDGER */}
+      <div className="space-y-6">
+        <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-amber-500">
+          <History className="w-6 h-6 text-amber-600" />
+          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Workflow History</h4>
+        </div>
+        
+        <div className="bg-slate-50 border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-inner">
+          {comments && comments.length > 0 ? (
+            <div className="divide-y divide-slate-200">
+              {comments.map((comment, idx) => (
+                  <div key={idx} className={`p-6 flex gap-5 items-start transition-colors ${comment.action === 'REWORK_REQUIRED' ? 'bg-rose-50/50 border-l-4 border-rose-500' : 'hover:bg-white'}`}>
+                    <div className={`w-10 h-10 rounded-full bg-white border flex items-center justify-center shrink-0 shadow-sm ${comment.action === 'REWORK_REQUIRED' ? 'border-rose-200' : 'border-slate-200'}`}>
+                      {comment.action === 'REWORK_REQUIRED' ? (
+                        <ShieldAlert className="w-4 h-4 text-rose-500" />
+                      ) : (
+                        <Activity className="w-4 h-4 text-slate-400" />
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] font-black uppercase text-slate-900 tracking-tight">
+                          {comment.from}
+                          {comment.action === 'REWORK_REQUIRED' && (
+                            <span className="ml-2 text-[9px] bg-rose-600 text-white px-2 py-0.5 rounded-full">REWORK REQUIRED</span>
+                          )}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed italic">
+                        "{comment.text}"
+                      </p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <div className="p-10 text-center text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">
+              No previous trail entries found
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="space-y-6">
         <div 
           onClick={() => setIsLedgerVisible(!isLedgerVisible)}
@@ -137,7 +195,7 @@ export default function ReviewSubmissionForm({
                 {isComplianceReview ? "Compliance Audit Ledger" : "Deficiency Ledger"}
               </h4>
               <p className={`text-[11px] font-bold uppercase tracking-widest mt-1 ${isLedgerVisible ? "text-purple-300" : "text-slate-500"}`}>
-                {isComplianceReview ? "Mandatory Analysis & Scoring" : "Optional Observations"}
+                {isComplianceReview ? "Mandatory Analysis & Scoring" : "Observations recorded during review"}
               </p>
             </div>
           </div>
@@ -163,45 +221,51 @@ export default function ReviewSubmissionForm({
             </div>
 
             <div className="space-y-6">
-              {findings.map((f, i) => (
-                <div key={i} className="p-7 rounded-[2.5rem] border border-slate-200 bg-white shadow-md space-y-5 relative transition-all hover:border-blue-300 group">
-                  <div className="flex wrap gap-4 items-center">
-                    <select 
-                      value={f.system} 
-                      onChange={(e) => updateFinding(i, 'system', e.target.value)} 
-                      className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all cursor-pointer"
-                    >
-                      {GMP_SYSTEMS.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    
-                    <select 
-                      value={f.severity} 
-                      onChange={(e) => updateFinding(i, 'severity', e.target.value)}
-                      className={`border-none rounded-2xl px-6 py-2.5 text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer ${
-                        f.severity === 'Critical' ? 'bg-rose-600 text-white hover:bg-rose-700' : 
-                        f.severity === 'Major' ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-200 text-slate-800 hover:bg-slate-300'
-                      }`}
-                    >
-                      {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    
-                    <button 
-                      type="button" 
-                      onClick={() => removeFinding(i)} 
-                      className="ml-auto p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <textarea 
-                    value={f.text} 
-                    onChange={(e) => updateFinding(i, 'text', e.target.value)} 
-                    placeholder="Describe specific observation from the inspection report..." 
-                    className="w-full bg-slate-50/50 p-5 rounded-2xl border border-slate-100 focus:border-blue-300 focus:bg-white text-sm text-slate-800 italic focus:outline-none min-h-[100px] resize-none transition-all shadow-inner placeholder:text-slate-400" 
-                  />
+              {findings.map((f) => (
+              <div key={f.id} className="p-7 rounded-[2.5rem] border border-slate-200 bg-white shadow-md space-y-5 transition-all hover:border-blue-300">
+                {/* Header area */}
+                <div className="flex flex-row items-center gap-4">
+                  <select 
+                    value={f.system} 
+                    onChange={(e) => updateFinding(f.id, 'system', e.target.value)} 
+                    className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all cursor-pointer flex-grow"
+                  >
+                    {GMP_SYSTEMS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  
+                  <select 
+                    value={f.severity} 
+                    onChange={(e) => updateFinding(f.id, 'severity', e.target.value)}
+                    className={`rounded-2xl px-6 py-2.5 text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer ${
+                      f.severity === 'Critical' ? 'bg-rose-600 text-white' : 
+                      f.severity === 'Major' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-800'
+                    }`}
+                  >
+                    {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
                 </div>
-              ))}
+
+                {/* Textarea remains the primary focus */}
+                <textarea 
+                  value={f.text} 
+                  onChange={(e) => updateFinding(f.id, 'text', e.target.value)} 
+                  placeholder="Describe specific observation..." 
+                  className="w-full bg-slate-50/50 p-5 rounded-2xl border border-slate-100 focus:border-blue-300 focus:bg-white text-sm text-slate-800 italic focus:outline-none min-h-[100px] resize-none transition-all shadow-inner placeholder:text-slate-400" 
+                />
+
+                {/* Centralized footer area for the delete button */}
+                <div className="flex justify-center pt-2">
+                  <button 
+                    type="button" 
+                    onClick={() => removeFinding(f.id)} 
+                    className="flex items-center gap-2 text-[10px] font-black text-slate-400 hover:text-rose-600 uppercase tracking-widest transition-colors duration-200"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Remove Entry
+                  </button>
+                </div>
+              </div>
+            ))}
 
               <button 
                 type="button" 
@@ -230,44 +294,50 @@ export default function ReviewSubmissionForm({
         )}
       </div>
 
-      {/* 2. EVIDENCE UPLOAD */}
-      <div className="space-y-6">
-        <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
-          <Upload className="w-6 h-6 text-blue-600" />
-          <h4 className="text-sm font-black uppercase tracking-[0.25em]">Supporting Evidence</h4>
+      {!isComplianceReview && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
+            <Upload className="w-6 h-6 text-blue-600" />
+            <h4 className="text-sm font-black uppercase tracking-[0.25em]">Verification Report (Optional)</h4>
+          </div>
+          
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className={`p-14 rounded-[3.5rem] border-2 border-dashed cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-5 shadow-sm ${
+              evidenceFile 
+                ? "border-emerald-500 bg-emerald-50/50 shadow-inner shadow-emerald-100" 
+                : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
+            }`}
+          >
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} 
+              className="hidden" 
+              accept=".pdf" 
+            />
+            {evidenceFile ? (
+              <>
+                <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
+                  <FileCheck className="w-10 h-10 text-white" />
+                </div>
+                <div className="text-center">
+                  <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
+                  <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to replace PDF</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
+                  <Upload className="w-10 h-10 text-slate-400" />
+                </div>
+                <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select PDF if available</span>
+              </>
+            )}
+          </div>
         </div>
-        
-        <div 
-          onClick={() => fileInputRef.current?.click()}
-          className={`p-14 rounded-[3.5rem] border-2 border-dashed cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-5 shadow-sm ${
-            evidenceFile 
-              ? "border-emerald-500 bg-emerald-50/50 shadow-inner shadow-emerald-100" 
-              : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
-          }`}
-        >
-          <input type="file" ref={fileInputRef} onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} className="hidden" accept=".pdf,.jpg,.png" />
-          {evidenceFile ? (
-            <>
-              <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
-                <FileCheck className="w-10 h-10 text-white" />
-              </div>
-              <div className="text-center">
-                <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
-                <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to change selection</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
-                <Upload className="w-10 h-10 text-slate-400" />
-              </div>
-              <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select Verification Document</span>
-            </>
-          )}
-        </div>
-      </div>
+      )}
 
-      {/* 3. EXECUTIVE SUMMARY & SUBMIT */}
       <div className="space-y-6">
         <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
           <FileText className="w-6 h-6 text-blue-600" />
@@ -278,7 +348,7 @@ export default function ReviewSubmissionForm({
           required
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
-          placeholder={isComplianceReview ? "Provide a final compliance verdict based on the inspection report audit..." : "Final assessment summary for the DDD..."}
+          placeholder="Final assessment summary for the Divisional Deputy Director..."
           className="w-full p-10 rounded-[3.5rem] border-2 border-slate-200 bg-white text-base text-slate-800 min-h-[220px] shadow-xl shadow-slate-200/30 focus:ring-8 focus:ring-blue-500/5 focus:border-blue-500 outline-none transition-all leading-relaxed placeholder:text-slate-400"
         />
 
@@ -301,7 +371,6 @@ export default function ReviewSubmissionForm({
           )}
         </button>
       </div>
-
     </form>
   );
 }

@@ -2,31 +2,41 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, companies, qmsTimelines } from "@/db/schema";
-import { eq, and, sql, isNull } from "drizzle-orm";
+import { eq, and, isNull, or } from "drizzle-orm";
+import { createClient } from "@/utils/supabase/server"; 
 import DossierLink from "@/components/DossierLink";
-import { ArrowRightCircle, Activity, Clock, Inbox, Users, Landmark, Factory } from "lucide-react";
+import { recallApplication } from "@/lib/actions/ddd";  
+ 
+import { 
+  ArrowRightCircle, Clock, Inbox, Users, 
+  Landmark, Factory, ShieldCheck, RotateCcw 
+} from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 export default async function DDDInboxPage({ 
   searchParams 
 }: { 
   searchParams: Promise<{ as?: string; view?: string }> 
 }) {
+  // 1. Resolve Search Params
   const { as, view } = await searchParams;
+
+  // 2. Authentication Check
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
   
+  if (!session) {
+    redirect("/login");
+  }
+  
+  const loggedInUserId = session.user.id; 
   const actingDivision = as?.toUpperCase() || "VMD";
   const isAssignedView = view === "assigned";
   
-  const userMap: Record<string, string> = {
-    VMD: "9215bf99-489e-4468-b9aa-bcd926d11c08",
-    IRSD: "cfb8ccbd-7753-43f0-aa51-a9c449a52de6",
-    PAD: "da0e45e5-cf4e-49b7-b22e-34e313df899d",
-    AFPD: "e6be1703-3075-4e5c-b07f-8a6f166f74c6"
-  };
-
-  const loggedInUserId = userMap[actingDivision];
-
-  // Fetching raw data with necessary joins
+  // 3. Database Query
+  // 3. Database Query
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -42,15 +52,19 @@ export default async function DDDInboxPage({
     .innerJoin(qmsTimelines, eq(qmsTimelines.applicationId, applications.id))
     .where(and(
       isNull(qmsTimelines.endTime),
+      eq(qmsTimelines.division, actingDivision),
       isAssignedView 
-        ? and(
+        ? or(
             eq(applications.currentPoint, 'Staff Technical Review'),
-            eq(qmsTimelines.division, actingDivision)
+            eq(applications.currentPoint, 'IRSD Staff Vetting') // Added this for IRSD support
           )
-        : eq(qmsTimelines.staffId, loggedInUserId)
+        : or(
+            eq(qmsTimelines.staffId, loggedInUserId),
+            eq(applications.currentPoint, 'Technical DD Review'),
+            eq(applications.currentPoint, 'IRSD Hub Clearance')
+          )
     ));
-
-  // Calculating display time and Round 2 status
+  // 4. Formatting Logic
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -65,44 +79,37 @@ export default async function DDDInboxPage({
         : `${minutes}m`;
 
     const details = (app.details as any) || {};
-    const isRound2 = details.type === "Inspection Report Review (Foreign)" || !!details.inspectionReportUrl;
+    const isRound2 = details.isComplianceReview === true || !!details.inspectionReportUrl;
 
     return { ...app, displayTime, isRound2 };
   });
 
   return (
     <div className="p-8 bg-slate-50 min-h-screen font-sans">
-      
-      {/* TESTING SWITCHER (Restored) */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-slate-700">
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Switch Desk:</span>
-        {Object.keys(userMap).map((div) => (
-          <Link 
-            key={div} 
-            href={`?as=${div.toLowerCase()}&view=${view || 'new'}`} 
-            className={`px-4 py-1 rounded-full text-[10px] font-bold transition-all ${actingDivision === div ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
-          >
-            {div}
-          </Link>
-        ))}
-      </div>
-
       <header className="mb-8">
+        <div className="flex items-center gap-3 mb-2 text-blue-600 font-black uppercase tracking-[0.3em] text-[10px]">
+          <ShieldCheck className="w-4 h-4" /> Executive Oversight
+        </div>
         <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tight italic leading-none">
           {actingDivision} Divisional Deputy Director
         </h1>
         
-        {/* VIEW TABS */}
         <div className="flex gap-4 mt-6">
             <Link 
               href={`?as=${actingDivision.toLowerCase()}&view=new`} 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${!isAssignedView ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all",
+                !isAssignedView ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-slate-400 border border-slate-200'
+              )}
             >
               <Inbox className="w-3 h-3" /> Incoming for Assignment
             </Link>
             <Link 
               href={`?as=${actingDivision.toLowerCase()}&view=assigned`} 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${isAssignedView ? 'bg-purple-600 text-white shadow-lg shadow-purple-100' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all",
+                isAssignedView ? 'bg-purple-600 text-white shadow-lg shadow-purple-100' : 'bg-white text-slate-400 border border-slate-200'
+              )}
             >
               <Users className="w-3 h-3" /> Monitoring Staff Reviews
             </Link>
@@ -114,14 +121,20 @@ export default async function DDDInboxPage({
           <thead className="bg-slate-900 text-white">
             <tr>
               <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">File Reference</th>
-              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Type / Round</th>
+              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Type / Stage</th>
               <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Desk Time</th>
-              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Status & Links</th>
+              <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-300">Status & Source</th>
               <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right text-slate-300">Action</th>
             </tr>
           </thead>
           <tbody>
-            {inbox.map((app) => {
+            {inbox.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="p-20 text-center">
+                  <p className="text-slate-400 text-xs font-black uppercase tracking-[0.2em]">Queue is clear for {actingDivision}</p>
+                </td>
+              </tr>
+            ) : inbox.map((app) => {
               const details = (app.details as any) || {};
               const lastComment = [...(details.comments || [])].reverse()[0];
 
@@ -133,12 +146,18 @@ export default async function DDDInboxPage({
                   </td>
 
                   <td className="p-6">
-                    <span className={`text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border ${
-                      app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
-                    }`}>
-                      {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
-                      {app.isRound2 ? 'Round 2: Compliance' : 'Round 1: Technical'}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className={cn(
+                        "text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border",
+                        app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
+                      )}>
+                        {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
+                        {app.isRound2 ? 'Pass 2: Compliance' : 'Pass 1: Facility'}
+                      </span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase italic">
+                        {app.currentPoint}
+                      </span>
+                    </div>
                   </td>
 
                   <td className="p-6">
@@ -148,36 +167,48 @@ export default async function DDDInboxPage({
                     </div>
                   </td>
                   
-                  <td className="p-6">
+                  <td className="p-6 text-xs italic text-slate-400">
                     <div className="flex flex-col gap-2 max-w-md">
                        <DossierLink url={details.inspectionReportUrl || details.poaUrl} />
-                       <p className="text-[10px] text-slate-600 italic line-clamp-1 border-l-2 border-slate-200 pl-2">
-                         {lastComment?.text || "No specific instructions from Directorate."}
+                       <p className="line-clamp-1 border-l-2 border-slate-200 pl-2">
+                         {lastComment?.text || "New assignment."}
                        </p>
                     </div>
                   </td>
 
-                  <td className="p-6 text-right">
-                    <Link 
-                      href={`/dashboard/ddd/review/${app.id}?as=${actingDivision.toLowerCase()}`}
-                      className="inline-flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 transition-all shadow-md group-hover:-translate-x-1"
-                    >
-                      {isAssignedView ? 'Manage' : 'Assign Specialist'} <ArrowRightCircle className="w-4 h-4" />
-                    </Link>
+                  <td className="p-6">
+                    <div className="flex justify-end gap-2">
+                      {isAssignedView && (
+                        <form action={async () => {
+                          "use server";
+                          // Convert ID to string to ensure it matches the server action expectations
+                          await recallApplication(String(app.id), actingDivision);
+                        }}>
+                          <button 
+                            type="submit" 
+                            className="flex items-center gap-2 px-4 py-3 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-black uppercase hover:bg-amber-600 hover:text-white transition-all shadow-sm"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Recall
+                          </button>
+                        </form>
+                      )}
+
+                      <Link 
+                        href={`/dashboard/ddd/review/${app.id}?as=${actingDivision.toLowerCase()}`}
+                        className={cn(
+                          "inline-flex items-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-md group-hover:-translate-x-1",
+                          isAssignedView ? "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50" : "bg-slate-900 text-white hover:bg-blue-600"
+                        )}
+                      >
+                        {isAssignedView ? 'Track' : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        
-        {inbox.length === 0 && (
-          <div className="p-32 text-center bg-slate-50/50">
-            <p className="text-slate-400 font-bold italic uppercase text-[10px] tracking-[0.3em]">
-              Clean Desk: No files pending in this category
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

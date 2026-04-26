@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, qmsTimelines, users } from "@/db/schema";
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq, and, isNull, sql, count } from "drizzle-orm";
 import QMSCountdown from "@/components/QMSCountdown";
 import AssignToDDDButton from "@/components/AssignToDDDButton"; 
 import DossierLink from "@/components/DossierLink"; 
@@ -20,7 +20,23 @@ export default async function DirectorPage({
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
-  // Fetch available Divisional Deputy Directors
+  // 1. Fetch counts for the badges independently of the list
+  const reviewCountResult = await db
+    .select({ value: count() })
+    .from(applications)
+    .where(eq(applications.currentPoint, "Director Review"));
+
+  const finalCountResult = await db
+    .select({ value: count() })
+    .from(applications)
+    .where(eq(applications.currentPoint, "Director Final Review"));
+
+  const counts = {
+    review: reviewCountResult[0]?.value || 0,
+    final: finalCountResult[0]?.value || 0,
+  };
+
+  // 2. Fetch heads for assignment
   const availableHeads = await db
     .select({
       id: users.id,
@@ -30,6 +46,7 @@ export default async function DirectorPage({
     .from(users)
     .where(eq(users.role, 'Divisional Deputy Director'));
 
+  // 3. Fetch the actual list for the current view
   const inbox = await db
     .select({
       id: applications.id,
@@ -46,7 +63,6 @@ export default async function DirectorPage({
         isNull(qmsTimelines.endTime)
     ));
 
-  // QMS Limit: 48 Hours for Director Point
   const QMS_LIMIT_SECONDS = 48 * 3600;
 
   return (
@@ -67,13 +83,13 @@ export default async function DirectorPage({
               href="?view=review" 
               className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Review' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
-              <ClipboardList className="w-3 h-3" /> New Reviews ({currentView === 'Director Review' ? inbox.length : '0'})
+              <ClipboardList className="w-3 h-3" /> New Reviews ({counts.review})
             </Link>
             <Link 
               href="?view=final" 
               className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Final Review' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
-              <CheckCircle2 className="w-3 h-3" /> Final Approvals ({currentView === 'Director Final Review' ? inbox.length : '0'})
+              <CheckCircle2 className="w-3 h-3" /> Final Approvals ({counts.final})
             </Link>
           </div>
         </div>
@@ -86,13 +102,13 @@ export default async function DirectorPage({
           const remaining = Math.max(0, QMS_LIMIT_SECONDS - elapsed);
 
           const details = app.details as any;
-          const savedUrl = details?.poaUrl || details?.inspectionReportUrl;
-          
+
           /**
-           * ✅ ROUND 2 DETECTION
-           * Identifying if this is a Foreign Compliance Review
+           * ✅ PASS 2 DETECTION & DOCUMENT RESOLUTION
+           * Priority: Inspection Report (Pass 2) > POA/Dossier (Pass 1)
            */
           const isInspectionReview = details?.type === "Inspection Report Review (Foreign)" || !!details?.inspectionReportUrl;
+          const savedUrl = details?.inspectionReportUrl || details?.poaUrl;
           const appTypeLabel = isInspectionReview ? "Compliance Review (Foreign)" : "Facility Verification (Local)";
 
           const firstProduct = details?.productLines?.[0]?.products?.[0]?.name || "Product info pending";
@@ -149,7 +165,7 @@ export default async function DirectorPage({
                       appId={app.id} 
                       defaultDivision={lodSuggestedDiv} 
                       availableHeads={availableHeads as any}
-                      isCompliance={isInspectionReview} // Trigger Round 2 UI state
+                      isCompliance={isInspectionReview} 
                     />
                   ) : (
                     <Link 

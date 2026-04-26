@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function createClient() {
-  const cookieStore = await cookies() // Note: cookies() is now async in newer Next.js
+  const cookieStore = await cookies()
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,7 +18,8 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             )
           } catch {
-            // This can be ignored if middleware is handling session refreshes
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing the session.
           }
         },
       },
