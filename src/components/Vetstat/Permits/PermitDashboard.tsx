@@ -4,7 +4,16 @@ import { createClient } from '@supabase/supabase-js';
 import EditPermitModal from './EditPermitModal';
 import AmmendPermitModal from './AmmendPermitModal';
 import RapidIntake from './RapidIntake';
-import { PackagePlus, PackageMinus, Search, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
+import PermitHistoryPanel from './PermitHistoryPanel'; // We will create this below
+import { 
+  PackagePlus, 
+  PackageMinus, 
+  Search, 
+  ChevronDown, 
+  ChevronUp, 
+  XCircle, 
+  History 
+} from 'lucide-react';
 
 interface PermitDashboardProps {
   initialPermits: any[];
@@ -24,6 +33,7 @@ export default function PermitDashboard({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingPermit, setEditingPermit] = useState<any | null>(null);
   const [amendingPermit, setAmendingPermit] = useState<any | null>(null);
+  const [viewingHistory, setViewingHistory] = useState<any | null>(null);
   
   const [activeScanner, setActiveScanner] = useState<{ 
     permit: any; 
@@ -56,7 +66,7 @@ export default function PermitDashboard({
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 relative">
       <div className="relative">
         <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
         <input 
@@ -66,16 +76,17 @@ export default function PermitDashboard({
         />
       </div>
 
-      <div className="overflow-hidden border border-slate-200 rounded-xl shadow-sm">
+      <div className="overflow-hidden border border-slate-200 rounded-xl shadow-sm bg-white">
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-600 text-xs uppercase tracking-wider">
               <th className="p-4 text-left font-bold">Permit Details</th>
               <th className="p-4 text-left font-bold">Actions</th>
               <th className="p-4 text-center font-bold text-emerald-600">Ledger Ops</th>
+              <th className="p-4 text-center font-bold">Audit</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 bg-white">
+          <tbody className="divide-y divide-slate-200">
             {filtered.map((permit) => {
               const isSelected = selectedId === permit.id;
               return (
@@ -124,7 +135,7 @@ export default function PermitDashboard({
                             e.stopPropagation(); 
                             setActiveScanner({ permit, mode: 'INTAKE' }); 
                           }}
-                          className="flex items-center gap-1 bg-emerald-600 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-emerald-700 transition shadow-sm shadow-emerald-100"
+                          className="flex items-center gap-1 bg-emerald-600 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-emerald-700 transition shadow-sm"
                         >
                           <PackagePlus size={14} /> INTAKE
                         </button>
@@ -133,17 +144,30 @@ export default function PermitDashboard({
                             e.stopPropagation(); 
                             setActiveScanner({ permit, mode: 'OUTAKE' }); 
                           }}
-                          className="flex items-center gap-1 bg-rose-600 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-rose-700 transition shadow-sm shadow-rose-100"
+                          className="flex items-center gap-1 bg-rose-600 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-rose-700 transition shadow-sm"
                         >
                           <PackageMinus size={14} /> OUTAKE
                         </button>
                       </div>
                     </td>
+
+                    <td className="p-4 text-center">
+                       <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setViewingHistory(permit); 
+                          }}
+                          className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-full transition"
+                          title="View History"
+                        >
+                          <History size={20} />
+                        </button>
+                    </td>
                   </tr>
 
                   {expandedId === permit.id && (
                     <tr className="bg-slate-50/50">
-                      <td colSpan={3} className="p-4 border-t border-slate-100">
+                      <td colSpan={4} className="p-4 border-t border-slate-100">
                         <div className="bg-white p-4 rounded-lg border border-slate-200">
                           <h4 className="font-bold text-xs mb-3 text-slate-500 uppercase tracking-widest">Authorized Substances Ledger:</h4>
                           {permit.permit_substances?.length > 0 ? (
@@ -172,7 +196,16 @@ export default function PermitDashboard({
         </table>
       </div>
 
-      {/* Modals Rendering */}
+      {/* Audit History Panel (Slide-over) */}
+      {viewingHistory && (
+        <PermitHistoryPanel 
+          permit={viewingHistory} 
+          atcCodes={atcCodes}
+          onClose={() => setViewingHistory(null)} 
+        />
+      )}
+
+      {/* Other Modals (Same as before) */}
       {activeScanner && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-md z-[150] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl">

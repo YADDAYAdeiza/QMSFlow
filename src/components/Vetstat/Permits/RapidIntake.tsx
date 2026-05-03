@@ -23,6 +23,9 @@ export default function RapidIntake({ companyName, mode, permitId, onComplete }:
   const [extractedData, setExtractedData] = useState<any[] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [mappingIndex, setMappingIndex] = useState<number | null>(null);
+  
+  // NEW: State to track the file path for the audit log
+  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -34,7 +37,11 @@ export default function RapidIntake({ companyName, mode, permitId, onComplete }:
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `intake-scans/${fileName}`;
+      const dateFolder = new Date().toISOString().split('T')[0]; 
+      const filePath = `${companyName}/${mode}/${dateFolder}/${fileName}`;
+
+      // Save to state for later use in handleFinalCommit
+      setCurrentFilePath(filePath);
 
       const { error: uploadError } = await supabase.storage
         .from('Permit') 
@@ -45,7 +52,6 @@ export default function RapidIntake({ companyName, mode, permitId, onComplete }:
       const response = await fetch('/api/process-packing-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // ADD THE MODE HERE
         body: JSON.stringify({ companyName, filePath, mode }), 
       });
 
@@ -60,82 +66,70 @@ export default function RapidIntake({ companyName, mode, permitId, onComplete }:
   };
 
   const handleManualUpdate = (updatedItem: any) => {
-      if (mappingIndex !== null && extractedData) {
-        const newData = [...extractedData];
-        newData[mappingIndex] = {
-          ...newData[mappingIndex],
-          // Use 'substance' if that's what your modal returns, 
-          // or 'substance_name' to match the master list
-          confirmed: updatedItem.substance || updatedItem.substance_name, 
-          
-          // CRITICAL: This is the missing link for the database
-          substanceId: updatedItem.id || updatedItem.substance_id, 
-          
-          permit: updatedItem.permit_number || "MANUAL MAPPING",
-          status: "READY"
-        };
-        setExtractedData(newData);
-        setMappingIndex(null); // Close the mapping UI
-      }
-};
+    if (mappingIndex !== null && extractedData) {
+      const newData = [...extractedData];
+      newData[mappingIndex] = {
+        ...newData[mappingIndex],
+        confirmed: updatedItem.substance || updatedItem.substance_name, 
+        substanceId: updatedItem.id || updatedItem.substance_id, 
+        permit: updatedItem.permit_number || "MANUAL MAPPING",
+        status: "READY"
+      };
+      setExtractedData(newData);
+      setMappingIndex(null);
+    }
+  };
 
   const handleFinalCommit = async () => {
-      setIsCommitting(true);
-      setErrorMessage(null);
-      try {
-        // We only take items that have a status of READY 
-        // (which means they have a valid substance_id from your atc_codes table)
-        const readyItems = extractedData?.filter(item => item.status === "READY") || [];
+    setIsCommitting(true);
+    setErrorMessage(null);
+    try {
+      const readyItems = extractedData?.filter(item => item.status === "READY") || [];
 
-        // Debug: See what is actually being sent
-  console.log("Payload:", extractedData);
+      if (readyItems.length === 0) {
+        throw new Error("No substances matched the Master list. Please map them manually.");
+      }
 
-  // Safety check to prevent the crash
-  const hasNullId = readyItems.some(item => !item.substanceId);
-  if (hasNullId) {
-    setErrorMessage("One or more items are missing their Master ID. Please remap them.");
-    return;
-  }
-
-  
-        
-        if (readyItems.length === 0) {
-          throw new Error("No substances matched the Master ATC list. Please map them manually.");
-        }
-
-        if (mode === 'INTAKE') {
-          const { error } = await supabase.rpc('replace_permit_substances', {
+      // --- INTAKE LOGIC ---
+      if (mode === 'INTAKE') {
+        const { error } = await supabase.rpc('replace_permit_substances', {
+          p_permit_id: permitId,
+          p_file_path: currentFilePath, // NEW: Added for audit trail
+          p_items: readyItems.map(item => ({
+            substance_id: item.substanceId,
+            qty: item.qty
+          }))
+        });
+        if (error) throw error;
+      } 
+      // --- OUTAKE LOGIC ---
+      else {
+        // Yes, OUTAKE also needs the file path for each deduction log
+        for (const item of readyItems) {
+          const { error } = await supabase.rpc('deduct_permit_balance', {
             p_permit_id: permitId,
-            p_items: readyItems.map(item => ({
-              substance_id: item.substanceId, // Map the state variable to what the SQL expects
-              qty: item.qty
-            }))
+            p_substance_id: item.substanceId,
+            p_amount: parseFloat(item.qty),
+            p_file_path: currentFilePath // NEW: Added for audit trail
           });
-          if (error) throw error;
-          onComplete();
-        } else {
-          // For OUTAKE, you'll need a similar fix in 'deduct_permit_balance' 
-          // if that function also expects an ID instead of a name.
-          for (const item of readyItems) {
-            const { error } = await supabase.rpc('deduct_permit_balance', {
-              p_permit_id: permitId,
-              p_substance_id: item.substanceId, // Updated parameter name
-              p_amount: item.qty
-            });
-            if (error) throw error;
+
+          if (error) {
+            throw new Error(`Failed to deduct ${item.confirmed}: ${error.message}`);
           }
         }
-
-        onComplete(); 
-      } catch (error: any) {
-        setErrorMessage(error.message);
-      } finally {
-        setIsCommitting(false);
       }
-};
+      
+      onComplete(); 
+    } catch (error: any) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsCommitting(false);
+    }
+  };
 
   return (
     <div className="p-6 bg-white rounded-xl">
+      {/* ... (Keep your existing UI code below) ... */}
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-lg font-bold text-slate-800 tracking-tight">
           {mode === 'INTAKE' ? 'Authorized List Population' : 'Usage Deduction'}
@@ -221,13 +215,12 @@ export default function RapidIntake({ companyName, mode, permitId, onComplete }:
             </div>
             <button 
               onClick={handleFinalCommit}
-              // Logic: Enable if not loading and at least one item is READY
               disabled={isCommitting || !extractedData?.some(i => i.status === "READY")}
-              className={`... ${
-                mode === 'INTAKE' ? 'bg-emerald-600' : 'bg-rose-600'
+              className={`flex items-center gap-2 px-6 py-2 rounded-lg text-white font-bold transition ${
+                mode === 'INTAKE' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
               } disabled:opacity-30`}
             >
-              {isCommitting ? <Loader2 className="animate-spin"/> : <CheckCircle/>}
+              {isCommitting ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle size={18}/>}
               CONFIRM {mode}
             </button>
           </div>
