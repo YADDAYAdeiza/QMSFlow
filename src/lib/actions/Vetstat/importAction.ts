@@ -1,54 +1,79 @@
-'use server'
+"use server"
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 
+/**
+ * VMD Antimicrobial Ledger - Server Action
+ * Standardizes inputs to MG and calculates the Defined Daily Dose (DDD) 
+ * for regulatory oversight.
+ */
 export async function submitLedgerEntry(previousState: any, formData: FormData) {
   const supabase = await createClient();
-  
-  // 1. Explicitly extract and validate data
-  const entryType = formData.get('entry_type') as string;
-  const atcId = formData.get('atc_id') as string;
-  const quantity = parseFloat(formData.get('quantity') as string);
-  const concentration = parseFloat(formData.get('concentration') as string);
-  const unit = formData.get('unit') as string;
-  const density = parseFloat(formData.get('density') as string) || 1.0;
-  const entityId = formData.get('entity_id') as string;
-  const purity = parseFloat(formData.get('purity') as string) || 1.0;
 
-  // 2. Fetch intelligence for DDD calculations
-  const { data: registry } = await supabase
+  // 1. Extract values from LedgerForm JSX
+  const atcId = formData.get('atc_id') as string;
+  const entityId = formData.get('entity_id') as string;
+  const entryType = formData.get('entry_type') as string; 
+  const massUnit = formData.get('mass_unit') as string; // 'mg', 'g', or 'IU'
+  
+  const strength = parseFloat(formData.get('strength') as string) || 0;
+  const packQty = parseFloat(formData.get('pack_quantity') as string) || 0;
+  const unitsPerPack = parseFloat(formData.get('units_per_pack') as string) || 1;
+  const purity = 1.0; // Default factor per QMS requirements
+
+  // 2. Fetch Reference Data (IU Factor and DDD Value)
+  const { data: atcData, error: atcError } = await supabase
     .from('atc_codes')
-    .select('ddd_mg, risk_priority')
+    .select('substance, iu_to_mg_factor, ddd_mg')
     .eq('id', atcId)
     .single();
 
-  // 3. Normalization Math
-  const unitMultiplier = unit === 'kg' ? 1000000 : (unit === 'g' ? 1000 : 1);
-  const apiMassMg = unit === 'ml' 
-    ? quantity * density * concentration * purity 
-    : quantity * unitMultiplier * concentration * purity;
-    
-  const dddConsumed = registry?.ddd_mg ? apiMassMg / registry.ddd_mg : 0;
-
-  // 4. Strict Insert
-  const { error } = await supabase.from('ledger_entries').insert({
-    entry_type: entryType,
-    atc_id: atcId,
-    api_mass_mg: apiMassMg,
-    entity_id: entityId,
-    purity_factor: purity,
-    ddd_consumed: dddConsumed, // Now a dedicated column for dashboards
-    metadata: {
-      risk_priority: registry?.risk_priority || 'UNKNOWN'
-    }
-  });
-
-  if (error) {
-    console.error("Supabase Error:", error);
-    return { success: false, message: `Error: ${error.message}` };
+  if (atcError || !atcData) {
+    return { success: false, message: 'Reference data for this substance not found.' };
   }
 
+  // 3. Normalize Strength to Milligrams (MG)
+  let normalizedStrength = strength;
+
+  if (massUnit === 'g') {
+    normalizedStrength = strength * 1000;
+  } else if (massUnit === 'IU') {
+    // Calculation: mg = IU / (iu_to_mg_factor)
+    const factor = parseFloat(atcData.iu_to_mg_factor?.toString() || "1");
+    normalizedStrength = strength / factor;
+  }
+
+  // 4. Calculate Total API Mass and DDD Consumed
+  const totalItems = packQty * unitsPerPack;
+  const apiMassMg = totalItems * normalizedStrength * purity;
+
+  // DDD Calculation: Total Mass / Reference DDD
+  const referenceDdd = parseFloat(atcData.ddd_mg?.toString() || "0");
+  const dddConsumed = referenceDdd > 0 ? apiMassMg / referenceDdd : 0;
+
+  // 5. Save to Supabase Ledger Table
+  const { error: insertError } = await supabase
+    .from('ledger_entries')
+    .insert([
+      {
+        atc_id: atcId,
+        entity_id: entityId,
+        entry_type: entryType,
+        api_mass_mg: apiMassMg,
+        purity_factor: purity,
+        ddd_consumed: dddConsumed, // This ensures your ledger data is no longer 0
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+  if (insertError) {
+    console.error("VMD Ledger Save Error:", insertError.message);
+    return { success: false, message: `Database error: ${insertError.message}` };
+  }
+
+  // 6. Revalidate cache to update UI
   revalidatePath('/Vetstat/Ledger');
-  return { success: true, message: "Entry logged successfully." };
+
+  return { success: true, message: 'Ledger entry submitted successfully.' };
 }

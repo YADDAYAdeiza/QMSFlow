@@ -18,12 +18,31 @@ export default async function LedgerPage({
   const params = await searchParams;
   const activeType = (params.type as 'IMPORT' | 'DESTRUCTION' | 'CONSUMPTION') || 'IMPORT';
 
-  const { data: atcCodes, error } = await supabase
-    .from('atc_codes')
-    .select('*')
-    .order('substance');
+  // Fetching from 'permits' table as confirmed by the row data
+  const [atcResponse, companiesResponse] = await Promise.all([
+    supabase
+      .from('atc_codes')
+      .select('*')
+      .order('substance'),
+    supabase
+      .from('permits') 
+      .select('id, company_name, permit_number')
+      .order('company_name', { ascending: true })
+  ]);
 
-  if (error) console.error("Supabase Error:", error);
+  const atcCodes = atcResponse.data || [];
+  const companies = companiesResponse.data || [];
+
+  // Error handling to ensure institutional capacity and audit readiness
+  if (atcResponse.error) console.error("ATC Fetch Error:", atcResponse.error);
+  if (companiesResponse.error) {
+    console.error("Permits Fetch Error Details:", {
+      message: companiesResponse.error.message,
+      code: companiesResponse.error.code,
+      details: companiesResponse.error.details,
+      hint: companiesResponse.error.hint
+    });
+  }
 
   const tabConfig = {
     IMPORT: { 
@@ -101,7 +120,7 @@ export default async function LedgerPage({
                     </div>
                     <div>
                         <h2 className="text-xl font-black text-slate-800 leading-tight">
-                             New {activeType} Entry
+                              New {activeType} Entry
                         </h2>
                         <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Formal Log Submission</p>
                     </div>
@@ -113,12 +132,12 @@ export default async function LedgerPage({
 
             <LedgerForm 
               type={activeType} 
-              atcCodes={atcCodes || []} 
+              atcCodes={atcCodes} 
+              companies={companies} 
             />
           </div>
         </div>
 
-        {/* System Footer Note */}
         <footer className="mt-8 text-center">
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
                 All ledger entries are subject to immediate audit under QMS requirements.
