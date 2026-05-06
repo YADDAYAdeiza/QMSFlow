@@ -20,86 +20,99 @@ function parsePackMultiplier(packSize: string | null): number {
  * Standardizes inputs to MG and calculates the Divisional Deputy Director (DDD) 
  * metrics for regulatory oversight.
  */
+
 export async function submitLedgerEntry(previousState: any, formData: FormData) {
   const supabase = await createClient();
 
-  // 1. Extract values from LedgerForm JSX
+  // 1. Extract IDs and Inputs
+  const productId = formData.get('product_id') as string; 
   const atcId = formData.get('atc_id') as string;
-  const permitId = formData.get('entity_id') as string; // Linked to your 'permits' table
   const entryType = formData.get('entry_type') as string; 
-  const massUnit = formData.get('mass_unit') as string; // 'mg', 'g', or 'IU'
+  const massUnit = formData.get('mass_unit') as string;
   
   const strength = parseFloat(formData.get('strength') as string) || 0;
-  const packQtySubmitted = parseFloat(formData.get('pack_quantity') as string) || 0;
-  const purity = 1.0; // Default factor per QMS requirements
+  const packQty = parseFloat(formData.get('pack_quantity') as string) || 0;
+  // User might have edited this, so we'll fetch the 'official' one below
+  const submittedUnitsPerPack = parseFloat(formData.get('units_per_pack') as string) || 0;
+  const purity = 1.0; 
 
-  // 2. Fetch Reference Data & Permit Details
-  // We fetch atc_codes for the science and permits for the Shipping Pack Size master data.
-  const [atcRes, permitRes] = await Promise.all([
-    supabase
-      .from('atc_codes')
-      .select('substance, iu_to_mg_factor, ddd_mg')
-      .eq('id', atcId)
-      .single(),
-    supabase
-      .from('permits')
-      .select('shipping_pack_size')
-      .eq('id', permitId)
-      .single()
+  // 2. Fetch both ATC info AND the official Product Registration data
+  // We need 'shipping_pack_size' from the permits/products table
+  const [atcResult, productResult] = await Promise.all([
+    supabase.from('atc_codes').select('*').eq('id', atcId).single(),
+    supabase.from('permits').select('shipping_pack_size, product_name').eq('id', productId).single()
   ]);
 
-  if (atcRes.error || !atcRes.data) {
-    return { success: false, message: 'Reference data for this substance not found.' };
+  if (atcResult.error || productResult.error) {
+    return { success: false, message: 'Regulatory reference data not found.' };
   }
 
-  // 3. Calculate Internal Multipliers
-  // We parse the Shipping Pack Size (Master Data) to know how many units are in one "Pack"
-  const unitsPerPackMultiplier = parsePackMultiplier(permitRes.data?.shipping_pack_size || "1");
+  const atcRes = atcResult.data;
+  const officialPackSizeStr = productResult.data.shipping_pack_size;
 
+
+  console.log('This is shipping_pack_size: ', officialPackSizeStr);
+
+  // 3. Server-Side Extraction (Verification)
+  // We repeat the logic here to ensure the calculation uses the registered value
+  // 3. Server-Side Extraction (Verification) - Updated to Multiplier Logic
+let officialUnitsPerPack = 1; 
+
+  if (officialPackSizeStr) {
+    // Matches the Client Logic: Multiply all segments (10x2x50 -> 1000)
+    officialUnitsPerPack = officialPackSizeStr.split(/[xX*]/)
+      .reduce((acc, curr) => {
+        const num = parseInt(curr.replace(/[^0-9]/g, ''));
+        return !isNaN(num) ? acc * num : acc;
+      }, 1);
+  } else {
+    // Fallback to what was submitted if the official string is missing
+    officialUnitsPerPack = submittedUnitsPerPack;
+  }
   // 4. Normalize Strength to Milligrams (MG)
   let normalizedStrength = strength;
-
   if (massUnit === 'g') {
     normalizedStrength = strength * 1000;
   } else if (massUnit === 'IU') {
-    const factor = parseFloat(atcRes.data.iu_to_mg_factor?.toString() || "1");
+    const factor = parseFloat(atcRes.iu_to_mg_factor?.toString() || "1");
     normalizedStrength = strength / factor;
   }
 
-  // 5. Calculate Total API Mass and DDD Consumed
-  // Formula: (Quantity of Packs) * (Units per Pack) * (Strength) * (Purity)
-  const totalItems = packQtySubmitted * unitsPerPackMultiplier;
-  const apiMassMg = totalItems * normalizedStrength * purity;
+  // 5. Final Calculations
+  const totalUnitsCount = packQty * officialUnitsPerPack;
+  const apiMassMg = totalUnitsCount * normalizedStrength * purity;
 
-  // DDD Calculation: Total Mass / Reference DDD mg
-  const referenceDdd = parseFloat(atcRes.data.ddd_mg?.toString() || "0");
+  // DDD Calculation
+  const referenceDdd = parseFloat(atcRes.ddd_mg?.toString() || "0");
   const dddConsumed = referenceDdd > 0 ? apiMassMg / referenceDdd : 0;
 
-  // 6. Save to Supabase Ledger Table
+  // 6. Save to Ledger
   const { error: insertError } = await supabase
     .from('ledger_entries')
     .insert([
       {
         atc_id: atcId,
-        entity_id: permitId,
+        entity_id: productId, 
         entry_type: entryType,
         api_mass_mg: apiMassMg,
         purity_factor: purity,
         ddd_consumed: dddConsumed,
+        metadata: { 
+          risk_priority: atcRes.risk_priority,
+          units_logged: totalUnitsCount,
+          original_unit: massUnit,
+          verified_pack_size: officialPackSizeStr // Store for audit trails
+        },
         created_at: new Date().toISOString(),
       },
     ]);
 
-  if (insertError) {
-    console.error("VMD Ledger Save Error:", insertError.message);
-    return { success: false, message: `Database error: ${insertError.message}` };
-  }
+  if (insertError) return { success: false, message: `Database error: ${insertError.message}` };
 
-  // 7. Revalidate cache to update UI for the Divisional Deputy Director oversight
   revalidatePath('/Vetstat/Ledger');
 
   return { 
     success: true, 
-    message: `Entry logged: Total API Mass ${apiMassMg.toFixed(2)}mg (${dddConsumed.toFixed(4)} DDD).` 
+    message: `Logged: ${apiMassMg.toFixed(2)}mg API (${dddConsumed.toFixed(4)} DDD) for ${productResult.data.product_name}.` 
   };
 }
