@@ -41,12 +41,22 @@ export default async function StaffLayout({
     return redirect(`/dashboard/${userDivision}`);
   }
   
-  // const navItems = [
-  //   { name: 'Active Queue', href: `/dashboard/${userDivision}`, icon: ClipboardCheck },
-  //   { name: 'My History', href: `/dashboard/${userDivision}/history`, icon: History },
-  //   { name: 'Dossier Search', href: `/dashboard/${userDivision}/search`, icon: FileSearch },
-  // ];
-  const navItems = [''];
+  const navItems = [
+    { name: 'Active Queue', 
+      href: `/dashboard/${userDivision}`, 
+      icon: ClipboardCheck 
+    },
+    { name: 'My History', 
+      href: `/dashboard/${userDivision}`, 
+      // href: `/dashboard/${userDivision}/history`, 
+      icon: History
+    },
+    { name: 'Dossier Search', 
+      href: `/dashboard/${userDivision}`,
+      // href: `/dashboard/${userDivision}/search`,
+      icon: FileSearch
+    },
+  ];
   
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans">
