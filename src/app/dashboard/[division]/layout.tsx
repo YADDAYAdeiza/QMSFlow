@@ -40,13 +40,14 @@ export default async function StaffLayout({
   if (profile.role !== "Admin" && userDivision !== requestedDivision) {
     return redirect(`/dashboard/${userDivision}`);
   }
-
-  const navItems = [
-    { name: 'Active Queue', href: `/dashboard/${userDivision}`, icon: ClipboardCheck },
-    { name: 'My History', href: `/dashboard/${userDivision}/history`, icon: History },
-    { name: 'Dossier Search', href: `/dashboard/${userDivision}/search`, icon: FileSearch },
-  ];
-
+  
+  // const navItems = [
+  //   { name: 'Active Queue', href: `/dashboard/${userDivision}`, icon: ClipboardCheck },
+  //   { name: 'My History', href: `/dashboard/${userDivision}/history`, icon: History },
+  //   { name: 'Dossier Search', href: `/dashboard/${userDivision}/search`, icon: FileSearch },
+  // ];
+  const navItems = [''];
+  
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans">
       <nav className="bg-slate-900 text-white h-16 border-b border-slate-800 sticky top-0 z-40 px-8 flex items-center justify-between">
