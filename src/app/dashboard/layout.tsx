@@ -29,12 +29,12 @@ export default function DashboardLayout({
     router.refresh();
   };
 
-  const menuItems = [
-    { name: 'Overview', icon: LayoutDashboard, href: '/dashboard/vmd' },
-    { name: 'Inbox', icon: Inbox, href: '/dashboard/vmd/inbox' },
-    { name: 'Staff Registry', icon: Users, href: '/dashboard/admin/staff' },
-    { name: 'Settings', icon: Settings, href: '/dashboard/settings' },
-  ];
+  // const menuItems = [
+  //   { name: 'Overview', icon: LayoutDashboard, href: '/dashboard/vmd' },
+  //   { name: 'Inbox', icon: Inbox, href: '/dashboard/vmd/inbox' },
+  //   { name: 'Staff Registry', icon: Users, href: '/dashboard/admin/staff' },
+  //   { name: 'Settings', icon: Settings, href: '/dashboard/settings' },
+  // ];
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
@@ -52,7 +52,7 @@ export default function DashboardLayout({
           </div>
 
           <nav className="space-y-2">
-            {menuItems.map((item) => {
+            {/* {menuItems.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link
@@ -71,7 +71,7 @@ export default function DashboardLayout({
                   {isActive && <ChevronRight className="w-3 h-3 text-white/50" />}
                 </Link>
               );
-            })}
+            })} */}
           </nav>
         </div>
 
