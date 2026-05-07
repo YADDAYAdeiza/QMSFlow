@@ -62,8 +62,8 @@ export const ClearanceLetter = ({ data }: { data: any }) => (
       <View style={{ marginTop: 20 }}>
         <Text>Thank you.</Text>
         <View style={styles.signatureBlock}>
-          <Text style={styles.signatureName}>Dr. Idayat Mudashir</Text>
-          <Text>Divisional Deputy Director, Veterinary Medicine & Allied Products</Text>
+          <Text style={styles.signatureName}>Mudashir, I. A</Text>
+          <Text>Deputy Director i/c, Veterinary Medicine & Allied Products</Text>
           <Text>For: Director-General (NAFDAC)</Text>
         </View>
       </View>
