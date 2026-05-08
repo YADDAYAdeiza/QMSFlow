@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
-import { ShieldCheck, Lock, Mail, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useState } from 'react';
+import { ShieldCheck, Lock, Mail, Loader2, AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
 import { createClient } from '@/utils/supabase/client'; 
 import { getRedirectPath } from './actions'; 
 
@@ -11,9 +11,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [resetSent, setResetSent] = useState(false); // Track reset email status
   const [error, setError] = useState<string | null>(null);
   
-  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
   const supabase = createClient();
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -21,7 +22,6 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    // 1. Authenticate with Supabase Auth
     const { data, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -35,18 +35,10 @@ export default function LoginPage() {
 
     if (data.user) {
       try {
-        // 2. Fetch the dynamic redirect path from the Database
         const path = await getRedirectPath(data.user.id);
-        
         setSuccess(true);
-        
-        // 3. Teleport to the correct Division
-        // We use window.location.href to break the 500 error loop 
-        // and ensure the middleware sees the new session correctly.
         window.location.href = path;
-
       } catch (err: any) {
-        // Log the actual error to the browser console for debugging
         console.error("Login Navigation Error:", err);
         setError("Authorized, but registry access failed. Contact Admin.");
         setLoading(false);
@@ -54,14 +46,35 @@ export default function LoginPage() {
     }
   };
 
+  // Logic for Password Reset
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError("Enter your official email first to reset access key.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/reset-password`,
+    });
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setResetSent(true);
+    }
+    setLoading(false);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
           <div className={`inline-flex p-4 rounded-3xl transition-all duration-500 ${
-            success ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-blue-600/10 border-blue-600/20'
+            success || resetSent ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-blue-600/10 border-blue-600/20'
           } border mb-6`}>
-            {success ? (
+            {(success || resetSent) ? (
               <ShieldCheck className="w-10 h-10 text-emerald-500 animate-pulse" />
             ) : (
               <ShieldCheck className="w-10 h-10 text-blue-500" />
@@ -75,7 +88,21 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {success ? (
+        {resetSent ? (
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] text-center animate-in fade-in zoom-in duration-300">
+            <KeyRound className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+            <h2 className="text-white font-black uppercase text-sm italic">Recovery Link Sent</h2>
+            <p className="text-slate-500 text-[10px] mt-2 font-bold uppercase tracking-widest leading-relaxed">
+              Check your official inbox for instructions to restore your terminal access key.
+            </p>
+            <button 
+              onClick={() => setResetSent(false)}
+              className="mt-6 text-[9px] font-black uppercase text-blue-500 hover:text-blue-400 tracking-widest"
+            >
+              Return to Login
+            </button>
+          </div>
+        ) : success ? (
           <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] text-center animate-in fade-in zoom-in duration-300">
             <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
             <h2 className="text-white font-black uppercase text-sm italic">Authentication Verified</h2>
@@ -114,6 +141,16 @@ export default function LoginPage() {
               />
             </div>
 
+            <div className="flex justify-end px-2">
+              <button 
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-[9px] font-black uppercase text-slate-600 hover:text-blue-500 tracking-widest transition-colors"
+              >
+                Forgot Access Key?
+              </button>
+            </div>
+
             {error && (
               <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex items-center gap-3 animate-in shake duration-300">
                 <AlertCircle className="w-4 h-4 text-rose-500" />
@@ -133,6 +170,13 @@ export default function LoginPage() {
                 </>
               ) : "Authenticate"}
             </button>
+            
+            <p 
+              className="mt-6 text-center text-[9px] font-bold text-slate-600 uppercase tracking-widest cursor-pointer hover:text-emerald-500 transition-colors"
+              onClick={() => router.push('/signup')}
+            >
+              New Personnel? Create Account
+            </p>
           </form>
         )}
       </div>
