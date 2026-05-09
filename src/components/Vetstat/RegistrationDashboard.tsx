@@ -149,13 +149,15 @@ export default function RegistrationDashboard({
             </div>
 
             {/* Scrollable Content Area */}
-            <div className="p-8 overflow-y-auto max-h-[calc(90vh-180px)]">
-              <LedgerForm 
-                type={activeLedgerEntry.entry_type} 
-                atcCodes={atcCodes} 
-                companies={companies} 
-              />
-            </div>
+            {/* RegistrationDashboard.tsx (Relevant Section) */}
+              <div className="p-8 overflow-y-auto max-h-[calc(90vh-180px)]">
+                <LedgerForm 
+                  type={activeLedgerEntry.entry_type} 
+                  atcCodes={atcCodes} 
+                  companies={companies} 
+                  initialData={activeLedgerEntry} // PASS THE DATA HERE
+                />
+              </div>
             
             <div className="p-6 bg-slate-50 border-t border-slate-100 text-center">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">

@@ -57,3 +57,25 @@ export async function enrollFPPHeader(formData: FormData) {
     permit_id: data.id 
   };
 }
+
+export async function updateFPPRegistration(id: string, formData: FormData) {
+  const supabase = await createClient();
+  
+  const updates = {
+    permit_number: formData.get('nafdac_reg_no') as string,
+    product_name: formData.get('product_name') as string,
+    company_name: formData.get('company_name') as string,
+    shipping_pack_size: formData.get('shipping_pack_size') as string,
+    active_substance: formData.get('active_substance') as string,
+  };
+
+  const { error } = await supabase
+    .from('permits')
+    .update(updates)
+    .eq('id', id);
+
+  if (error) return { success: false, message: error.message };
+  
+  revalidatePath('/Vetstat/Ledger');
+  return { success: true };
+}

@@ -24,20 +24,26 @@ function parsePackMultiplier(packSize: string | null): number {
 export async function submitLedgerEntry(previousState: any, formData: FormData) {
   const supabase = await createClient();
 
-  // 1. Extract IDs and Inputs
+  // 1. Extract IDs and Core Inputs
+  const entryId = formData.get('entry_id') as string;
   const productId = formData.get('product_id') as string; 
   const atcId = formData.get('atc_id') as string;
   const entryType = formData.get('entry_type') as string; 
   const massUnit = formData.get('mass_unit') as string;
   
+  // 2. Extract AMS/Geospatial Inputs (Updated for Pinpoint Accuracy)
+  const originWarehouse = formData.get('origin_warehouse') as string;
+  const originState = formData.get('origin_state') as string;
+  const destinationState = formData.get('destination_state') as string;
+  const geopoliticalZone = formData.get('geopolitical_zone') as string;
+  const targetSpecies = formData.get('target_species') as string;
+
   const strength = parseFloat(formData.get('strength') as string) || 0;
   const packQty = parseFloat(formData.get('pack_quantity') as string) || 0;
-  // User might have edited this, so we'll fetch the 'official' one below
   const submittedUnitsPerPack = parseFloat(formData.get('units_per_pack') as string) || 0;
   const purity = 1.0; 
 
-  // 2. Fetch both ATC info AND the official Product Registration data
-  // We need 'shipping_pack_size' from the permits/products table
+  // 3. Fetch Regulatory Reference Data (Verification)
   const [atcResult, productResult] = await Promise.all([
     supabase.from('atc_codes').select('*').eq('id', atcId).single(),
     supabase.from('permits').select('shipping_pack_size, product_name').eq('id', productId).single()
@@ -50,26 +56,19 @@ export async function submitLedgerEntry(previousState: any, formData: FormData) 
   const atcRes = atcResult.data;
   const officialPackSizeStr = productResult.data.shipping_pack_size;
 
-
-  console.log('This is shipping_pack_size: ', officialPackSizeStr);
-
-  // 3. Server-Side Extraction (Verification)
-  // We repeat the logic here to ensure the calculation uses the registered value
-  // 3. Server-Side Extraction (Verification) - Updated to Multiplier Logic
-let officialUnitsPerPack = 1; 
-
+  // 4. Server-Side Extraction (Verification of Pack Multiplier)
+  let officialUnitsPerPack = 1; 
   if (officialPackSizeStr) {
-    // Matches the Client Logic: Multiply all segments (10x2x50 -> 1000)
     officialUnitsPerPack = officialPackSizeStr.split(/[xX*]/)
-      .reduce((acc, curr) => {
+      .reduce((acc: number, curr: string) => {
         const num = parseInt(curr.replace(/[^0-9]/g, ''));
         return !isNaN(num) ? acc * num : acc;
       }, 1);
   } else {
-    // Fallback to what was submitted if the official string is missing
     officialUnitsPerPack = submittedUnitsPerPack;
   }
-  // 4. Normalize Strength to Milligrams (MG)
+
+  // 5. Normalize Strength to MG
   let normalizedStrength = strength;
   if (massUnit === 'g') {
     normalizedStrength = strength * 1000;
@@ -78,41 +77,67 @@ let officialUnitsPerPack = 1;
     normalizedStrength = strength / factor;
   }
 
-  // 5. Final Calculations
+  // 6. Final Calculations (DDD and Mass)
   const totalUnitsCount = packQty * officialUnitsPerPack;
   const apiMassMg = totalUnitsCount * normalizedStrength * purity;
-
-  // DDD Calculation
   const referenceDdd = parseFloat(atcRes.ddd_mg?.toString() || "0");
   const dddConsumed = referenceDdd > 0 ? apiMassMg / referenceDdd : 0;
 
-  // 6. Save to Ledger
-  const { error: insertError } = await supabase
-    .from('ledger_entries')
-    .insert([
-      {
-        atc_id: atcId,
-        entity_id: productId, 
-        entry_type: entryType,
-        api_mass_mg: apiMassMg,
-        purity_factor: purity,
-        ddd_consumed: dddConsumed,
-        metadata: { 
-          risk_priority: atcRes.risk_priority,
-          units_logged: totalUnitsCount,
-          original_unit: massUnit,
-          verified_pack_size: officialPackSizeStr // Store for audit trails
-        },
-        created_at: new Date().toISOString(),
-      },
-    ]);
+  // 7. Construct Payload (Mapping-Ready & Pinpoint Accurate)
+  const payload: any = {
+    atc_id: atcId,
+    entity_id: productId, 
+    entry_type: entryType,
+    api_mass_mg: apiMassMg,
+    ddd_consumed: dddConsumed,
+    
+    // Explicit columns for Map/Dashboard filtering
+    origin_warehouse: originWarehouse,
+    origin_state: originState,
+    destination_state: destinationState,
+    geopolitical_zone: geopoliticalZone,
+    target_species: targetSpecies,
 
-  if (insertError) return { success: false, message: `Database error: ${insertError.message}` };
+    metadata: { 
+      risk_priority: atcRes.risk_priority,
+      units_logged: totalUnitsCount,
+      original_unit: massUnit,
+      strength_at_log: strength,
+      verified_pack_size: officialPackSizeStr,
+      is_edited: !!entryId,
+      edit_timestamp: entryId ? new Date().toISOString() : null
+    },
+  };
+
+  // 8. Database Operation
+  let dbResult;
+  if (entryId) {
+    dbResult = await supabase
+      .from('ledger_entries')
+      .update(payload)
+      .eq('id', entryId);
+  } else {
+    // Adding created_at for new entries
+    payload.created_at = new Date().toISOString();
+    dbResult = await supabase
+      .from('ledger_entries')
+      .insert([payload]);
+  }
+
+  if (dbResult.error) {
+    console.error("Database Error:", dbResult.error);
+    return { success: false, message: `Database error: ${dbResult.error.message}` };
+  }
 
   revalidatePath('/Vetstat/Ledger');
 
+  // 9. Informative Success Message
+  const actionType = entryId ? 'Updated' : 'Logged';
+  const speciesContext = targetSpecies ? ` for ${targetSpecies}` : '';
+  const locationContext = destinationState ? ` in ${destinationState}` : '';
+
   return { 
     success: true, 
-    message: `Logged: ${apiMassMg.toFixed(2)}mg API (${dddConsumed.toFixed(4)} DDD) for ${productResult.data.product_name}.` 
+    message: `${actionType}: ${apiMassMg.toFixed(2)}mg API (${dddConsumed.toFixed(4)} DDD)${speciesContext}${locationContext}.` 
   };
 }

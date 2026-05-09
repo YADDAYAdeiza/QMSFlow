@@ -11,27 +11,65 @@ import {
   ChevronRight, 
   Building2, 
   Tag, 
-  Calculator 
+  MapPin,
+  Truck,
+  Bird,
+  Warehouse
 } from 'lucide-react';
 
 interface LedgerFormProps {
   type: 'IMPORT' | 'DESTRUCTION' | 'CONSUMPTION';
   atcCodes: any[];
   companies: any[]; 
+  initialData?: any; 
 }
 
-export default function LedgerForm({ type, atcCodes = [], companies = [] }: LedgerFormProps) {
+const GEO_ZONES: Record<string, string[]> = {
+  "North-Central": ["Benue", "FCT", "Kogi", "Kwara", "Nasarawa", "Niger", "Plateau"],
+  "North-East": ["Adamawa", "Bauchi", "Borno", "Gombe", "Taraba", "Yobe"],
+  "North-West": ["Kaduna", "Kano", "Katsina", "Kebbi", "Jigawa", "Sokoto", "Zamfara"],
+  "South-East": ["Abia", "Anambra", "Ebonyi", "Enugu", "Imo"],
+  "South-South": ["Akwa Ibom", "Bayelsa", "Cross River", "Delta", "Edo", "Rivers"],
+  "South-West": ["Ekiti", "Lagos", "Ogun", "Ondo", "Osun", "Oyo"]
+};
+
+const ALL_STATES = Object.values(GEO_ZONES).flat().sort();
+
+const SPECIES_CATEGORIES = [
+  "Poultry", 
+  "Livestock (Cattle/Sheep/Goat)", 
+  "Poultry + Livestock", 
+  "Swine", 
+  "Aquaculture", 
+  "Companion Animals"
+];
+
+export default function LedgerForm({ type, atcCodes = [], companies = [], initialData }: LedgerFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
 
   // Selection States
+  const [selectedProductId, setSelectedProductId] = useState<string>(initialData?.entity_id || "");
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
-  const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedSubstance, setSelectedSubstance] = useState<any>(null);
   
-  // Calculation & Input States
-  const [unit, setUnit] = useState<'mg' | 'g' | 'IU'>('mg');
-  const [strength, setStrength] = useState<number>(0);
-  const [shippingPacks, setShippingPacks] = useState(0);
+  // Pinpoint Logistics States
+  const [originWarehouse, setOriginWarehouse] = useState<string>(initialData?.origin_warehouse || "");
+  const [originState, setOriginState] = useState<string>(initialData?.origin_state || "");
+  const [destinationState, setDestinationState] = useState<string>(initialData?.destination_state || "");
+  const [targetSpecies, setTargetSpecies] = useState<string>(initialData?.target_species || "");
+
+  // Auto-derived Zone for the Destination
+  const derivedZone = useMemo(() => {
+    for (const [zone, states] of Object.entries(GEO_ZONES)) {
+      if (states.includes(destinationState)) return zone;
+    }
+    return "";
+  }, [destinationState]);
+
+  // Calculation States
+  const [unit, setUnit] = useState<'mg' | 'g' | 'IU'>(initialData?.metadata?.original_unit || 'mg');
+  const [strength, setStrength] = useState<number>(initialData?.metadata?.strength_at_log || 0);
+  const [shippingPacks, setShippingPacks] = useState(initialData?.pack_quantity || 0);
   const [displayPackSize, setDisplayPackSize] = useState(""); 
   const [numericPackSize, setNumericPackSize] = useState(0); 
   
@@ -40,275 +78,164 @@ export default function LedgerForm({ type, atcCodes = [], companies = [] }: Ledg
     message: '' 
   });
 
-  // 1. Filter products based on company name (Support for multiple permits per company)
-  const availableProducts = useMemo(() => {
-    if (!selectedCompanyId) return [];
-    const selectedCompanyName = companies.find(c => c.id === selectedCompanyId)?.company_name;
-    return companies.filter(c => c.company_name === selectedCompanyName);
-  }, [selectedCompanyId, companies]);
-
-  // 2. Substance Detection and Pack Size Multiplier Extraction
+  // Success Reset logic
   useEffect(() => {
-    const product = availableProducts.find(p => p.id === selectedProductId);
-    
+    if (state.success) {
+      setSelectedCompanyId(""); setSelectedProductId(""); setSelectedSubstance(null);
+      setOriginWarehouse(""); setOriginState(""); setDestinationState(""); setTargetSpecies("");
+      setStrength(0); setShippingPacks(0); setDisplayPackSize(""); setNumericPackSize(0);
+      formRef.current?.reset();
+    }
+  }, [state.success]);
+
+  // Substance Detection logic
+  useEffect(() => {
+    const product = companies.find(p => p.id === selectedProductId);
     if (product) {
-      const targetSubstance = product.active_substance?.trim().toLowerCase();
-      const registryMatch = atcCodes.find(a => 
-        a.substance?.trim().toLowerCase() === targetSubstance ||
-        a.id === product.atc_id
-      );
-
-      setSelectedSubstance(registryMatch || { 
-        substance: product.active_substance, 
-        risk_priority: 'Pending Review',
-        atc_code: 'N/A',
-        ddd_mg: 0,
-        iu_to_mg_factor: 1
-      });
-
-      const rawSize = product.shipping_pack_size || "";
-      setDisplayPackSize(rawSize);
-
-      const calculatedMultiplier = rawSize.split(/[xX*]/)
-        .reduce((acc: number, curr: string) => {
-            const num = parseInt(curr.replace(/[^0-9]/g, ''));
-            return !isNaN(num) ? acc * num : acc;
-        }, 1);
-      
-      setNumericPackSize(calculatedMultiplier || 0);
-
-    } else {
-      setSelectedSubstance(null);
-      setDisplayPackSize("");
-      setNumericPackSize(0);
+      const match = atcCodes.find(a => a.substance?.toLowerCase() === product.active_substance?.toLowerCase());
+      setSelectedSubstance(match || { substance: product.active_substance, ddd_mg: 0 });
+      setDisplayPackSize(product.shipping_pack_size || "");
+      const mult = (product.shipping_pack_size || "").split(/[xX*]/).reduce((a, c) => a * (parseInt(c.replace(/\D/g,'')) || 1), 1);
+      setNumericPackSize(mult || 0);
     }
-  }, [selectedProductId, availableProducts, atcCodes]);
+  }, [selectedProductId, companies, atcCodes]);
 
-  // 3. Dynamic Unit Selection
-  useEffect(() => {
-    if (selectedSubstance?.iu_to_mg_factor && selectedSubstance.iu_to_mg_factor !== 1) {
-      setUnit('IU');
-    } else {
-      setUnit('mg');
-    }
-  }, [selectedSubstance]);
-
-  // 4. Combined Calculation Logic
   const totalUnits = shippingPacks * numericPackSize;
 
   const dddPreview = useMemo(() => {
     if (!selectedSubstance || !strength || !totalUnits) return null;
-
-    let normalizedStrength = strength;
-    if (unit === 'g') {
-      normalizedStrength = strength * 1000;
-    } else if (unit === 'IU') {
-      const factor = parseFloat(selectedSubstance.iu_to_mg_factor || "1");
-      normalizedStrength = strength / factor;
-    }
-
-    const totalMassMg = totalUnits * normalizedStrength;
-    const referenceDdd = parseFloat(selectedSubstance.ddd_mg || "0");
-    const dddConsumed = referenceDdd > 0 ? totalMassMg / referenceDdd : 0;
-
-    return {
-      mass: totalMassMg,
-      ddd: dddConsumed
-    };
+    let norm = unit === 'g' ? strength * 1000 : strength;
+    if (unit === 'IU') norm = strength / parseFloat(selectedSubstance.iu_to_mg_factor || "1");
+    const mass = totalUnits * norm;
+    const ddd = parseFloat(selectedSubstance.ddd_mg) > 0 ? mass / parseFloat(selectedSubstance.ddd_mg) : 0;
+    return { mass, ddd };
   }, [selectedSubstance, strength, totalUnits, unit]);
 
   return (
     <form ref={formRef} action={action} className="space-y-6">
+      {/* Hidden Fields for DB Mapping */}
+      <input type="hidden" name="entry_type" value={type} />
+      <input type="hidden" name="origin_warehouse" value={originWarehouse} />
+      <input type="hidden" name="origin_state" value={originState} />
+      <input type="hidden" name="destination_state" value={destinationState} />
+      <input type="hidden" name="geopolitical_zone" value={derivedZone} />
+      <input type="hidden" name="target_species" value={targetSpecies} />
+      <input type="hidden" name="mass_unit" value={unit} />
+
+      {/* STEP 1: CORPORATE SELECTION */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+            <Building2 size={14} /> Marketing Authorization Holder
+          </label>
+          <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setSelectedProductId(""); }} className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-medium" required>
+            <option value="">Select MAH...</option>
+            {Array.from(new Set(companies.map(c => c.company_name))).map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </div>
+        <div className={`flex flex-col gap-1.5 ${!selectedCompanyId ? 'opacity-40' : ''}`}>
+          <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+            <Tag size={14} /> Registered Product Brand
+          </label>
+          <select name="product_id" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)} className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-medium" required={!!selectedCompanyId}>
+            <option value="">Select Brand...</option>
+            {companies.filter(c => c.company_name === selectedCompanyId).map(p => <option key={p.id} value={p.id}>{p.product_name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* STEP 2: GRANULAR LOGISTICS (Pinpoint Warehouse Tracking) */}
+      {type === 'CONSUMPTION' && selectedProductId && (
+        <div className="p-6 bg-slate-50 border-2 border-slate-200 rounded-3xl space-y-5 animate-in slide-in-from-top-4">
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+             <Warehouse size={18} className="text-blue-600" />
+             <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest">Supply Chain Pinpoint</h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase">Origin State</label>
+              <select value={originState} onChange={(e) => setOriginState(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
+                <option value="">Origin State...</option>
+                {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase">Origin Warehouse</label>
+              <input type="text" placeholder="e.g. Lagos Hub A" value={originWarehouse} onChange={(e) => setOriginWarehouse(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase">Target State</label>
+              <select value={destinationState} onChange={(e) => setDestinationState(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
+                <option value="">Destination State...</option>
+                {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase">Target Sector</label>
+              <select value={targetSpecies} onChange={(e) => setTargetSpecies(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
+                <option value="">Select Sector...</option>
+                {SPECIES_CATEGORIES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: SUBSTANCE & DDD CALCULATIONS */}
+      {selectedSubstance && (
+        <div className="bg-slate-900 p-6 rounded-3xl text-white space-y-6 shadow-2xl">
+          <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+             <div>
+               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Ingredient</p>
+               <h4 className="text-xl font-bold text-emerald-400">{selectedSubstance.substance}</h4>
+             </div>
+             <div className="text-right">
+               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Zone</p>
+               <span className="text-blue-400 font-bold uppercase">{derivedZone || 'N/A'}</span>
+             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase">Packs Dispatched</label>
+              <input type="number" value={shippingPacks || ""} onChange={(e) => setShippingPacks(Number(e.target.value))} className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase">Pack Weight/Count</label>
+              <input type="text" readOnly value={displayPackSize} className="bg-slate-800/50 p-3 rounded-xl font-bold text-slate-500 cursor-not-allowed" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase">Strength ({unit})</label>
+              <input type="number" step="any" value={strength || ""} onChange={(e) => setStrength(parseFloat(e.target.value))} className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
+            </div>
+          </div>
+
+          {dddPreview && (
+            <div className="bg-emerald-600 p-5 rounded-2xl flex justify-between items-center border-b-4 border-emerald-800">
+              <div>
+                <p className="text-[10px] font-black text-emerald-100 uppercase tracking-widest">Consumption Load (DDD)</p>
+                <p className="text-4xl font-black">{dddPreview.ddd.toFixed(4)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-black text-emerald-100 uppercase tracking-widest">Total API Content</p>
+                <p className="font-bold text-xl">{dddPreview.mass.toLocaleString()} mg</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <button type="submit" disabled={isPending || !selectedSubstance} className="w-full bg-blue-600 text-white font-black uppercase tracking-[0.2em] py-5 rounded-2xl hover:bg-blue-500 transition-all shadow-xl disabled:bg-slate-300">
+        {isPending ? 'Verifying & Logging...' : `Record ${type} Activity`}
+      </button>
+
       {state.message && (
-        <div className={`p-4 rounded-xl flex items-center gap-3 border animate-in fade-in zoom-in-95 ${
-          state.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
-        }`}>
+        <div className={`p-4 rounded-xl flex items-center gap-3 border ${state.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
           {state.success ? <Activity size={18} /> : <AlertTriangle size={18} />}
           <span className="text-sm font-bold">{state.message}</span>
         </div>
       )}
-
-      {/* Hidden Fields */}
-      <input type="hidden" name="entry_type" value={type} />
-      <input type="hidden" name="mass_unit" value={unit} />
-      <input type="hidden" name="atc_id" value={selectedSubstance?.id || ""} />
-      <input type="hidden" name="substance_name" value={selectedSubstance?.substance || ""} />
-      <input type="hidden" name="units_per_pack" value={numericPackSize} />
-
-      {/* STEP 1: COMPANY */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
-          <Building2 size={14} /> {type === 'IMPORT' ? 'Authorized Importer' : 'Entity'}
-        </label>
-        <select 
-          name="entity_id" 
-          value={selectedCompanyId}
-          onChange={(e) => {
-            setSelectedCompanyId(e.target.value);
-            setSelectedProductId(""); 
-            setSelectedSubstance(null);
-          }}
-          className="border-2 border-slate-200 p-3 rounded-xl focus:border-emerald-600 transition-all font-medium text-slate-700 bg-white outline-none"
-          required
-        >
-          <option value="">Select company...</option>
-          {Array.from(new Set(companies.map(c => c.company_name))).map((name) => {
-            const comp = companies.find(c => c.company_name === name);
-            return <option key={comp?.id} value={comp?.id || ""}>{name}</option>
-          })}
-        </select>
-      </div>
-
-      {/* STEP 2: PRODUCT */}
-      <div className={`flex flex-col gap-1.5 transition-all duration-300 ${!selectedCompanyId ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
-        <label className="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
-          <Tag size={14} /> Registered Product (Brand Name)
-        </label>
-        <select 
-          name="product_id" 
-          value={selectedProductId}
-          onChange={(e) => setSelectedProductId(e.target.value)}
-          className="border-2 border-slate-200 p-3 rounded-xl focus:border-emerald-600 transition-all font-medium text-slate-700 bg-white outline-none"
-          required={!!selectedCompanyId}
-        >
-          <option value="">Select enrolled product...</option>
-          {availableProducts.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.product_name} [{p.permit_number}]
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* STEP 3: SUBSTANCE */}
-      <div className={`flex flex-col gap-1.5 transition-all duration-300 ${!selectedProductId ? 'opacity-40' : 'opacity-100'}`}>
-        <label className="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
-          <Beaker size={14} /> Detected Active Substance
-        </label>
-        <div className={`border-2 p-3 rounded-xl font-bold flex justify-between items-center transition-colors ${
-          selectedSubstance ? 'bg-white border-emerald-100 text-slate-800' : 'bg-slate-50 border-slate-100 text-slate-400'
-        }`}>
-          <span>{selectedSubstance ? selectedSubstance.substance : "Waiting for selection..."}</span>
-          {selectedSubstance?.atc_code && (
-            <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg font-mono">
-              {selectedSubstance.atc_code}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* STEP 4: PACKING & CALCULATIONS */}
-      <div className={`bg-slate-50 p-5 rounded-2xl border-2 border-dashed border-slate-200 space-y-4 transition-all duration-300 ${!selectedSubstance ? 'opacity-40 pointer-events-none scale-[0.98]' : 'opacity-100 scale-100'}`}>
-        <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-               <Package size={16} className="text-slate-400" />
-               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Packing List Details</h3>
-            </div>
-            
-            <div className="flex bg-white border border-slate-200 rounded-lg p-1">
-              {['mg', 'g', 'IU'].map((u) => (
-                  <button
-                    key={u}
-                    type="button"
-                    disabled={unit !== u}
-                    className={`px-3 py-1 text-[10px] font-black rounded-md transition-all ${
-                      unit === u ? 'bg-slate-900 text-white' : 'text-slate-400 opacity-20 cursor-not-allowed'
-                    }`}
-                  >
-                    {u.toUpperCase()}
-                  </button>
-              ))}
-            </div>
-        </div>
-        
-        <div className="grid grid-cols-2 gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase">Shipping Packs</label>
-            <input 
-              name="pack_quantity" 
-              type="number" 
-              min="1"
-              onChange={(e) => setShippingPacks(Number(e.target.value) || 0)} 
-              className="border-2 border-slate-200 p-2.5 rounded-lg font-bold outline-none focus:border-slate-900 transition-colors" 
-              required 
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase">Ref. Pack Size</label>
-            <input 
-              type="text" 
-              readOnly
-              value={displayPackSize}
-              className="border-2 border-slate-100 p-2.5 rounded-lg font-bold bg-slate-100 text-slate-500 cursor-not-allowed" 
-            />
-          </div>
-        </div>
-
-        {/* RESTORED: Calculated Units Display */}
-        {totalUnits > 0 && (
-          <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 p-2.5 rounded-lg border border-emerald-100">
-            <ChevronRight size={14} />
-            <span className="text-[10px] font-bold uppercase tracking-tight">
-              Total {selectedSubstance?.substance} Count: {totalUnits.toLocaleString()} units
-            </span>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-black text-slate-400 uppercase">Strength per Unit ({unit})</label>
-          <div className="relative">
-            <input 
-              name="strength" 
-              type="number" 
-              step="any" 
-              onChange={(e) => setStrength(parseFloat(e.target.value) || 0)}
-              placeholder={unit === 'IU' ? "1000000" : "500"} 
-              className="w-full border-2 border-slate-200 p-2.5 rounded-lg font-bold pr-12 outline-none focus:border-slate-900 transition-colors" 
-              required 
-            />
-            <span className="absolute right-3 top-2.5 text-xs font-black text-slate-300 uppercase">{unit}</span>
-          </div>
-        </div>
-
-        {/* DDD METRIC PANEL */}
-        {dddPreview && dddPreview.ddd > 0 && (
-          <div className="mt-4 p-4 bg-slate-900 rounded-xl text-white border-b-4 border-emerald-500 shadow-xl animate-in slide-in-from-bottom-2 duration-500">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <Calculator size={12} className="text-emerald-400" /> Regulatory Metric Preview
-              </span>
-              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold">
-                {selectedSubstance?.risk_priority || 'Standard'}
-              </span>
-            </div>
-            <div className="flex justify-between items-end">
-              <div>
-                <p className="text-3xl font-black text-emerald-400 tracking-tighter">
-                  {dddPreview.ddd.toFixed(4)} 
-                  <span className="text-xs text-white tracking-normal font-bold ml-1">
-                    DDD Consumed
-                  </span>
-                </p>
-                <p className="text-[9px] text-slate-400 font-medium italic mt-1">
-                  Normalized Mass: {dddPreview.mass.toLocaleString()}mg API
-                </p>
-              </div>
-              <div className="text-right pb-1">
-                <p className="text-[9px] text-slate-500 uppercase font-black">Ref Standard</p>
-                <p className="text-xs font-mono text-slate-300">{selectedSubstance?.ddd_mg}mg/DDD</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <button 
-        type="submit" 
-        disabled={isPending || !selectedSubstance} 
-        className="w-full bg-slate-900 text-white font-black uppercase tracking-[0.2em] py-4 rounded-xl hover:bg-emerald-600 transition-all disabled:bg-slate-200 disabled:text-slate-400 shadow-xl shadow-slate-900/10 active:scale-[0.98]"
-      >
-        {isPending ? 'Processing...' : `Log ${type} Entry`}
-      </button>
     </form>
   );
 }

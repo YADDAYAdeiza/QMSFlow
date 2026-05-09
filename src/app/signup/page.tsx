@@ -2,8 +2,17 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-// Added Eye and EyeOff icons
-import { ShieldCheck, Lock, Mail, User, Loader2, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { 
+  ShieldCheck, 
+  Lock, 
+  Mail, 
+  User, 
+  Loader2, 
+  AlertCircle, 
+  CheckCircle2, 
+  Eye, 
+  EyeOff 
+} from 'lucide-react';
 import { createClient } from '@/utils/supabase/client';
 
 export default function SignUpPage() {
@@ -24,7 +33,7 @@ export default function SignUpPage() {
     setLoading(true);
     setError(null);
 
-    // 1. Check if passwords match before even talking to the server
+    // 1. Check if passwords match before talking to the server
     if (password !== confirmPassword) {
       setError("Passwords do not match");
       setLoading(false);
@@ -59,9 +68,16 @@ export default function SignUpPage() {
           }),
         });
 
+        // Defensive check for JSON response to prevent "Unexpected end of JSON input"
         if (!response.ok) {
-          const result = await response.json();
-          throw new Error(result.error || "Personnel registry sync failed");
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const result = await response.json();
+            throw new Error(result.error || "Personnel registry sync failed");
+          } else {
+            // Fallback for non-JSON errors (e.g., 500 server crash returning HTML/blank)
+            throw new Error(`Server error: ${response.status} ${response.statusText}`);
+          }
         }
 
         setSuccess(true);

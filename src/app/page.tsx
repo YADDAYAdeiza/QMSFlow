@@ -1,51 +1,45 @@
-// "use server"
+import Link from 'next/link';
+import { ShieldCheck, LogIn, ArrowRight } from 'lucide-react';
 
-import LODEntryForm from "@/components/LODEntryForm";
-
-export default function LODWorkstation() {
+export default function Home() {
   return (
-    <div className="p-8 space-y-12 bg-gray-50 min-h-screen">
-      
-      {/* SECTION 1: THE ENTRY FORM */}
-      <section className="max-w-4xl mx-auto">
-        <header className="mb-6">
-          <h1 className="text-3xl font-black text-slate-900 uppercase">LOD Entry Portal</h1>
-          <p className="text-gray-500">Register new applications and push to Director for assignment.</p>
-        </header>
-        
-        {/* Your LODEntryForm Component goes here */}
-        <LODEntryForm />
-      </section>
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6">
+      {/* Background Glow Decor */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-600/10 blur-[120px] rounded-full" />
 
-      <hr className="border-gray-200" />
-
-      {/* SECTION 2: THE TRACKING DASHBOARD */}
-      <section className="max-w-6xl mx-auto">
-        <div className="flex justify-between items-end mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800">Application Tracking</h2>
-            <p className="text-sm text-gray-500">Real-time status of dossiers pushed to the Director.</p>
-          </div>
-          <div className="flex gap-4">
-             {/* Future filters: [All] [Pending Director] [In Review] */}
-          </div>
+      <div className="relative w-full max-w-md text-center space-y-8">
+        {/* Icon / Logo Area */}
+        <div className="inline-flex p-5 rounded-3xl bg-blue-600/10 border border-blue-600/20 mb-2">
+          <ShieldCheck className="w-12 h-12 text-blue-500" />
         </div>
 
-        {/* --- DASHBOARD GOES IN HERE --- */}
-        <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-           <div className="p-20 text-center flex flex-col items-center justify-center text-gray-400">
-              <div className="w-16 h-16 bg-gray-100 rounded-full mb-4 flex items-center justify-center">
-                 <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                 </svg>
-              </div>
-              <h3 className="font-bold text-slate-600 italic">Tracking Logic Coming Soon</h3>
-              <p className="max-w-xs text-sm">Tomorrow, we will build a table here that pulls from your Supabase 'Applications' and 'QMS_Timelines' tables.</p>
-           </div>
+        {/* Messaging */}
+        <div className="space-y-3">
+          <h1 className="text-3xl font-black text-white uppercase italic tracking-tighter italic">
+            QMS Flow <span className="text-blue-500">Personnel</span>
+          </h1>
+          <p className="text-slate-400 text-sm font-medium leading-relaxed">
+            Authorized Regulatory Access Only. <br />
+            Please authenticate to access the LOD Workstation and Registry.
+          </p>
         </div>
-        {/* --- END DASHBOARD --- */}
 
-      </section>
+        {/* Action Area */}
+        <div className="pt-4">
+          <Link 
+            href="/login"
+            className="group relative flex items-center justify-center gap-3 bg-white text-slate-950 py-5 px-8 rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] transition-all hover:bg-blue-50 hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <LogIn className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
+            Log Into Application
+            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+          </Link>
+          
+          <p className="mt-8 text-[10px] text-slate-600 uppercase font-bold tracking-widest">
+            National Agency for Food & Drug Administration & Control
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

@@ -8,8 +8,10 @@ import {
   Stethoscope,
   ClipboardCheck,
   Activity,
-  History
+  History,
+  FileSearch
 } from 'lucide-react';
+import FPPEnrolledRegistry from '@/components/Vetstat/FPPEnrolledRegistry';
 
 export default async function LedgerPage({
   searchParams
@@ -19,52 +21,60 @@ export default async function LedgerPage({
   const supabase = await createClient();
   
   const params = await searchParams;
-  const activeType = (params.type as 'IMPORT' | 'DESTRUCTION' | 'CONSUMPTION') || 'IMPORT';
+  const activeType = (params.type as 'IMPORT' | 'DESTRUCTION' | 'CONSUMPTION' | 'REGISTRY') || 'IMPORT';
 
-  // Fetching all regulatory data including existing registration history
-  const [atcResponse, companiesResponse, ledgerResponse] = await Promise.all([
+  const [atcResponse, permitsResponse, ledgerResponse] = await Promise.all([
     supabase
       .from('atc_codes')
       .select('*')
       .order('substance'),
     supabase
       .from('permits')
-    // ADDED: product_name and active_substance
-    .select('id, company_name, permit_number, product_name, active_substance, shipping_pack_size') 
-    .order('company_name', { ascending: true }),
+      .select('*')
+      .eq('dir_type', 'VMD')
+      .order('company_name', { ascending: true }),
     supabase
-    .from('ledger_entries') 
-    .select('*')
-    .order('created_at', { ascending: false })
-]);
+      .from('ledger_entries') 
+      .select('*')
+      .order('created_at', { ascending: false })
+  ]);
 
   const atcCodes = atcResponse.data || [];
-  const companies = companiesResponse.data || [];
+  const allFppRegistrations = permitsResponse.data || [];
   const registrationHistory = ledgerResponse.data || [];
 
-  // Error handling for transparency in the regulatory workflow
   if (atcResponse.error) console.error("ATC Fetch Error:", atcResponse.error);
-  if (companiesResponse.error) console.error("Permits Fetch Error:", companiesResponse.error.message);
+  if (permitsResponse.error) console.error("Permits Fetch Error:", permitsResponse.error.message);
   if (ledgerResponse.error) console.error("Ledger Fetch Error:", ledgerResponse.error);
 
   const tabConfig = {
     IMPORT: {
+      label: 'Import',
       icon: <Ship size={18} />,
       color: 'text-emerald-600',
       border: 'border-emerald-600',
       bg: 'bg-emerald-50'
     },
     DESTRUCTION: {
+      label: 'Destruction',
       icon: <Flame size={18} />,
       color: 'text-rose-600',
       border: 'border-rose-600',
       bg: 'bg-rose-50'
     },
     CONSUMPTION: {
+      label: 'Consumption',
       icon: <Stethoscope size={18} />,
       color: 'text-amber-600',
       border: 'border-amber-600',
       bg: 'bg-amber-50'
+    },
+    REGISTRY: {
+      label: 'FPP Registry',
+      icon: <FileSearch size={18} />,
+      color: 'text-blue-600',
+      border: 'border-blue-600',
+      bg: 'bg-blue-50'
     }
   };
 
@@ -86,9 +96,9 @@ export default async function LedgerPage({
           </div>
           
           <div className="flex flex-col items-end gap-3">
-            {/* Added atcCodes prop to enable searchable substance dropdown */}
+            {/* The main 'Enroll' button remains here */}
             <CertificateEnrollment 
-              companies={companies} 
+              companies={allFppRegistrations} 
               atcCodes={atcCodes} 
             />
             
@@ -101,7 +111,7 @@ export default async function LedgerPage({
         
         <div className="grid grid-cols-1 gap-8">
           
-          {/* Section 1: Data Entry Form */}
+          {/* Section 1: Dynamic Work Area */}
           <section className="space-y-6">
             <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-xl w-fit">
               {Object.entries(tabConfig).map(([t, config]) => {
@@ -117,7 +127,7 @@ export default async function LedgerPage({
                     }`}
                   >
                     {config.icon}
-                    {t}
+                    {config.label}
                   </a>
                 );
               })}
@@ -134,9 +144,11 @@ export default async function LedgerPage({
                         </div>
                         <div>
                             <h2 className="text-xl font-black text-slate-800 leading-tight">
-                                New {activeType} Entry
+                                {activeType === 'REGISTRY' ? 'FPP Master Data' : `New ${activeType} Entry`}
                             </h2>
-                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Formal Log Submission</p>
+                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                              {activeType === 'REGISTRY' ? 'Authorized Product Listing' : 'Formal Log Submission'}
+                            </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-1 text-slate-300">
@@ -144,28 +156,39 @@ export default async function LedgerPage({
                     </div>
                 </div>
 
-                <LedgerForm
-                  type={activeType}
-                  atcCodes={atcCodes}
-                  companies={companies}
-                />
+                {/* UPDATED: We pass the master data to the registry so it can feed the Edit modal */}
+                {activeType === 'REGISTRY' ? (
+                  <FPPEnrolledRegistry 
+                    data={allFppRegistrations} 
+                    atcCodes={atcCodes} 
+                    companies={allFppRegistrations} 
+                  />
+                ) : (
+                  <LedgerForm
+                    type={activeType}
+                    atcCodes={atcCodes}
+                    companies={allFppRegistrations}
+                  />
+                )}
               </div>
             </div>
           </section>
 
-          {/* Section 2: Management Dashboard (History) */}
-          <section className="space-y-4 pt-10">
-            <div className="flex items-center gap-2 border-b-2 border-slate-200 pb-2">
-              <History className="text-slate-400" size={20} />
-              <h2 className="text-lg font-black text-slate-700 uppercase tracking-tight">Registry Management</h2>
-            </div>
-            
-            <RegistrationDashboard 
-              initialData={registrationHistory} 
-              atcCodes={atcCodes}
-              companies={companies}
-            />
-          </section>
+          {/* Section 2: Management Dashboard */}
+          {activeType !== 'REGISTRY' && (
+            <section className="space-y-4 pt-10">
+              <div className="flex items-center gap-2 border-b-2 border-slate-200 pb-2">
+                <History className="text-slate-400" size={20} />
+                <h2 className="text-lg font-black text-slate-700 uppercase tracking-tight">Recent Activity Log</h2>
+              </div>
+              
+              <RegistrationDashboard 
+                initialData={registrationHistory} 
+                atcCodes={atcCodes}
+                companies={allFppRegistrations}
+              />
+            </section>
+          )}
 
         </div>
 

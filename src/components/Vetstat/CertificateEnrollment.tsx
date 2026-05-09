@@ -1,11 +1,11 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, ShieldCheck, X, PackageSearch, 
-  Search, Building2, Microscope, AlertCircle 
+  Search, Building2, Microscope, AlertCircle, Edit3 
 } from 'lucide-react';
-import { enrollFPPHeader } from '@/lib/actions/Vetstat/Registration/registrationAction'; 
+import { enrollFPPHeader, updateFPPRegistration } from '@/lib/actions/Vetstat/Registration/registrationAction'; 
 
 interface Company { 
   id: string; 
@@ -21,15 +21,19 @@ interface ATCCode {
 
 export default function CertificateEnrollment({ 
   companies = [], 
-  atcCodes = [] 
+  atcCodes = [],
+  editData = null, // Prop for edit mode
+  onClose // Callback to clear state in parent
 }: { 
   companies: Company[], 
-  atcCodes: ATCCode[] 
+  atcCodes: ATCCode[],
+  editData?: any | null,
+  onClose?: () => void
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  // If editData exists, we initialize the modal as open
+  const [isOpen, setIsOpen] = useState(!!editData);
   const [isPending, setIsPending] = useState(false);
   
-  // Search and Selection States
   const [searchTerm, setSearchTerm] = useState('');
   const [substanceSearch, setSubstanceSearch] = useState('');
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -37,11 +41,19 @@ export default function CertificateEnrollment({
   
   const router = useRouter();
 
-  // Search logic for ATC Codes (Substances)
+  // Sync state when entering edit mode
+  useEffect(() => {
+    if (editData) {
+      setIsOpen(true);
+      setSearchTerm(editData.company_name || '');
+      setSelectedSubstance(atcCodes.find(a => a.substance === editData.active_substance) || null);
+      if (!selectedSubstance) setSubstanceSearch(editData.active_substance || '');
+    }
+  }, [editData, atcCodes]);
+
   const filteredSubstances = useMemo(() => {
     if (!substanceSearch || selectedSubstance) return [];
     const search = substanceSearch.toLowerCase();
-    
     return atcCodes.filter(a => {
       const name = a?.substance?.toLowerCase() || '';
       const vCode = a?.vet_atc?.toLowerCase() || '';
@@ -50,38 +62,40 @@ export default function CertificateEnrollment({
     }).slice(0, 8);
   }, [substanceSearch, atcCodes, selectedSubstance]);
 
-  // Search logic for Companies
   const filteredCompanies = useMemo(() => {
     if (!searchTerm || selectedCompany) return [];
     const search = searchTerm.toLowerCase();
-
     return companies.filter(c => 
       (c?.company_name?.toLowerCase() || '').includes(search)
     ).slice(0, 5);
   }, [searchTerm, companies, selectedCompany]);
 
+  const handleClose = () => {
+    setIsOpen(false);
+    setSearchTerm('');
+    setSubstanceSearch('');
+    setSelectedCompany(null);
+    setSelectedSubstance(null);
+    if (onClose) onClose();
+  };
+
   const handleAction = async (formData: FormData) => {
     setIsPending(true);
     
-    // Logic: If a company was clicked from the list, use that name. 
-    // Otherwise, use the typed searchTerm (New Company).
     const mahName = selectedCompany ? selectedCompany.company_name : searchTerm;
-    
     formData.set('company_name', mahName);
     formData.set('active_substance', selectedSubstance ? selectedSubstance.substance : substanceSearch); 
     
-    // Pass the ATC ID if selected for backend precision
     if (selectedSubstance) formData.set('atc_id', selectedSubstance.id);
 
     try {
-      const result = await enrollFPPHeader(formData);
+      const result = editData 
+        ? await updateFPPRegistration(editData.id, formData)
+        : await enrollFPPHeader(formData);
+
       if (result.success) {
         router.refresh();
-        setIsOpen(false);
-        setSearchTerm('');
-        setSubstanceSearch('');
-        setSelectedCompany(null);
-        setSelectedSubstance(null);
+        handleClose();
       } else {
         alert(`Regulatory Error: ${result.message}`);
       }
@@ -94,23 +108,29 @@ export default function CertificateEnrollment({
 
   return (
     <>
-      <button 
-        onClick={() => setIsOpen(true)} 
-        className="flex items-center gap-2 bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-800 transition shadow-lg shadow-emerald-900/20"
-      >
-        <Plus size={18} /> Enroll FPP Certificate
-      </button>
+      {!editData && (
+        <button 
+          onClick={() => setIsOpen(true)} 
+          className="flex items-center gap-2 bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-800 transition shadow-lg shadow-emerald-900/20"
+        >
+          <Plus size={18} /> Enroll FPP Certificate
+        </button>
+      )}
 
       {isOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 text-slate-900">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 text-slate-900">
           <form action={handleAction} className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 flex flex-col">
             
             <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
               <div>
-                <h2 className="text-xl font-black text-slate-800 tracking-tight">FPP Registration</h2>
-                <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Master Data Enrollment [VMD]</p>
+                <h2 className="text-xl font-black text-slate-800 tracking-tight">
+                  {editData ? 'Edit Registration' : 'FPP Registration'}
+                </h2>
+                <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">
+                  {editData ? 'Updating Master Record' : 'Master Data Enrollment [VMD]'}
+                </p>
               </div>
-              <button type="button" onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-slate-600 transition">
+              <button type="button" onClick={handleClose} className="text-slate-400 hover:text-slate-600 transition">
                 <X size={20} />
               </button>
             </div>
@@ -119,15 +139,26 @@ export default function CertificateEnrollment({
               <div className="grid grid-cols-2 gap-3">
                  <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Reg Number</label>
-                    <input name="nafdac_reg_no" placeholder="A4-XXXX" className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium" required />
+                    <input 
+                      name="nafdac_reg_no" 
+                      defaultValue={editData?.permit_number}
+                      placeholder="A4-XXXX" 
+                      className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium" 
+                      required 
+                    />
                  </div>
                  <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Trade Name</label>
-                    <input name="product_name" placeholder="FPP Name" className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium" required />
+                    <input 
+                      name="product_name" 
+                      defaultValue={editData?.product_name}
+                      placeholder="FPP Name" 
+                      className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium" 
+                      required 
+                    />
                  </div>
               </div>
 
-              {/* ACTIVE SUBSTANCE SEARCH SECTION */}
               <div className="relative">
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Active Substance (API)</label>
                 <div className="relative">
@@ -179,10 +210,15 @@ export default function CertificateEnrollment({
                 <label className="text-[10px] font-bold text-emerald-700 uppercase mb-1 flex items-center gap-1">
                   <PackageSearch size={12} /> Shipping Pack Size
                 </label>
-                <input name="shipping_pack_size" placeholder="e.g., 40x2x10" className="w-full border border-emerald-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm font-medium" required />
+                <input 
+                  name="shipping_pack_size" 
+                  defaultValue={editData?.shipping_pack_size}
+                  placeholder="e.g., 40x2x10" 
+                  className="w-full border border-emerald-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm font-medium" 
+                  required 
+                />
               </div>
 
-              {/* MAH SEARCH / INPUT SECTION */}
               <div className="relative pb-10"> 
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Marketing Authorization Holder (MAH)</label>
                 <div className="relative">
@@ -212,7 +248,6 @@ export default function CertificateEnrollment({
                   )}
                 </div>
 
-                {/* MAH Dropdown Results */}
                 {filteredCompanies.length > 0 && (
                   <div className="absolute mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-2xl z-[100] overflow-hidden">
                     {filteredCompanies.map((company) => (
@@ -229,7 +264,6 @@ export default function CertificateEnrollment({
                   </div>
                 )}
                 
-                {/* Visual indicator for New Company input */}
                 {searchTerm && !selectedCompany && filteredCompanies.length === 0 && (
                   <div className="mt-2 flex items-center gap-2 text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-100">
                     <AlertCircle size={12} />
@@ -240,9 +274,14 @@ export default function CertificateEnrollment({
             </div>
             
             <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3 shrink-0">
-              <button type="button" onClick={() => setIsOpen(false)} className="flex-1 bg-white border border-slate-200 p-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition text-sm">Cancel</button>
-              <button type="submit" disabled={isPending} className="flex-1 bg-emerald-600 text-white p-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 transition disabled:opacity-50 text-sm shadow-lg shadow-emerald-900/10">
-                {isPending ? 'Enrolling...' : <><ShieldCheck size={18}/> Authorize Enrollment</>}
+              <button type="button" onClick={handleClose} className="flex-1 bg-white border border-slate-200 p-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition text-sm">Cancel</button>
+              <button type="submit" disabled={isPending} className={`flex-1 ${editData ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'} text-white p-3 rounded-xl font-bold flex items-center justify-center gap-2 transition disabled:opacity-50 text-sm shadow-lg shadow-emerald-900/10`}>
+                {isPending ? 'Processing...' : (
+                  <>
+                    {editData ? <Edit3 size={18}/> : <ShieldCheck size={18}/>} 
+                    {editData ? 'Authorize Update' : 'Authorize Enrollment'}
+                  </>
+                )}
               </button>
             </div>
           </form>
