@@ -73,27 +73,44 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
   const [displayPackSize, setDisplayPackSize] = useState(""); 
   const [numericPackSize, setNumericPackSize] = useState(0); 
   
-  const [state, action, isPending] = useActionState(submitLedgerEntry, { 
-    success: false, 
-    message: '' 
-  });
+  // 1. Update the initial state in useActionState
+const [state, action, isPending] = useActionState(submitLedgerEntry, { 
+  success: false, 
+  message: '',
+  timestamp: 0 // Initialize timestamp
+});
 
-  // Success Reset logic
-  useEffect(() => {
-    if (state.success) {
-      setSelectedCompanyId(""); setSelectedProductId(""); setSelectedSubstance(null);
-      setOriginWarehouse(""); setOriginState(""); setDestinationState(""); setTargetSpecies("");
-      setStrength(0); setShippingPacks(0); setDisplayPackSize(""); setNumericPackSize(0);
-      formRef.current?.reset();
-    }
-  }, [state.success]);
+// 2. Update the Success Reset logic
+useEffect(() => {
+  if (state.success && state.timestamp !== 0) {
+    // Reset all your states
+    setSelectedCompanyId(""); 
+    setSelectedProductId(""); 
+    setSelectedSubstance(null);
+    setOriginWarehouse(""); 
+    setOriginState(""); 
+    setDestinationState(""); 
+    setTargetSpecies("");
+    setStrength(0); 
+    setShippingPacks(0); 
+    setDisplayPackSize(""); 
+    setNumericPackSize(0);
+    
+    // Reset the native form elements
+    formRef.current?.reset();
+    
+    console.log("Form successfully cleared at:", state.timestamp);
+  }
+}, [state.success, state.timestamp]); // Watch the timestamp!
 
   // Substance Detection logic
   useEffect(() => {
     const product = companies.find(p => p.id === selectedProductId);
     if (product) {
+      // FIX: Ensure we capture the 'id' from the atcCodes match
       const match = atcCodes.find(a => a.substance?.toLowerCase() === product.active_substance?.toLowerCase());
-      setSelectedSubstance(match || { substance: product.active_substance, ddd_mg: 0 });
+      setSelectedSubstance(match || { id: "", substance: product.active_substance, ddd_mg: 0 });
+      
       setDisplayPackSize(product.shipping_pack_size || "");
       const mult = (product.shipping_pack_size || "").split(/[xX*]/).reduce((a, c) => a * (parseInt(c.replace(/\D/g,'')) || 1), 1);
       setNumericPackSize(mult || 0);
@@ -121,6 +138,9 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
       <input type="hidden" name="geopolitical_zone" value={derivedZone} />
       <input type="hidden" name="target_species" value={targetSpecies} />
       <input type="hidden" name="mass_unit" value={unit} />
+      
+      {/* BRIDGE FIX: Hidden input to pass the actual ATC ID to the Server Action */}
+      <input type="hidden" name="atc_id" value={selectedSubstance?.id || ""} />
 
       {/* STEP 1: CORPORATE SELECTION */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -144,7 +164,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
         </div>
       </div>
 
-      {/* STEP 2: GRANULAR LOGISTICS (Pinpoint Warehouse Tracking) */}
+      {/* STEP 2: GRANULAR LOGISTICS */}
       {type === 'CONSUMPTION' && selectedProductId && (
         <div className="p-6 bg-slate-50 border-2 border-slate-200 rounded-3xl space-y-5 animate-in slide-in-from-top-4">
           <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
@@ -199,7 +219,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-black text-slate-500 uppercase">Packs Dispatched</label>
-              <input type="number" value={shippingPacks || ""} onChange={(e) => setShippingPacks(Number(e.target.value))} className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
+              <input type="number" name="pack_quantity" value={shippingPacks || ""} onChange={(e) => setShippingPacks(Number(e.target.value))} className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-black text-slate-500 uppercase">Pack Weight/Count</label>
@@ -207,7 +227,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-black text-slate-500 uppercase">Strength ({unit})</label>
-              <input type="number" step="any" value={strength || ""} onChange={(e) => setStrength(parseFloat(e.target.value))} className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
+              <input type="number" step="any" name="strength" value={strength || ""} onChange={(e) => setStrength(parseFloat(e.target.value))} className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
             </div>
           </div>
 

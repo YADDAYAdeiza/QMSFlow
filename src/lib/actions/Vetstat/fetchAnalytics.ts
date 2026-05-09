@@ -3,35 +3,30 @@
 
 import { createClient } from '@/utils/supabase/server';
 
+// lib/actions/Vetstat/fetchAnalytics.ts
 export async function getAMSRegionalAnalytics() {
   const supabase = await createClient();
+  const { data, error } = await supabase.rpc('get_ams_stats');
 
-  // Fetching the pre-aggregated view
-  const { data, error } = await supabase
-    .from('ams_regional_summary')
-    .select('*');
-
-  if (error) {
-    console.error("Analytics Fetch Error:", error);
-    return [];
+  if (error || !data) {
+    console.error("RPC Error:", error);
+    return { zones: [], totalDDD: 0, poultryTotal: 0 };
   }
 
-  // Transform for the Map (Zone Totals)
-  const zoneData = data.reduce((acc: any, curr) => {
-    const existing = acc.find((item: any) => item.zone === curr.geopolitical_zone);
-    if (existing) {
-      existing.value += curr.total_ddd;
-    } else {
-      acc.push({ zone: curr.geopolitical_zone, value: curr.total_ddd });
-    }
-    return acc;
-  }, []);
+  // Debug: Check this in your terminal to see if poultry_ddd is coming through
+  console.log("RPC Data Raw:", data);
 
-  return {
-    raw: data,
-    zones: zoneData,
-    poultryTotal: data
-      .filter(d => d.target_species === 'Poultry')
-      .reduce((sum, d) => sum + d.total_ddd, 0)
-  };
+  const zones = data.map((row: any) => ({
+    zone: row.geopolitical_zone,
+    value: parseFloat(row.total_ddd) || 0
+  }));
+
+  const totalDDD = zones.reduce((sum, z) => sum + z.value, 0);
+
+  // This matches the column name in our SQL function above
+  const poultryTotal = data.reduce((sum: number, row: any) => 
+    sum + (parseFloat(row.poultry_ddd) || 0), 0
+  );
+
+  return { zones, totalDDD, poultryTotal };
 }
