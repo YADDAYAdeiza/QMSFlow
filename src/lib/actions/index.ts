@@ -23,7 +23,7 @@ export async function submitLODApplication(
   rawData: any, 
   userId: string, 
   userName: string, 
-  userRole: string
+  userRole: string // Ensure this passes "Divisional Deputy Director" per QMS
 ) {
   const validated = lodFormSchema.safeParse(rawData);
   if (!validated.success) return { success: false, error: "Validation Failed" };
@@ -45,9 +45,10 @@ export async function submitLODApplication(
       const isUpdate = !!existingApp;
       const userDivision = submittingUser?.division || "LOD";
       
-      const isActuallyRound2 = isUpdate && (existingApp.status === 'TECHNICAL_PASSED' || existingApp.isComplianceReview === true);
+      // Determine if this is a Pass 2 (Compliance Review) update
+      const isActuallyRound2 = isUpdate && (existingApp.status === 'TECHNICAL_PASSED' || existingApp.details?.isComplianceReview === true);
 
-      // 2. Upsert Companies
+      // 2. Upsert Companies (Master Data Protection)
       const upsertCompany = async (name: string, address: string, category: 'LOCAL' | 'FOREIGN') => {
         const cleanName = normalize(name);
         const existing = await tx.query.companies.findFirst({
@@ -97,7 +98,7 @@ export async function submitLODApplication(
         }
       }
 
-      // 4. Update Details & Comments
+      // 4. Comment & Detail Threading
       const existingDetails = (existingApp?.details as any) || {};
       const newComment = {
         from: userName,
@@ -114,9 +115,13 @@ export async function submitLODApplication(
         isComplianceReview: isActuallyRound2 
       };
 
-      let appId = existingApp?.id;
+      let appId: number;
 
-      if (isUpdate) {
+      // 5. Unified Application & Timeline Logic
+      if (isUpdate && existingApp) {
+        appId = existingApp.id;
+        
+        // Update application
         await tx.update(applications)
           .set({
             status: isActuallyRound2 ? 'PENDING_DIRECTOR_FINAL' : 'PENDING_DIRECTOR',
@@ -125,19 +130,15 @@ export async function submitLODApplication(
             type: data.type,
             updatedAt: sql`now()`
           })
-          .where(eq(applications.id, existingApp.id));
+          .where(eq(applications.id, appId));
 
+        // Close ANY open timeline record for this app
         await tx.update(qmsTimelines)
           .set({ endTime: sql`now()` })
-          .where(and(eq(qmsTimelines.applicationId, existingApp.id), isNull(qmsTimelines.endTime)));
+          .where(and(eq(qmsTimelines.applicationId, appId), isNull(qmsTimelines.endTime)));
 
-        await tx.insert(qmsTimelines).values({
-          applicationId: existingApp.id,
-          division: userDivision as any, 
-          point: 'Director Review',
-          startTime: sql`now()`
-        });
       } else {
+        // Create Fresh Application
         const [newApp] = await tx.insert(applications).values({
           applicationNumber: normalizedAppNumber,
           type: data.type,
@@ -150,7 +151,16 @@ export async function submitLODApplication(
         appId = newApp.id;
       }
 
-      // 5. Risk Assessment Upsert
+      // SHARED QMS REQUIREMENT: Start the clock for Director Review
+      await tx.insert(qmsTimelines).values({
+        applicationId: appId,
+        staffId: userId,
+        division: userDivision as any, 
+        point: 'Director Review',
+        startTime: sql`now()`
+      });
+
+      // 6. Risk Assessment Logic (Always keep in sync with current Dossier)
       const score = maxComp * maxCrit;
       const level = score <= 2 ? "Low" : score <= 4 ? "Medium" : "High";
 
@@ -180,5 +190,25 @@ export async function submitLODApplication(
   } catch (e: any) {
     console.error("LOD Submission Error:", e);
     return { success: false, error: e.message };
+  }
+}
+
+import { desc } from "drizzle-orm";
+
+export async function getApplications() {
+  try {
+    const data = await db.query.applications.findMany({
+      columns: {
+        id: true,
+        applicationNumber: true,
+      },
+      orderBy: [desc(applications.id)],
+      limit: 50, // Grab enough to give the officer a good history
+    });
+    
+    return data;
+  } catch (error) {
+    console.error("Failed to fetch applications:", error);
+    return [];
   }
 }
