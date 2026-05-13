@@ -28,7 +28,11 @@ const RISK_CATEGORIES = [
   { name: "STERILE INJECTABLES", comp: 3, crit: 2 },
   { name: "POWDER BETA-LACTAMS", comp: 2, crit: 3 },
   { name: "TABLETS (GENERAL)", comp: 1, crit: 2 },
-  { name: "MULTIVITAMINS", comp: 1, crit: 1 },
+  { name: "AGROCHEMICALS", comp: 1, crit: 1 },
+  { name: "INSECTICIDES", comp: 1, crit: 1 },
+  { name: "PET FOOD", comp: 1, crit: 1 },
+  { name: "POULTRY FEED", comp: 1, crit: 1 },
+  { name: "FISH FEED", comp: 1, crit: 1 },
 ];
 
 const getRiskLevel = (score: number) => {
@@ -298,7 +302,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             )}
             <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
             <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
-            <FileUpload label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true })} />
+            <FileUpload label={watchType === "Facility Verification" ? "Documents (Invitation, etc)" : "Inspection Report (PDF)"} onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true })} />
           </div>
         </div>
 
