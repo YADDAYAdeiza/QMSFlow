@@ -4,7 +4,17 @@ import DateRangePicker from "@/components/Vetstat/DateRangePicker";
 import SectorToggle from "@/components/Vetstat/SectorToggle";
 import RiskToggle from "@/components/Vetstat/RiskToggle";
 import DrillDownSidebar from "@/components/Vetstat/DrillDownSidebar";
-import { Activity, Bird, ShieldAlert, Calendar, Database, TrendingUp, TrendingDown, Zap } from 'lucide-react';
+import ExportButton from "@/components/Vetstat/ExportButton"; // New Import
+import { 
+  Activity, 
+  Bird, 
+  ShieldAlert, 
+  Calendar, 
+  Database, 
+  TrendingUp, 
+  TrendingDown, 
+  Zap 
+} from 'lucide-react';
 
 export default async function AMSDashboardPage({
   searchParams,
@@ -53,13 +63,14 @@ export default async function AMSDashboardPage({
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
+              <ExportButton /> {/* Integrated Button */}
               <RiskToggle />
               <SectorToggle />
               <DateRangePicker />
             </div>
           </div>
 
-          {/* Quick Metrics Bar with Trend Analysis */}
+          {/* Quick Metrics Bar */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
                <div>
