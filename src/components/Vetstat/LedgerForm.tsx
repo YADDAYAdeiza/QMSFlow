@@ -4,17 +4,9 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useActionState } from 'react';
 import { submitLedgerEntry } from "@/lib/actions/Vetstat/importAction";
 import { 
-  Package, 
-  Beaker, 
-  Activity, 
-  AlertTriangle, 
-  ChevronRight, 
-  Building2, 
-  Tag, 
-  MapPin,
-  Truck,
-  Bird,
-  Warehouse
+  Package, Beaker, Activity, AlertTriangle, 
+  ChevronRight, Building2, Tag, MapPin,
+  Truck, Bird, Warehouse
 } from 'lucide-react';
 
 interface LedgerFormProps {
@@ -58,62 +50,56 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
   const [destinationState, setDestinationState] = useState<string>(initialData?.destination_state || "");
   const [targetSpecies, setTargetSpecies] = useState<string>(initialData?.target_species || "");
 
-  // Auto-derived Zone for the Destination
-  const derivedZone = useMemo(() => {
-    for (const [zone, states] of Object.entries(GEO_ZONES)) {
-      if (states.includes(destinationState)) return zone;
-    }
-    return "";
-  }, [destinationState]);
-
   // Calculation States
   const [unit, setUnit] = useState<'mg' | 'g' | 'IU'>(initialData?.metadata?.original_unit || 'mg');
   const [strength, setStrength] = useState<number>(initialData?.metadata?.strength_at_log || 0);
   const [shippingPacks, setShippingPacks] = useState(initialData?.pack_quantity || 0);
   const [displayPackSize, setDisplayPackSize] = useState(""); 
   const [numericPackSize, setNumericPackSize] = useState(0); 
-  
-  // 1. Update the initial state in useActionState
-const [state, action, isPending] = useActionState(submitLedgerEntry, { 
-  success: false, 
-  message: '',
-  timestamp: 0 // Initialize timestamp
-});
 
-// 2. Update the Success Reset logic
-useEffect(() => {
-  if (state.success && state.timestamp !== 0) {
-    // Reset all your states
-    setSelectedCompanyId(""); 
-    setSelectedProductId(""); 
-    setSelectedSubstance(null);
-    setOriginWarehouse(""); 
-    setOriginState(""); 
-    setDestinationState(""); 
-    setTargetSpecies("");
-    setStrength(0); 
-    setShippingPacks(0); 
-    setDisplayPackSize(""); 
-    setNumericPackSize(0);
-    
-    // Reset the native form elements
-    formRef.current?.reset();
-    
-    console.log("Form successfully cleared at:", state.timestamp);
-  }
-}, [state.success, state.timestamp]); // Watch the timestamp!
+  const [state, action, isPending] = useActionState(submitLedgerEntry, { 
+    success: false, 
+    message: '',
+    timestamp: 0 
+  });
 
-  // Substance Detection logic
+  // Success Reset logic
+  useEffect(() => {
+    if (state.success && state.timestamp !== 0) {
+      setSelectedCompanyId(""); 
+      setSelectedProductId(""); 
+      setSelectedSubstance(null);
+      setOriginWarehouse(""); 
+      setOriginState(""); 
+      setDestinationState(""); 
+      setTargetSpecies("");
+      setStrength(0); 
+      setShippingPacks(0); 
+      setDisplayPackSize(""); 
+      setNumericPackSize(0);
+      formRef.current?.reset();
+    }
+  }, [state.success, state.timestamp]);
+
+  // Substance Detection & Master Data Strength Prefill
   useEffect(() => {
     const product = companies.find(p => p.id === selectedProductId);
     if (product) {
-      // FIX: Ensure we capture the 'id' from the atcCodes match
+      // 1. Link to ATC Master Data
       const match = atcCodes.find(a => a.substance?.toLowerCase() === product.active_substance?.toLowerCase());
       setSelectedSubstance(match || { id: "", substance: product.active_substance, ddd_mg: 0 });
       
+      // 2. Prefill Pack Size Multiplier
       setDisplayPackSize(product.shipping_pack_size || "");
       const mult = (product.shipping_pack_size || "").split(/[xX*]/).reduce((a, c) => a * (parseInt(c.replace(/\D/g,'')) || 1), 1);
       setNumericPackSize(mult || 0);
+
+      // 3. PREFILL STRENGTH: Pull from Permits Master Data
+      if (product.strength) {
+        console.log('This is strength: ', product.strength)
+        const numericStrength = parseFloat(product.strength.replace(/[^\d.]/g, ''));
+        setStrength(numericStrength || 0);
+      }
     }
   }, [selectedProductId, companies, atcCodes]);
 
@@ -128,9 +114,16 @@ useEffect(() => {
     return { mass, ddd };
   }, [selectedSubstance, strength, totalUnits, unit]);
 
+  const derivedZone = useMemo(() => {
+    for (const [zone, states] of Object.entries(GEO_ZONES)) {
+      if (states.includes(destinationState)) return zone;
+    }
+    return "";
+  }, [destinationState]);
+
   return (
     <form ref={formRef} action={action} className="space-y-6">
-      {/* Hidden Fields for DB Mapping */}
+      {/* Hidden Fields for Server Action mapping */}
       <input type="hidden" name="entry_type" value={type} />
       <input type="hidden" name="origin_warehouse" value={originWarehouse} />
       <input type="hidden" name="origin_state" value={originState} />
@@ -139,7 +132,7 @@ useEffect(() => {
       <input type="hidden" name="target_species" value={targetSpecies} />
       <input type="hidden" name="mass_unit" value={unit} />
       
-      {/* BRIDGE FIX: Hidden input to pass the actual ATC ID to the Server Action */}
+      {/* Critical: Pass the ATC ID so the Server Action can fetch ddd_mg */}
       <input type="hidden" name="atc_id" value={selectedSubstance?.id || ""} />
 
       {/* STEP 1: CORPORATE SELECTION */}
@@ -226,8 +219,18 @@ useEffect(() => {
               <input type="text" readOnly value={displayPackSize} className="bg-slate-800/50 p-3 rounded-xl font-bold text-slate-500 cursor-not-allowed" />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Strength ({unit})</label>
-              <input type="number" step="any" name="strength" value={strength || ""} onChange={(e) => setStrength(parseFloat(e.target.value))} className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
+              <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                Strength ({unit}) <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded font-bold">VMD MASTER DATA</span>
+              </label>
+              <input 
+                type="number" 
+                step="any" 
+                name="strength" 
+                value={strength || ""} 
+                onChange={(e) => setStrength(parseFloat(e.target.value))} 
+                className="bg-slate-800 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500 border-none" 
+                required 
+              />
             </div>
           </div>
 

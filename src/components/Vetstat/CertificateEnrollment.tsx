@@ -3,9 +3,24 @@ import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, ShieldCheck, X, PackageSearch, 
-  Search, Building2, Microscope, AlertCircle, Edit3 
+  Search, Building2, Microscope, AlertCircle, Edit3,
+  Globe, Activity, Zap, Check, ChevronRight
 } from 'lucide-react';
 import { enrollFPPHeader, updateFPPRegistration } from '@/lib/actions/Vetstat/Registration/registrationAction'; 
+
+// Master Data Lists
+const COUNTRIES = [
+  "Nigeria", "India", "China", "United Kingdom", "USA", 
+  "Germany", "Egypt", "South Africa", "Vietnam", "Pakistan", "France", "Malaysia",
+  "Israel", "Spain"
+];
+
+// Grouped for UI organization, but we save the specific strings
+const ROUTE_GROUPS = {
+  "Oral": ["Oral"],
+  "Parenteral": ["Intramuscular (IM)", "Intravenous (IV)", "Subcutaneous"],
+  "Other": ["Topical", "Intramammary", "Intrauterine"]
+};
 
 interface Company { 
   id: string; 
@@ -22,15 +37,14 @@ interface ATCCode {
 export default function CertificateEnrollment({ 
   companies = [], 
   atcCodes = [],
-  editData = null, // Prop for edit mode
-  onClose // Callback to clear state in parent
+  editData = null, 
+  onClose 
 }: { 
   companies: Company[], 
   atcCodes: ATCCode[],
   editData?: any | null,
   onClose?: () => void
 }) {
-  // If editData exists, we initialize the modal as open
   const [isOpen, setIsOpen] = useState(!!editData);
   const [isPending, setIsPending] = useState(false);
   
@@ -38,6 +52,9 @@ export default function CertificateEnrollment({
   const [substanceSearch, setSubstanceSearch] = useState('');
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [selectedSubstance, setSelectedSubstance] = useState<ATCCode | null>(null);
+  
+  // State for multi-select routes
+  const [selectedRoutes, setSelectedRoutes] = useState<string[]>([]);
   
   const router = useRouter();
 
@@ -48,8 +65,21 @@ export default function CertificateEnrollment({
       setSearchTerm(editData.company_name || '');
       setSelectedSubstance(atcCodes.find(a => a.substance === editData.active_substance) || null);
       if (!selectedSubstance) setSubstanceSearch(editData.active_substance || '');
+      
+      // Parse existing routes if editing
+      if (editData.route_of_administration) {
+        setSelectedRoutes(editData.route_of_administration.split(', '));
+      }
     }
   }, [editData, atcCodes]);
+
+  const toggleRoute = (route: string) => {
+    setSelectedRoutes(prev => 
+      prev.includes(route) 
+        ? prev.filter(r => r !== route) 
+        : [...prev, route]
+    );
+  };
 
   const filteredSubstances = useMemo(() => {
     if (!substanceSearch || selectedSubstance) return [];
@@ -76,6 +106,7 @@ export default function CertificateEnrollment({
     setSubstanceSearch('');
     setSelectedCompany(null);
     setSelectedSubstance(null);
+    setSelectedRoutes([]);
     if (onClose) onClose();
   };
 
@@ -84,7 +115,10 @@ export default function CertificateEnrollment({
     
     const mahName = selectedCompany ? selectedCompany.company_name : searchTerm;
     formData.set('company_name', mahName);
-    formData.set('active_substance', selectedSubstance ? selectedSubstance.substance : substanceSearch); 
+    formData.set('active_substance', selectedSubstance ? selectedSubstance.substance : (substanceSearch || '')); 
+    
+    // Join specific routes into a comma-separated string for the database
+    formData.set('route_of_administration', selectedRoutes.join(', '));
     
     if (selectedSubstance) formData.set('atc_id', selectedSubstance.id);
 
@@ -135,7 +169,8 @@ export default function CertificateEnrollment({
               </button>
             </div>
             
-            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+            <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto custom-scrollbar">
+              {/* Row 1: Reg No & Trade Name */}
               <div className="grid grid-cols-2 gap-3">
                  <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Reg Number</label>
@@ -159,31 +194,32 @@ export default function CertificateEnrollment({
                  </div>
               </div>
 
+              {/* Row 2: API Selection */}
               <div className="relative">
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Active Substance (API)</label>
                 <div className="relative">
-                   <Microscope className="absolute left-3 top-3 text-slate-400" size={14} />
-                   <input 
-                    type="text" 
-                    autoComplete="off"
-                    value={selectedSubstance ? selectedSubstance.substance : substanceSearch}
-                    onChange={(e) => {
-                        setSubstanceSearch(e.target.value);
-                        if (selectedSubstance) setSelectedSubstance(null);
-                    }}
-                    placeholder="Search API or ATC code..." 
-                    className={`w-full border p-3 pl-9 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition text-sm font-medium ${selectedSubstance ? 'bg-blue-50 border-blue-200 text-blue-800' : 'border-slate-200'}`}
-                    required 
-                   />
-                   {(selectedSubstance || substanceSearch) && (
-                    <button 
-                      type="button" 
-                      onClick={() => { setSelectedSubstance(null); setSubstanceSearch(''); }} 
-                      className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-rose-500"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
+                    <Microscope className="absolute left-3 top-3 text-slate-400" size={14} />
+                    <input 
+                     type="text" 
+                     autoComplete="off"
+                     value={selectedSubstance ? selectedSubstance.substance : (substanceSearch || '')}
+                     onChange={(e) => {
+                         setSubstanceSearch(e.target.value);
+                         if (selectedSubstance) setSelectedSubstance(null);
+                     }}
+                     placeholder="Search API or ATC code..." 
+                     className={`w-full border p-3 pl-9 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition text-sm font-medium ${selectedSubstance ? 'bg-blue-50 border-blue-200 text-blue-800' : 'border-slate-200'}`}
+                     required 
+                    />
+                    {(selectedSubstance || substanceSearch) && (
+                     <button 
+                       type="button" 
+                       onClick={() => { setSelectedSubstance(null); setSubstanceSearch(''); }} 
+                       className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-rose-500"
+                     >
+                       <X size={14} />
+                     </button>
+                   )}
                 </div>
                 
                 {filteredSubstances.length > 0 && (
@@ -206,20 +242,90 @@ export default function CertificateEnrollment({
                 )}
               </div>
 
-              <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100/50">
-                <label className="text-[10px] font-bold text-emerald-700 uppercase mb-1 flex items-center gap-1">
-                  <PackageSearch size={12} /> Shipping Pack Size
-                </label>
-                <input 
-                  name="shipping_pack_size" 
-                  defaultValue={editData?.shipping_pack_size}
-                  placeholder="e.g., 40x2x10" 
-                  className="w-full border border-emerald-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm font-medium" 
-                  required 
-                />
+              {/* Row 3: Strength & Route Groupings */}
+              <div className="space-y-3">
+                 <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block flex items-center gap-1">
+                      <Zap size={10} /> Strength
+                    </label>
+                    <input 
+                      name="strength" 
+                      defaultValue={editData?.strength}
+                      placeholder="e.g. 100mg/ml" 
+                      className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium" 
+                      required 
+                    />
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1">
+                      <Activity size={10} /> Route(s) of Administration
+                    </label>
+                    <div className="space-y-3">
+                      {Object.entries(ROUTE_GROUPS).map(([group, routes]) => (
+                        <div key={group} className="space-y-1">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter flex items-center gap-1">
+                            <ChevronRight size={8} /> {group}
+                          </span>
+                          <div className="grid grid-cols-2 gap-2">
+                            {routes.map((route) => (
+                              <button
+                                key={route}
+                                type="button"
+                                onClick={() => toggleRoute(route)}
+                                className={`flex items-center gap-2 p-2 rounded-lg border text-[11px] font-bold transition-all ${
+                                  selectedRoutes.includes(route) 
+                                  ? 'bg-emerald-50 border-emerald-500 text-emerald-700' 
+                                  : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                                }`}
+                              >
+                                <div className={`w-3 h-3 rounded border flex items-center justify-center transition-colors ${
+                                  selectedRoutes.includes(route) ? 'bg-emerald-500 border-emerald-500' : 'bg-white border-slate-300'
+                                }`}>
+                                  {selectedRoutes.includes(route) && <Check size={8} className="text-white" strokeWidth={4} />}
+                                </div>
+                                {route}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                 </div>
               </div>
 
-              <div className="relative pb-10"> 
+              {/* Row 4: Pack Size & Country Dropdown */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-emerald-50/30 rounded-xl border border-emerald-100/50">
+                  <label className="text-[10px] font-bold text-emerald-700 uppercase mb-1 flex items-center gap-1">
+                    <PackageSearch size={12} /> Pack Size
+                  </label>
+                  <input 
+                    name="shipping_pack_size" 
+                    defaultValue={editData?.shipping_pack_size}
+                    placeholder="40x2x10" 
+                    className="w-full border border-emerald-200 p-2 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm font-medium" 
+                    required 
+                  />
+                </div>
+                <div className="p-3 bg-blue-50/30 rounded-xl border border-blue-100/50">
+                  <label className="text-[10px] font-bold text-blue-700 uppercase mb-1 flex items-center gap-1">
+                    <Globe size={12} /> Origin
+                  </label>
+                  <select 
+                    name="country_of_origin" 
+                    defaultValue={editData?.country_of_origin || "Nigeria"}
+                    className="w-full border border-blue-200 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-sm font-medium cursor-pointer"
+                    required
+                  >
+                    {COUNTRIES.map(country => (
+                      <option key={country} value={country}>{country}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 5: MAH Selection */}
+              <div className="relative pb-4"> 
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Marketing Authorization Holder (MAH)</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
@@ -228,7 +334,7 @@ export default function CertificateEnrollment({
                   <input 
                     type="text"
                     autoComplete="off"
-                    value={selectedCompany ? selectedCompany.company_name : searchTerm}
+                    value={selectedCompany ? selectedCompany.company_name : (searchTerm || '')}
                     onChange={(e) => { 
                       setSearchTerm(e.target.value); 
                       if (selectedCompany) setSelectedCompany(null); 

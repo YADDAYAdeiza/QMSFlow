@@ -31,7 +31,6 @@ export default async function LedgerPage({
     supabase
       .from('permits')
       .select('*')
-      .eq('dir_type', 'VMD')
       .order('company_name', { ascending: true }),
     supabase
       .from('ledger_entries') 
@@ -46,6 +45,8 @@ export default async function LedgerPage({
   if (atcResponse.error) console.error("ATC Fetch Error:", atcResponse.error);
   if (permitsResponse.error) console.error("Permits Fetch Error:", permitsResponse.error.message);
   if (ledgerResponse.error) console.error("Ledger Fetch Error:", ledgerResponse.error);
+
+  console.log('This is permits response: ', permitsResponse);
 
   const tabConfig = {
     IMPORT: {
