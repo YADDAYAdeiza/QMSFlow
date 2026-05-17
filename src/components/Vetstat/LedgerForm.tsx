@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useActionState } from 'react';
@@ -6,7 +6,7 @@ import { submitLedgerEntry } from "@/lib/actions/Vetstat/importAction";
 import { 
   Package, Beaker, Activity, AlertTriangle, 
   ChevronRight, Building2, Tag, MapPin,
-  Truck, Bird, Warehouse
+  Truck, Bird, Warehouse, Layers
 } from 'lucide-react';
 
 interface LedgerFormProps {
@@ -14,6 +14,7 @@ interface LedgerFormProps {
   atcCodes: any[];
   companies: any[]; 
   initialData?: any; 
+  enrolledDepots?: any[]; // Reloaded network master nodes array parameter passes down cleanly
 }
 
 const GEO_ZONES: Record<string, string[]> = {
@@ -36,7 +37,7 @@ const SPECIES_CATEGORIES = [
   "Companion Animals"
 ];
 
-export default function LedgerForm({ type, atcCodes = [], companies = [], initialData }: LedgerFormProps) {
+export default function LedgerForm({ type, atcCodes = [], companies = [], enrolledDepots = [], initialData }: LedgerFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
 
   // Selection States
@@ -49,6 +50,11 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
   const [originState, setOriginState] = useState<string>(initialData?.origin_state || "");
   const [destinationState, setDestinationState] = useState<string>(initialData?.destination_state || "");
   const [targetSpecies, setTargetSpecies] = useState<string>(initialData?.target_species || "");
+  
+  // Dynamic Node Tracking Selection Parameter IDs
+  const [targetWarehouseId, setTargetWarehouseId] = useState<string>("");
+  const [isDepotDistribution, setIsDepotDistribution] = useState<boolean>(false);
+  const [targetDepotId, setTargetDepotId] = useState<string>("");
 
   // Calculation States
   const [unit, setUnit] = useState<'mg' | 'g' | 'IU'>(initialData?.metadata?.original_unit || 'mg');
@@ -56,6 +62,27 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
   const [shippingPacks, setShippingPacks] = useState(initialData?.pack_quantity || 0);
   const [displayPackSize, setDisplayPackSize] = useState(""); 
   const [numericPackSize, setNumericPackSize] = useState(0); 
+
+  // Compute live active product balance matching profiles
+  const activeProductMatch = useMemo(() => {
+    return companies.find(p => p.id === selectedProductId);
+  }, [selectedProductId, companies]);
+
+  // Isolate custom strategically enrolled warehouses assigned to active corporation
+  const filteredCorporateWarehouses = useMemo(() => {
+    if (!selectedCompanyId) return [];
+    return enrolledDepots.filter(
+      node => node.company_name.toLowerCase() === selectedCompanyId.toLowerCase() && node.node_type === 'WAREHOUSE'
+    );
+  }, [selectedCompanyId, enrolledDepots]);
+
+  // Isolate downstream distribution regional depot facilities assigned to active corporation
+  const filteredCorporateDepots = useMemo(() => {
+    if (!selectedCompanyId) return [];
+    return enrolledDepots.filter(
+      node => node.company_name.toLowerCase() === selectedCompanyId.toLowerCase() && node.node_type === 'DEPOT'
+    );
+  }, [selectedCompanyId, enrolledDepots]);
 
   const [state, action, isPending] = useActionState(submitLedgerEntry, { 
     success: false, 
@@ -73,6 +100,9 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
       setOriginState(""); 
       setDestinationState(""); 
       setTargetSpecies("");
+      setTargetWarehouseId("");
+      setIsDepotDistribution(false);
+      setTargetDepotId("");
       setStrength(0); 
       setShippingPacks(0); 
       setDisplayPackSize(""); 
@@ -83,25 +113,51 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
 
   // Substance Detection & Master Data Strength Prefill
   useEffect(() => {
-    const product = companies.find(p => p.id === selectedProductId);
-    if (product) {
-      // 1. Link to ATC Master Data
-      const match = atcCodes.find(a => a.substance?.toLowerCase() === product.active_substance?.toLowerCase());
-      setSelectedSubstance(match || { id: "", substance: product.active_substance, ddd_mg: 0 });
+    if (activeProductMatch) {
+      const match = atcCodes.find(a => a.substance?.toLowerCase() === activeProductMatch.active_substance?.toLowerCase());
+      setSelectedSubstance(match || { id: "", substance: activeProductMatch.active_substance, ddd_mg: 0 });
       
-      // 2. Prefill Pack Size Multiplier
-      setDisplayPackSize(product.shipping_pack_size || "");
-      const mult = (product.shipping_pack_size || "").split(/[xX*]/).reduce((a, c) => a * (parseInt(c.replace(/\D/g,'')) || 1), 1);
+      setDisplayPackSize(activeProductMatch.shipping_pack_size || "");
+      const mult = (activeProductMatch.shipping_pack_size || "").split(/[xX*]/).reduce((a: number, c: string) => a * (parseInt(c.replace(/\D/g,'')) || 1), 1);
       setNumericPackSize(mult || 0);
 
-      // 3. PREFILL STRENGTH: Pull from Permits Master Data
-      if (product.strength) {
-        console.log('This is strength: ', product.strength)
-        const numericStrength = parseFloat(product.strength.replace(/[^\d.]/g, ''));
+      if (activeProductMatch.strength) {
+        const numericStrength = parseFloat(activeProductMatch.strength.replace(/[^\d.]/g, ''));
         setStrength(numericStrength || 0);
       }
     }
-  }, [selectedProductId, companies, atcCodes]);
+  }, [activeProductMatch, atcCodes]);
+
+  // Handle dynamic lookup updates when origin source node is modified
+  const handleWarehouseSelectionChange = (warehouseId: string) => {
+    setTargetWarehouseId(warehouseId);
+    if (!warehouseId) {
+      setOriginWarehouse("");
+      setOriginState("");
+      return;
+    }
+    const matchingHub = filteredCorporateWarehouses.find(w => w.id === warehouseId);
+    if (matchingHub) {
+      setOriginWarehouse(matchingHub.depot_name); // maps standard string property back down
+      setOriginState(matchingHub.state);
+    }
+  };
+
+  // Bidirectional Lookup Logic: Triggered when user selects a registered depot location
+  const handleDepotSelectionChange = (depotId: string) => {
+    setTargetDepotId(depotId);
+    
+    if (!depotId) {
+      setDestinationState("");
+      return;
+    }
+
+    const selectedDepotNode = filteredCorporateDepots.find(d => d.id === depotId);
+    if (selectedDepotNode) {
+      setDestinationState(selectedDepotNode.state);
+      setTargetSpecies("Poultry + Livestock");
+    }
+  };
 
   const totalUnits = shippingPacks * numericPackSize;
 
@@ -131,9 +187,36 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
       <input type="hidden" name="geopolitical_zone" value={derivedZone} />
       <input type="hidden" name="target_species" value={targetSpecies} />
       <input type="hidden" name="mass_unit" value={unit} />
-      
-      {/* Critical: Pass the ATC ID so the Server Action can fetch ddd_mg */}
+      <input type="hidden" name="is_depot_distribution" value={String(isDepotDistribution)} />
+      <input type="hidden" name="target_depot_id" value={targetDepotId} />
       <input type="hidden" name="atc_id" value={selectedSubstance?.id || ""} />
+
+      {/* VERIFIED INVENTORY BADGES */}
+      {activeProductMatch && (
+        <div className="bg-slate-100 border border-slate-200 p-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between animate-in fade-in duration-200">
+          <div className="flex items-center gap-2.5">
+            <Warehouse size={18} className="text-slate-500" />
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Current Verified Balances</p>
+              <h5 className="text-sm font-bold text-slate-700">Stock Assets Profile</h5>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <div className="bg-white border border-slate-200 px-4 py-2 rounded-xl text-center">
+              <span className="block text-[9px] font-black text-slate-400 uppercase">Central Whse</span>
+              <span className={`text-sm font-black ${activeProductMatch.warehouse_balance > 0 ? 'text-blue-600' : 'text-slate-400'}`}>
+                {activeProductMatch.warehouse_balance ?? 0} Packs
+              </span>
+            </div>
+            <div className="bg-white border border-slate-200 px-4 py-2 rounded-xl text-center">
+              <span className="block text-[9px] font-black text-slate-400 uppercase">Active Depots</span>
+              <span className="text-sm font-black text-slate-600">
+                {activeProductMatch.depots?.length || 0} Locations
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* STEP 1: CORPORATE SELECTION */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -141,7 +224,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
           <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
             <Building2 size={14} /> Marketing Authorization Holder
           </label>
-          <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setSelectedProductId(""); }} className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-medium" required>
+          <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setSelectedProductId(""); setTargetDepotId(""); setTargetWarehouseId(""); }} className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-medium" required>
             <option value="">Select MAH...</option>
             {Array.from(new Set(companies.map(c => c.company_name))).map(name => <option key={name} value={name}>{name}</option>)}
           </select>
@@ -160,37 +243,97 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
       {/* STEP 2: GRANULAR LOGISTICS */}
       {type === 'CONSUMPTION' && selectedProductId && (
         <div className="p-6 bg-slate-50 border-2 border-slate-200 rounded-3xl space-y-5 animate-in slide-in-from-top-4">
-          <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-             <Warehouse size={18} className="text-blue-600" />
-             <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest">Supply Chain Pinpoint</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+             <div className="flex items-center gap-2">
+                <Warehouse size={18} className="text-blue-600" />
+                <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest">Supply Chain Pinpoint</h3>
+             </div>
+             
+             {/* Alternate Route Toggle */}
+             <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm select-none">
+               <input 
+                 type="checkbox" 
+                 checked={isDepotDistribution} 
+                 onChange={(e) => {
+                   setIsDepotDistribution(e.target.checked);
+                   setTargetDepotId("");
+                   if (!e.target.checked) setDestinationState("");
+                 }}
+                 className="accent-blue-600 h-4 w-4"
+               />
+               <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                 <Layers size={13} className="text-amber-500" /> Regional Depot Supply Route
+               </span>
+             </label>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Origin State</label>
-              <select value={originState} onChange={(e) => setOriginState(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
-                <option value="">Origin State...</option>
-                {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            {/* AUTOMATED SOURCE WAREHOUSE PICKER */}
+            <div className="flex flex-col gap-1.5 col-span-1 md:col-span-2 bg-blue-50/40 p-3 rounded-xl border border-blue-100">
+              <label className="text-[10px] font-black text-blue-700 uppercase flex items-center justify-between">
+                <span>Source Warehouse Hub</span>
+                {originState && <span className="text-[9px] bg-blue-200 px-1.5 py-0.5 rounded text-blue-800 font-black">MAPPED STATE: {originState}</span>}
+              </label>
+              <select 
+                value={targetWarehouseId} 
+                onChange={(e) => handleWarehouseSelectionChange(e.target.value)} 
+                className="p-2.5 rounded-lg border border-blue-300 bg-white font-bold text-sm outline-none text-slate-800"
+                required
+              >
+                <option value="">Select Enrolled Warehouse Origin...</option>
+                {filteredCorporateWarehouses.map(wh => (
+                  <option key={wh.id} value={wh.id}>
+                    {wh.depot_name} ({wh.state})
+                  </option>
+                ))}
+                {filteredCorporateWarehouses.length === 0 && (
+                  <option value="" disabled>No custom hubs found for this corporate MAH.</option>
+                )}
               </select>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Origin Warehouse</label>
-              <input type="text" placeholder="e.g. Lagos Hub A" value={originWarehouse} onChange={(e) => setOriginWarehouse(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Target State</label>
-              <select value={destinationState} onChange={(e) => setDestinationState(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
-                <option value="">Destination State...</option>
-                {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Target Sector</label>
-              <select value={targetSpecies} onChange={(e) => setTargetSpecies(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
-                <option value="">Select Sector...</option>
-                {SPECIES_CATEGORIES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
+
+            {/* If it's an enrolled Depot Allocation Route, swap fields to render the automated picker */}
+            {isDepotDistribution ? (
+              <div className="flex flex-col gap-1.5 col-span-1 md:col-span-2 bg-amber-50 p-3 rounded-xl border border-amber-200 animate-in zoom-in-95">
+                <label className="text-[10px] font-black text-amber-700 uppercase flex items-center justify-between">
+                  <span>Target Distribution Depot</span>
+                  {destinationState && <span className="text-[9px] bg-amber-200 px-1.5 py-0.5 rounded text-amber-800 font-black">MAPPED STATE: {destinationState}</span>}
+                </label>
+                <select 
+                  value={targetDepotId} 
+                  onChange={(e) => handleDepotSelectionChange(e.target.value)} 
+                  className="p-2.5 rounded-lg border border-amber-300 bg-white font-bold text-sm outline-none text-slate-800"
+                  required={isDepotDistribution}
+                >
+                  <option value="">Select Enrolled Depot Location...</option>
+                  {filteredCorporateDepots.map(depot => (
+                    <option key={depot.id} value={depot.id}>
+                      {depot.depot_name} ({depot.state})
+                    </option>
+                  ))}
+                  {filteredCorporateDepots.length === 0 && (
+                    <option value="" disabled>No registered depots found for this MAH.</option>
+                  )}
+                </select>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Target State</label>
+                  <select value={destinationState} onChange={(e) => setDestinationState(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
+                    <option value="">Destination State...</option>
+                    {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Target Sector</label>
+                  <select value={targetSpecies} onChange={(e) => setTargetSpecies(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
+                    <option value="">Select Sector...</option>
+                    {SPECIES_CATEGORIES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -204,8 +347,10 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], initia
                <h4 className="text-xl font-bold text-emerald-400">{selectedSubstance.substance}</h4>
              </div>
              <div className="text-right">
-               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Zone</p>
-               <span className="text-blue-400 font-bold uppercase">{derivedZone || 'N/A'}</span>
+               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Zone / Route Status</p>
+               <span className="text-blue-400 font-bold uppercase">
+                 {isDepotDistribution ? 'DEPOT LOGISTICS CHAIN' : (derivedZone || 'N/A')}
+               </span>
              </div>
           </div>
 
