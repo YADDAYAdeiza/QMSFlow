@@ -5,7 +5,7 @@ import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { useRouter } from "next/navigation";
 import { zodResolver } from '@hookform/resolvers/zod';
 import { lodFormSchema } from '@/lib/validations';
-import { submitLODApplication } from '@/lib/actions/index';
+import { submitLODApplication, getApplications } from '@/lib/actions/index'; 
 import FileUpload from './FileUpload'; 
 import { CompanySearch } from './CompanySearch';
 import { 
@@ -22,17 +22,14 @@ const CURRENT_USER = {
 };
 
 const DIVISION_OPTIONS = ["VMD", "PAD", "AFPD", "IRSD"];
+const PREFIX = "NAFDAC/VMAP/";
 
 const RISK_CATEGORIES = [
   { name: "VACCINES / BIOLOGICALS", comp: 3, crit: 3 },
   { name: "STERILE INJECTABLES", comp: 3, crit: 2 },
   { name: "POWDER BETA-LACTAMS", comp: 2, crit: 3 },
   { name: "TABLETS (GENERAL)", comp: 1, crit: 2 },
-  { name: "AGROCHEMICALS", comp: 1, crit: 1 },
-  { name: "INSECTICIDES", comp: 1, crit: 1 },
-  { name: "PET FOOD", comp: 1, crit: 1 },
-  { name: "POULTRY FEED", comp: 1, crit: 1 },
-  { name: "FISH FEED", comp: 1, crit: 1 },
+  { name: "MULTIVITAMINS", comp: 1, crit: 1 },
 ];
 
 const getRiskLevel = (score: number) => {
@@ -42,6 +39,7 @@ const getRiskLevel = (score: number) => {
   return null;
 };
 
+// --- HELPER COMPONENT: CREATABLE SELECT ---
 function CreatableSelect({ value, onChange, options, placeholder, onSelectOption }: any) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -58,7 +56,8 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
   const filteredOptions = (options || []).filter((opt: any) => 
     opt.name?.toLowerCase().includes(search.toLowerCase())
   );
-  const showCreateOption = search.length > 0 && !options?.some((opt: any) => opt.name?.toLowerCase() === search.toLowerCase());
+  
+  const showCreateOption = search.length > PREFIX.length && !options?.some((opt: any) => opt.name?.toLowerCase() === search.toLowerCase());
 
   const handleSelect = (name: string, fullOption?: any) => {
     onChange(name);
@@ -84,10 +83,20 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
           <div className="p-2 border-b border-slate-50">
             <input 
               autoFocus
-              placeholder="Filter..."
-              className="w-full p-3 text-[10px] outline-none bg-slate-50 rounded-lg font-medium"
+              placeholder="Type or filter..."
+              className="w-full p-3 text-[10px] outline-none bg-slate-50 rounded-lg font-bold text-blue-600"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value.toUpperCase();
+                if (val.startsWith(PREFIX) || val === "" || PREFIX.startsWith(val)) {
+                  setSearch(val);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && search.startsWith(PREFIX)) {
+                  handleSelect(search);
+                }
+              }}
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
@@ -105,7 +114,7 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
                 onClick={() => handleSelect(search)}
                 className="p-3 text-[10px] font-bold uppercase text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white cursor-pointer flex items-center gap-2"
               >
-                <Plus className="w-3 h-3" /> Add: "{search}"
+                <Plus className="w-3 h-3" /> Use: "{search}"
               </div>
             )}
           </div>
@@ -115,14 +124,31 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
   );
 }
 
+// --- MAIN FORM COMPONENT ---
 export default function LODEntryForm({ initialData, isUpdate = false }: { initialData?: any; isUpdate?: boolean }) {
   const router = useRouter();
   const initialized = useRef(false);
   const [availableLines, setAvailableLines] = useState<any[]>(initialData?.productLines || []);
+  const [existingApps, setExistingApps] = useState<{name: string}[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  // Fetch application numbers for the dropdown reference
+  useEffect(() => {
+    async function loadHistory() {
+      const apps = await getApplications();
+      if (apps) {
+        const mapped = apps
+          .sort((a: any, b: any) => b.id - a.id)
+          .slice(0, 10)
+          .map((a: any) => ({ name: a.applicationNumber }));
+        setExistingApps(mapped);
+      }
+    }
+    loadHistory();
+  }, []);
+
   const defaultValues = useMemo(() => ({
-    appNumber: initialData?.appNumber || "", 
+    appNumber: initialData?.appNumber || PREFIX, 
     type: isUpdate ? "Inspection Report Review (Foreign)" : (initialData?.type || "Facility Verification"), 
     companyName: initialData?.companyName || "", 
     companyAddress: initialData?.companyAddress || "", 
@@ -155,28 +181,19 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     }
   }, [initialData, reset, defaultValues]);
 
+  const handleAppNumberChange = (val: string, onChange: (v: string) => void) => {
+    const upperVal = val.toUpperCase();
+    if (!upperVal.startsWith(PREFIX)) {
+      onChange(PREFIX);
+    } else {
+      onChange(upperVal);
+    }
+  };
+
   const handleGracefulExit = (path: string) => {
-    // 1. Wipe the form data back to absolute defaults
-    reset({
-      appNumber: "", 
-      type: "Facility Verification",
-      companyName: "", 
-      companyAddress: "", 
-      notificationEmail: "",
-      facilityName: "", 
-      facilityAddress: "", 
-      lodRemarks: "",
-      productLines: [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
-      divisions: ["VMD"], 
-      poaUrl: "", 
-      inspectionReportUrl: ""
-    });
-    
-    // 2. Clear state
+    reset(defaultValues);
     setShowSuccess(false);
     initialized.current = false;
-
-    // 3. Navigate
     router.push(path);
     router.refresh();
   };
@@ -218,7 +235,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
 
             <div className="grid grid-cols-1 gap-4 pt-4">
               <button 
-                // onClick={() => handleGracefulExit("/dashboard/lod/daily-status")} 
                 onClick={() => handleGracefulExit("/dashboard/lod/applications")} 
                 className="w-full py-6 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all"
               >
@@ -258,9 +274,22 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {/* APP NUMBER WITH LOCKED PREFIX AND DROPDOWN REFERENCE */}
           <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black uppercase text-slate-400 ml-2">App Number</label>
-            <input {...register("appNumber")} readOnly={isUpdate} className={cn("bg-slate-50 p-5 rounded-[1.5rem] text-sm font-bold border-2 border-transparent focus:border-blue-500/20 uppercase outline-none", isUpdate && "opacity-60")} />
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 italic">App Number (Ref Latest in Dropdown)</label>
+            <Controller
+              name="appNumber"
+              control={control}
+              render={({ field }) => (
+                <CreatableSelect 
+                  value={field.value}
+                  options={existingApps}
+                  placeholder="NAFDAC/VMAP/..."
+                  onChange={(val: string) => handleAppNumberChange(val, field.onChange)}
+                  onSelectOption={(opt: any) => field.onChange(opt.name)}
+                />
+              )}
+            />
           </div>
           <div className="flex flex-col gap-2">
             <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Review Type</label>
@@ -302,7 +331,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             )}
             <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
             <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
-            <FileUpload label={watchType === "Facility Verification" ? "Documents (Invitation, etc)" : "Inspection Report (PDF)"} onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true })} />
+            <FileUpload label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true })} />
           </div>
         </div>
 

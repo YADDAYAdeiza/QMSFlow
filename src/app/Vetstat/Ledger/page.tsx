@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server';
 import LedgerForm from "@/components/Vetstat/LedgerForm";
 import CertificateEnrollment from "@/components/Vetstat/CertificateEnrollment";
 import RegistrationDashboard from "@/components/Vetstat/RegistrationDashboard";
+import DepotEnrollmentForm from '@/components/Vetstat/DepotEnrollmentForm';
 import {
   Ship,
   Flame,
@@ -13,6 +14,8 @@ import {
 } from 'lucide-react';
 import FPPEnrolledRegistry from '@/components/Vetstat/FPPEnrolledRegistry';
 
+export const dynamic = 'force-dynamic';
+
 export default async function LedgerPage({
   searchParams
 }: {
@@ -23,7 +26,8 @@ export default async function LedgerPage({
   const params = await searchParams;
   const activeType = (params.type as 'IMPORT' | 'DESTRUCTION' | 'CONSUMPTION' | 'REGISTRY') || 'IMPORT';
 
-  const [atcResponse, permitsResponse, ledgerResponse] = await Promise.all([
+  // 1. Parallel fetch targeting updated master database schema layout tables
+  const [atcResponse, permitsResponse, ledgerResponse, inventoriesResponse, nodesResponse] = await Promise.all([
     supabase
       .from('atc_codes')
       .select('*')
@@ -31,21 +35,70 @@ export default async function LedgerPage({
     supabase
       .from('permits')
       .select('*')
-      .eq('dir_type', 'VMD')
       .order('company_name', { ascending: true }),
     supabase
       .from('ledger_entries') 
       .select('*')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('importer_inventories')
+      .select('*'),
+    supabase
+      .from('importer_logistics_nodes')
+      .select('*')
       .order('created_at', { ascending: false })
   ]);
 
-  const atcCodes = atcResponse.data || [];
-  const allFppRegistrations = permitsResponse.data || [];
-  const registrationHistory = ledgerResponse.data || [];
+  // Clean, explicit string serialization to catch hidden errors immediately
+  if (atcResponse.error) {
+    console.error("ATC Fetch Error Details:", JSON.stringify(atcResponse.error, null, 2));
+  }
+  if (permitsResponse.error) {
+    console.error("Permits Fetch Error Details:", JSON.stringify(permitsResponse.error, null, 2));
+  }
+  if (ledgerResponse.error) {
+    console.error("Ledger Fetch Error Details:", JSON.stringify(ledgerResponse.error, null, 2));
+  }
+  if (inventoriesResponse.error) {
+    console.error("Inventories Fetch Error Details:", JSON.stringify(inventoriesResponse.error, null, 2));
+  }
+  if (nodesResponse.error) {
+    console.error("Logistics Nodes Fetch Error Details:", JSON.stringify(nodesResponse.error, null, 2));
+  }
 
-  if (atcResponse.error) console.error("ATC Fetch Error:", atcResponse.error);
-  if (permitsResponse.error) console.error("Permits Fetch Error:", permitsResponse.error.message);
-  if (ledgerResponse.error) console.error("Ledger Fetch Error:", ledgerResponse.error);
+  const atcCodes = atcResponse.data || [];
+  const permits = permitsResponse.data || [];
+  const registrationHistory = ledgerResponse.data || [];
+  const inventories = inventoriesResponse.data || [];
+  const enrolledNodes = nodesResponse.data || [];
+
+  // 2. DATA STITCHING: Inject matching real-time inventory positions into each permit entity
+  const allFppRegistrations = permits.map((product) => {
+    const companyInventory = inventories.find(
+      (inv) => inv.company_name.toLowerCase() === product.company_name.toLowerCase()
+    );
+
+    const distribution = companyInventory?.inventory_distribution || { central_warehouse: [], depots: [] };
+
+    const warehouseMatch = distribution.central_warehouse.find(
+      (item: any) => item.product_id === product.id
+    );
+
+    const productDepots = distribution.depots?.map((depot: any) => {
+      const depotProd = depot.inventory?.find((i: any) => i.product_id === product.id);
+      return {
+        depot_id: depot.depot_id,
+        name: depot.depot_name,
+        balance: depotProd ? depotProd.balance : 0
+      };
+    }).filter((d: any) => d.balance > 0) || [];
+
+    return {
+      ...product,
+      warehouse_balance: warehouseMatch ? warehouseMatch.balance : 0,
+      depots: productDepots
+    };
+  });
 
   const tabConfig = {
     IMPORT: {
@@ -96,7 +149,6 @@ export default async function LedgerPage({
           </div>
           
           <div className="flex flex-col items-end gap-3">
-            {/* The main 'Enroll' button remains here */}
             <CertificateEnrollment 
               companies={allFppRegistrations} 
               atcCodes={atcCodes} 
@@ -111,6 +163,11 @@ export default async function LedgerPage({
         
         <div className="grid grid-cols-1 gap-8">
           
+          {/* Administrative Step: Interactive Depot Enrollment Form Panel */}
+          {activeType !== 'REGISTRY' && (
+            <DepotEnrollmentForm companies={allFppRegistrations} />
+          )}
+
           {/* Section 1: Dynamic Work Area */}
           <section className="space-y-6">
             <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-xl w-fit">
@@ -156,7 +213,6 @@ export default async function LedgerPage({
                     </div>
                 </div>
 
-                {/* UPDATED: We pass the master data to the registry so it can feed the Edit modal */}
                 {activeType === 'REGISTRY' ? (
                   <FPPEnrolledRegistry 
                     data={allFppRegistrations} 
@@ -168,6 +224,7 @@ export default async function LedgerPage({
                     type={activeType}
                     atcCodes={atcCodes}
                     companies={allFppRegistrations}
+                    enrolledDepots={enrolledNodes}
                   />
                 )}
               </div>

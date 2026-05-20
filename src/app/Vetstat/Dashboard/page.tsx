@@ -4,7 +4,18 @@ import DateRangePicker from "@/components/Vetstat/DateRangePicker";
 import SectorToggle from "@/components/Vetstat/SectorToggle";
 import RiskToggle from "@/components/Vetstat/RiskToggle";
 import DrillDownSidebar from "@/components/Vetstat/DrillDownSidebar";
-import { Activity, Bird, ShieldAlert, Calendar, Database, TrendingUp, TrendingDown, Zap } from 'lucide-react';
+import ExportButton from "@/components/Vetstat/ExportButton"; 
+import { 
+  Activity, 
+  Bird, 
+  ShieldAlert, 
+  Calendar, 
+  Database, 
+  TrendingUp, 
+  TrendingDown, 
+  Zap,
+  Drama
+} from 'lucide-react';
 
 export default async function AMSDashboardPage({
   searchParams,
@@ -24,6 +35,14 @@ export default async function AMSDashboardPage({
   const hasRealData = analytics.totalDDD > 0;
   const isAnomaly = (analytics.globalTrend ?? 0) > 15;
   const isHighRiskMode = risk === 'HPCIA';
+
+  // Dynamic Theme Utility for the Hero Highlight Card
+  const getCardTheme = () => {
+    if (isHighRiskMode) return 'bg-slate-900 ring-4 ring-rose-500/20 text-white';
+    if (species === 'Poultry') return 'bg-emerald-600 text-white';
+    if (species === 'Swine') return 'bg-orange-600 text-white'; // Custom styling for Swine sector
+    return 'bg-blue-600 text-white';
+  };
 
   return (
     <div className="p-8 bg-slate-50 min-h-screen">
@@ -53,13 +72,14 @@ export default async function AMSDashboardPage({
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
+              <ExportButton /> 
               <RiskToggle />
               <SectorToggle />
               <DateRangePicker />
             </div>
           </div>
 
-          {/* Quick Metrics Bar with Trend Analysis */}
+          {/* Quick Metrics Bar */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
                <div>
@@ -118,9 +138,9 @@ export default async function AMSDashboardPage({
 
           <div className="space-y-6">
             {/* Sector/Risk Summary Card */}
-            <div className={`p-8 rounded-[2.5rem] text-white shadow-lg relative overflow-hidden group transition-all duration-500 ${isHighRiskMode ? 'bg-slate-900 ring-4 ring-rose-500/20' : species === 'Poultry' ? 'bg-emerald-600' : 'bg-blue-600'}`}>
+            <div className={`p-8 rounded-[2.5rem] shadow-lg relative overflow-hidden group transition-all duration-500 ${getCardTheme()}`}>
                <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform">
-                 {isHighRiskMode ? <ShieldAlert size={120} /> : <Bird size={120} />}
+                 {isHighRiskMode ? <ShieldAlert size={120} /> : species === 'Poultry' ? <Bird size={120} /> : <Drama size={120} />}
                </div>
                <p className="text-xs font-black opacity-80 uppercase tracking-widest">
                  {isHighRiskMode ? '🔴 High Risk Load' : `${species} Impact`}

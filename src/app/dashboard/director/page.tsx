@@ -74,7 +74,7 @@ export default async function DirectorPage({
               <Inbox className="w-5 h-5 text-white" />
             </div>
             <h1 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">
-              Directorate Workspace
+              Director Workspace
             </h1>
           </div>
           

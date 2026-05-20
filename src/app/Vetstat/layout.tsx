@@ -14,7 +14,7 @@ export default function VetstatLayout({ children }: { children: React.ReactNode 
           <NavItem icon={LayoutDashboard} label="Overview" href="/Vetstat" />
           <NavItem icon={FileText} label="API Permits" href="/Vetstat/Permits" />
           <NavItem icon={ClipboardList} label="Finished Goods Ledger" href="/Vetstat/Ledger" />
-          <NavItem icon={BarChart3} label="AMS Reporting" href="/Vetstat/Reporting" />
+          <NavItem icon={BarChart3} label="AMS Reporting" href="/Vetstat/Dashboard" />
         </nav>
 
         <div className="pt-6 border-t border-slate-800">
