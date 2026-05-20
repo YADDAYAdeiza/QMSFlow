@@ -6,19 +6,26 @@ export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const { searchParams } = new URL(request.url);
 
-  const start = searchParams.get('start');
-  const end = searchParams.get('end');
-  const species = searchParams.get('species');
-  const risk = searchParams.get('risk');
+  // 1. Reconcile fallback parameters
+  const rawStart = searchParams.get('start');
+  const rawEnd = searchParams.get('end');
+  const rawSpecies = searchParams.get('species');
+  const rawRisk = searchParams.get('risk');
 
-  console.log("Exporting with filters:", { start, end, species, risk });
+  const start = (rawStart && rawStart !== 'undefined') ? rawStart : '2026-01-01';
+  const end = (rawEnd && rawEnd !== 'undefined') ? rawEnd : new Date().toISOString();
+  const species = (rawSpecies && rawSpecies !== 'undefined') ? rawSpecies : 'All';
+  const risk = (rawRisk && rawRisk !== 'undefined') ? rawRisk : 'All';
 
-  // FIXED: Removed "!inner" from the core select string to allow a LEFT JOIN behavior.
-  // This ensures ledger entries show up even if their ATC mapping is missing.
-  let query = supabase
+  console.log("--- VMD PARTIAL-MATCH HOLISTIC EXPORT ---");
+  console.log("Executing filters:", { start, end, species, risk });
+
+  // 2. Query broad consumption entries (Delegating complex filtering safely to the runtime)
+  const { data: entries, error: entriesError } = await supabase
     .from('ledger_entries')
     .select(`
       created_at,
+      entry_type,
       geopolitical_zone,
       destination_state,
       target_species,
@@ -26,91 +33,106 @@ export async function GET(request: NextRequest) {
       api_mass_mg,
       pack_quantity,
       metadata,
-      atc_codes (
-        human_atc,
-        vet_atc,
-        substance,
-        class,
-        risk_priority
-      ),
-      permits (
-        permit_number,
-        company_name,
-        product_name,
-        strength,
-        shipping_pack_size,
-        route_of_administration
-      )
-    `);
+      atc_id
+    `)
+    .eq('entry_type', 'CONSUMPTION')
+    .gte('created_at', start)
+    .lte('created_at', end);
 
-  // Only apply filters if they actually exist in the URL
-  if (start && start !== 'undefined') query = query.gte('created_at', start);
-  if (end && end !== 'undefined') query = query.lte('created_at', end);
-  if (species && species !== 'All') query = query.eq('target_species', species);
-
-  const { data, error } = await query;
-
-  if (error) {
-    console.error("Database Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (entriesError) {
+    console.error("Database Query Error:", entriesError);
+    return NextResponse.json({ error: entriesError.message }, { status: 500 });
   }
 
-  // Debugging block preserved
-  if (!data || data.length === 0) {
-    console.log("No data returned from Supabase for these filters.");
-    return NextResponse.json({ error: "No data found" }, { status: 404 });
+  if (!entries || entries.length === 0) {
+    return NextResponse.json({ error: "No raw consumption data found within this timeframe" }, { status: 404 });
   }
 
-  // Map and reconstruct the records cleanly
-  let rows = data.map((entry: any) => {
-    // Safely extract metadata properties if they exist
+  // 3. Pull master ATC definitions to map classifications
+  const { data: atcList, error: atcError } = await supabase
+    .from('atc_codes')
+    .select('id, human_atc, vet_atc, class, substance, risk_priority');
+
+  if (atcError) {
+    console.error("Failed to map ATC master catalog relations:", atcError);
+    return NextResponse.json({ error: atcError.message }, { status: 500 });
+  }
+
+  const atcMap = new Map<string, any>();
+  atcList?.forEach(item => atcMap.set(item.id, item));
+
+  // 4. Transform and dynamically map rows
+  let rows = entries.map((entry: any) => {
     const meta = entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+    const linkedAtc = entry.atc_id ? atcMap.get(entry.atc_id) : null;
 
-    // Reconcile ATC code variant fields (prioritizing veterinary system codes)
-    const atcCode = entry.atc_codes?.vet_atc || entry.atc_codes?.human_atc || 'N/A';
+    const atcCode = linkedAtc?.vet_atc || linkedAtc?.human_atc || 'N/A';
+    const substance = linkedAtc?.substance || 'N/A';
+    const drugClass = linkedAtc?.class || 'N/A';
+    
+    const directRisk = linkedAtc?.risk_priority || 'N/A';
+    const metadataRisk = meta.risk_priority || 'N/A';
+    const recordSpecies = entry.target_species || 'N/A';
 
     return {
       "DATE": new Date(entry.created_at).toLocaleDateString(),
-      "ZONE": entry.geopolitical_zone,
-      "STATE": entry.destination_state,
-      "COMPANY": entry.permits?.company_name || 'N/A',
-      "PERMIT": entry.permits?.permit_number || 'N/A',
-      "PRODUCT": entry.permits?.product_name || 'N/A',
-      "SUBSTANCE": entry.atc_codes?.substance || 'N/A',
-      
-      // --- RECONCILED FIELDS ---
+      "ZONE": entry.geopolitical_zone || 'N/A',
+      "STATE": entry.destination_state || 'N/A',
+      "SUBSTANCE": substance,
       "ATC_CODE": atcCode,
-      "ROUTE": entry.permits?.route_of_administration || 'N/A',
-      
-      // Fall back to historical logged metadata if master data row didn't exist yet
-      "STRENGTH": entry.permits?.strength || meta.strength_at_log || 'N/A',
+      "CLASS": drugClass,
+      "RISK_MASTER": directRisk,
+      "RISK_LOGGED": metadataRisk,
+      "SPECIES": recordSpecies,
       "QUANTITY": entry.pack_quantity || 0,
-      "PACK_SIZE": entry.permits?.shipping_pack_size || meta.verified_pack_size || 'N/A',
-      
-      "CLASS": entry.atc_codes?.class || 'N/A',
-      "RISK": entry.atc_codes?.risk_priority || 'N/A',
-      "SPECIES": entry.target_species || 'N/A',
+      "STRENGTH": meta.strength_at_log || 'N/A',
+      "PACK_SIZE": meta.verified_pack_size || 'N/A',
       "TOTAL API CONTENT (mg)": entry.api_mass_mg ? parseFloat(entry.api_mass_mg).toFixed(2) : '0.00',
       "DDD": entry.ddd_consumed ? parseFloat(entry.ddd_consumed).toFixed(4) : '0.0000'
     };
   });
 
-  // FIXED: Post-processing filter handles the risk criteria matching flawlessly 
-  // on the mapped rows, keeping rows like Mustacyn from dropping out on a LEFT JOIN.
-  if (risk && risk !== 'All') {
-    rows = rows.filter((row: any) => row.RISK.toLowerCase() === risk.toLowerCase());
+  // 5. Apply Smart Partial Matching Filters
+
+  // A. Case-Insensitive Species Partial Filtering
+  if (species !== 'All') {
+    const targetSpeciesLower = species.trim().toLowerCase(); // e.g., 'livestock' or 'poultry'
+    
+    rows = rows.filter((row: any) => {
+      const currentSpeciesLower = row.SPECIES.toLowerCase();
+      return currentSpeciesLower.includes(targetSpeciesLower);
+    });
   }
 
-  // Handle case where custom filtering clears out your spreadsheet completely
+  // B. Case-Insensitive Risk Partial Filtering
+  if (risk !== 'All') {
+    const searchRiskLower = risk.trim().toLowerCase();
+
+    rows = rows.filter((row: any) => {
+      const masterRisk = row.RISK_MASTER.toLowerCase();
+      const loggedRisk = row.RISK_LOGGED.toLowerCase();
+
+      if (searchRiskLower === 'hpcia') {
+        return masterRisk.includes('hpcia') || loggedRisk.includes('hpcia') || masterRisk === 'critical';
+      }
+
+      return masterRisk === searchRiskLower || loggedRisk.includes(searchRiskLower);
+    });
+  }
+
+  // 6. Check if anything survived our filtering steps
   if (rows.length === 0) {
-    return NextResponse.json({ error: "No data found matching criteria" }, { status: 404 });
+    return NextResponse.json({ 
+      error: `Filtered records yielded zero matches for species: "${species}" and risk profile: "${risk}"` 
+    }, { status: 404 });
   }
 
+  // 7. Generate Excel File Output Buffer
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "VMD Export");
+  XLSX.utils.book_append_sheet(workbook, worksheet, "VMD Consumption Audit Log");
 
-  // Autofit column widths intact so headers aren't cut off in Excel
+  // Autofit column space widths
   const maxWds = rows.reduce((acc: any, row: any) => {
     Object.keys(row).forEach((key, idx) => {
       const valLen = row[key] ? row[key].toString().length : 10;
@@ -126,7 +148,7 @@ export async function GET(request: NextRequest) {
   return new NextResponse(buffer, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="VMD_Audit_Log.xlsx"`
+      'Content-Disposition': `attachment; filename="VMD_Consumption_Audit_Log.xlsx"`
     },
   });
 }

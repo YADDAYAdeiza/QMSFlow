@@ -19,11 +19,17 @@ export async function enrollFPPHeader(formData: FormData) {
   const product_name = formData.get('product_name') as string;
   const company_name = formData.get('company_name') as string;
   const shipping_pack_size = formData.get('shipping_pack_size') as string;
+  const country_of_origin = formData.get('country_of_origin') as string;
   const active_substance = formData.get('active_substance') as string; 
+  const atc_id = formData.get('atc_id') as string || null;
   
-  // FIXED: Capturing the missing strength and route data
+  // Capturing strength and route data
   const strength = formData.get('strength') as string;
   const route_of_administration = formData.get('route_of_administration') as string;
+
+  // Capturing new VMD structural classifications
+  const dosage_form = formData.get('dosage_form') as string;
+  const therapeutic_class = formData.get('therapeutic_class') as string;
 
   const { data, error } = await supabase
     .from('permits')
@@ -32,9 +38,13 @@ export async function enrollFPPHeader(formData: FormData) {
       product_name,
       company_name,
       shipping_pack_size,
+      country_of_origin,
       active_substance,
-      strength,                // Now being saved!
-      route_of_administration, // Now being saved!
+      atc_id,
+      strength,
+      route_of_administration,
+      dosage_form,        // Saved to permits table
+      therapeutic_class,  // Saved to permits table
       status: 'Original',
       dir_type: 'VMD' 
     }])

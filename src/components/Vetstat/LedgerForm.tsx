@@ -14,7 +14,7 @@ interface LedgerFormProps {
   atcCodes: any[];
   companies: any[]; 
   initialData?: any; 
-  enrolledDepots?: any[]; // Reloaded network master nodes array parameter passes down cleanly
+  enrolledDepots?: any[];
 }
 
 const GEO_ZONES: Record<string, string[]> = {
@@ -39,6 +39,7 @@ const SPECIES_CATEGORIES = [
 
 export default function LedgerForm({ type, atcCodes = [], companies = [], enrolledDepots = [], initialData }: LedgerFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
+  const clientStartTimeRef = useRef<number>(Date.now());
 
   // Selection States
   const [selectedProductId, setSelectedProductId] = useState<string>(initialData?.entity_id || "");
@@ -62,6 +63,10 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
   const [shippingPacks, setShippingPacks] = useState(initialData?.pack_quantity || 0);
   const [displayPackSize, setDisplayPackSize] = useState(""); 
   const [numericPackSize, setNumericPackSize] = useState(0); 
+
+  // 🔴 NEW: Live Balanced Audit State Hooks
+  const [calculatedBalance, setCalculatedBalance] = useState<number | null>(null);
+  const [isLoadingBalance, setIsLoadingBalance] = useState<boolean>(false);
 
   // Compute live active product balance matching profiles
   const activeProductMatch = useMemo(() => {
@@ -90,6 +95,42 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
     timestamp: 0 
   });
 
+  // 🔴 NEW: Fetching Live Product Allocation Stock from Database Ledgers
+  useEffect(() => {
+    if (!selectedProductId) {
+      setCalculatedBalance(null);
+      return;
+    }
+
+    async function fetchLiveBalance() {
+      setIsLoadingBalance(true);
+      try {
+        const { createClient } = await import('@/utils/supabase/client');
+        const supabase = createClient();
+        
+        const { data, error } = await supabase
+          .from('ledger_entries')
+          .select('entry_type, pack_quantity')
+          .eq('entity_id', selectedProductId);
+
+        if (!error && data) {
+          const imports = data.filter(r => r.entry_type === 'IMPORT').reduce((sum, r) => sum + (parseFloat(r.pack_quantity) || 0), 0);
+          const deductions = data.filter(r => r.entry_type === 'CONSUMPTION' || r.entry_type === 'DESTRUCTION').reduce((sum, r) => sum + (parseFloat(r.pack_quantity) || 0), 0);
+          setCalculatedBalance(imports - deductions);
+        }
+      } catch (e) {
+        console.error("Failed calculating real-time inventory ledger snapshots:", e);
+      } finally {
+        setIsLoadingBalance(false);
+      }
+    }
+
+    fetchLiveBalance();
+  }, [selectedProductId, state.timestamp]); // Recalculates on select or on form success operations
+
+  // Evaluation: Is the user attempting to write out a deficit balance configuration?
+  const isOverdrawn = type !== 'IMPORT' && calculatedBalance !== null && shippingPacks > calculatedBalance;
+
   // Success Reset logic
   useEffect(() => {
     if (state.success && state.timestamp !== 0) {
@@ -107,6 +148,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
       setShippingPacks(0); 
       setDisplayPackSize(""); 
       setNumericPackSize(0);
+      clientStartTimeRef.current = Date.now(); // Reset QMS stopwatch
       formRef.current?.reset();
     }
   }, [state.success, state.timestamp]);
@@ -138,7 +180,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
     }
     const matchingHub = filteredCorporateWarehouses.find(w => w.id === warehouseId);
     if (matchingHub) {
-      setOriginWarehouse(matchingHub.depot_name); // maps standard string property back down
+      setOriginWarehouse(matchingHub.depot_name); 
       setOriginState(matchingHub.state);
     }
   };
@@ -146,12 +188,10 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
   // Bidirectional Lookup Logic: Triggered when user selects a registered depot location
   const handleDepotSelectionChange = (depotId: string) => {
     setTargetDepotId(depotId);
-    
     if (!depotId) {
       setDestinationState("");
       return;
     }
-
     const selectedDepotNode = filteredCorporateDepots.find(d => d.id === depotId);
     if (selectedDepotNode) {
       setDestinationState(selectedDepotNode.state);
@@ -190,6 +230,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
       <input type="hidden" name="is_depot_distribution" value={String(isDepotDistribution)} />
       <input type="hidden" name="target_depot_id" value={targetDepotId} />
       <input type="hidden" name="atc_id" value={selectedSubstance?.id || ""} />
+      <input type="hidden" name="client_start_time" value={clientStartTimeRef.current} />
 
       {/* VERIFIED INVENTORY BADGES */}
       {activeProductMatch && (
@@ -214,6 +255,34 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
                 {activeProductMatch.depots?.length || 0} Locations
               </span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔴 NEW: LIVE REAL-TIME STOCK BALANCE AUDITOR STATUS PANEL */}
+      {selectedProductId && type !== 'IMPORT' && (
+        <div className={`p-4 rounded-2xl border transition-all duration-300 ${
+          isOverdrawn 
+            ? 'bg-rose-50 border-rose-300 text-rose-900 animate-pulse' 
+            : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Layers className={isOverdrawn ? "text-rose-600" : "text-emerald-600"} size={20} />
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider opacity-60">
+                  {isLoadingBalance ? "Computing Transaction Audit history..." : "Ledger Audited Allocation Limit"}
+                </p>
+                <h4 className="text-sm font-black">
+                  {isLoadingBalance ? "Loading..." : `${calculatedBalance ?? 0} Imported Packs Available`}
+                </h4>
+              </div>
+            </div>
+            {isOverdrawn && (
+              <span className="bg-rose-600 text-white text-[10px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wide">
+                Deficit: Overdrawn by {shippingPacks - (calculatedBalance ?? 0)} Packs
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -292,7 +361,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
               </select>
             </div>
 
-            {/* If it's an enrolled Depot Allocation Route, swap fields to render the automated picker */}
+            {/* Depot Override Check */}
             {isDepotDistribution ? (
               <div className="flex flex-col gap-1.5 col-span-1 md:col-span-2 bg-amber-50 p-3 rounded-xl border border-amber-200 animate-in zoom-in-95">
                 <label className="text-[10px] font-black text-amber-700 uppercase flex items-center justify-between">
@@ -319,7 +388,7 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
             ) : (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black text-slate-500 uppercase">Target State</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Destination State</label>
                   <select value={destinationState} onChange={(e) => setDestinationState(e.target.value)} className="p-3 rounded-xl border-2 border-white bg-white font-bold outline-none" required>
                     <option value="">Destination State...</option>
                     {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -342,16 +411,16 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
       {selectedSubstance && (
         <div className="bg-slate-900 p-6 rounded-3xl text-white space-y-6 shadow-2xl">
           <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-             <div>
-               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Ingredient</p>
-               <h4 className="text-xl font-bold text-emerald-400">{selectedSubstance.substance}</h4>
-             </div>
-             <div className="text-right">
-               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Zone / Route Status</p>
-               <span className="text-blue-400 font-bold uppercase">
-                 {isDepotDistribution ? 'DEPOT LOGISTICS CHAIN' : (derivedZone || 'N/A')}
-               </span>
-             </div>
+              <div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Ingredient</p>
+                <h4 className="text-xl font-bold text-emerald-400">{selectedSubstance.substance}</h4>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Zone / Route Status</p>
+                <span className="text-blue-400 font-bold uppercase">
+                  {isDepotDistribution ? 'DEPOT LOGISTICS CHAIN' : (derivedZone || 'N/A')}
+                </span>
+              </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -394,8 +463,13 @@ export default function LedgerForm({ type, atcCodes = [], companies = [], enroll
         </div>
       )}
 
-      <button type="submit" disabled={isPending || !selectedSubstance} className="w-full bg-blue-600 text-white font-black uppercase tracking-[0.2em] py-5 rounded-2xl hover:bg-blue-500 transition-all shadow-xl disabled:bg-slate-300">
-        {isPending ? 'Verifying & Logging...' : `Record ${type} Activity`}
+      {/* Submissions Guards Activated if overdrawn or balance checking */}
+      <button 
+        type="submit" 
+        disabled={isPending || !selectedSubstance || isOverdrawn || isLoadingBalance} 
+        className="w-full bg-blue-600 text-white font-black uppercase tracking-[0.2em] py-5 rounded-2xl hover:bg-blue-500 transition-all shadow-xl disabled:bg-slate-300"
+      >
+        {isPending ? 'Verifying & Logging...' : isOverdrawn ? 'Invalid Balance Quantity' : `Record ${type} Activity`}
       </button>
 
       {state.message && (

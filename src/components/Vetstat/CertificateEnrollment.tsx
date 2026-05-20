@@ -4,7 +4,8 @@ import { useRouter } from 'next/navigation';
 import { 
   Plus, ShieldCheck, X, PackageSearch, 
   Search, Building2, Microscope, AlertCircle, Edit3,
-  Globe, Activity, Zap, Check, ChevronRight, Loader2, Sparkles
+  Globe, Activity, Zap, Check, ChevronRight, Loader2, Sparkles,
+  Layers, Stethoscope
 } from 'lucide-react';
 import { enrollFPPHeader, updateFPPRegistration } from '@/lib/actions/Vetstat/Registration/registrationAction'; 
 import { createClient } from '@/utils/supabase/client'; 
@@ -22,6 +23,18 @@ const ROUTE_GROUPS = {
   "Other": ["Topical", "Intramammary", "Intrauterine"]
 };
 
+// VMD Master Categorization Lists
+const DOSAGE_FORMS = [
+  "Oral Powder", "Tablet", "Bolus", "Oral Solution", 
+  "Injectable Solution", "Injectable Suspension", "Premix", 
+  "Intramammary Ointment", "Vial", "Ampoule"
+];
+
+const THERAPEUTIC_CLASSES = [
+  "Antibacterial", "Antiviral", "Antifungal", "Anti-protozoal", 
+  "Anthelmintic", "Coccidiostat", "Ectoparasiticide"
+];
+
 interface Company { 
   id: string; 
   company_name: string; 
@@ -34,7 +47,6 @@ interface ATCCode {
   human_atc: string; 
 }
 
-// Instantiate outside component to guarantee a stable single instance reference across renders
 const supabase = createClient();
 
 export default function CertificateEnrollment({ 
@@ -56,6 +68,10 @@ export default function CertificateEnrollment({
   const [productName, setProductName] = useState(editData?.product_name || '');
   const [shippingPackSize, setShippingPackSize] = useState(editData?.shipping_pack_size || '');
   const [countryOfOrigin, setCountryOfOrigin] = useState(editData?.country_of_origin || "Nigeria");
+  
+  // States for Dosage Form and Therapeutic Class
+  const [dosageForm, setDosageForm] = useState(editData?.dosage_form || "Oral Powder");
+  const [therapeuticClass, setTherapeuticClass] = useState(editData?.therapeutic_class || "Antibacterial");
 
   const [searchTerm, setSearchTerm] = useState('');
   const [substanceSearch, setSubstanceSearch] = useState('');
@@ -63,12 +79,11 @@ export default function CertificateEnrollment({
   const [selectedSubstance, setSelectedSubstance] = useState<ATCCode | null>(null);
   const [selectedRoutes, setSelectedRoutes] = useState<string[]>([]);
   
-  // API Reference / Lookup Status Indicators
+  // API Reference Lookup Indicators
   const [lookupStatus, setLookupStatus] = useState<'idle' | 'checking' | 'found' | 'not_found'>('idle');
   const lookupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastInitializedIdRef = useRef<string | null>(null);
 
-  // Sync prop arrays into refs to protect the lookup routine from parent reference updates
   const companiesRef = useRef(companies);
   const atcCodesRef = useRef(atcCodes);
 
@@ -77,7 +92,7 @@ export default function CertificateEnrollment({
 
   const router = useRouter();
 
-  // Sync state when entering edit mode (guarded against reference resets while typing)
+  // Sync state when entering edit mode
   useEffect(() => {
     if (editData && editData.id !== lastInitializedIdRef.current) {
       lastInitializedIdRef.current = editData.id;
@@ -86,6 +101,8 @@ export default function CertificateEnrollment({
       setProductName(editData.product_name || '');
       setShippingPackSize(editData.shipping_pack_size || '');
       setCountryOfOrigin(editData.country_of_origin || "Nigeria");
+      setDosageForm(editData.dosage_form || "Oral Powder");
+      setTherapeuticClass(editData.therapeutic_class || "Antibacterial");
       setSearchTerm(editData.company_name || '');
       
       const matchedATC = atcCodes.find(a => a.substance === editData.active_substance);
@@ -116,12 +133,10 @@ export default function CertificateEnrollment({
     }
 
     if (lookupTimeoutRef.current) clearTimeout(lookupTimeoutRef.current);
-
     setLookupStatus('checking');
 
     lookupTimeoutRef.current = setTimeout(async () => {
       try {
-        // Changed from .maybeSingle() to .limit(1) to safely handle multiple matching rows
         const { data, error } = await supabase
           .from('napams_cache')
           .select('*')
@@ -132,13 +147,15 @@ export default function CertificateEnrollment({
 
         if (data && data.length > 0) {
           const matchedRecord = data[0];
-          console.log('Autofill registry reference data found: ', matchedRecord);
           setProductName(matchedRecord.product_name || '');
           setShippingPackSize(matchedRecord.raw_pack_size || '');
           
           if (matchedRecord.manufacturer_country && COUNTRIES.includes(matchedRecord.manufacturer_country)) {
             setCountryOfOrigin(matchedRecord.manufacturer_country);
           }
+
+          if (matchedRecord.dosage_form) setDosageForm(matchedRecord.dosage_form);
+          if (matchedRecord.therapeutic_class) setTherapeuticClass(matchedRecord.therapeutic_class);
 
           if (matchedRecord.active_substance) {
             const matchedATC = atcCodesRef.current.find(a => a.substance.toLowerCase() === matchedRecord.active_substance.toLowerCase());
@@ -167,12 +184,7 @@ export default function CertificateEnrollment({
           setLookupStatus('not_found');
         }
       } catch (err: any) {
-        console.error("Lookup error details:", {
-          message: err?.message || err,
-          code: err?.code,
-          details: err?.details,
-          hint: err?.hint
-        });
+        console.error("Lookup error details:", err);
         setLookupStatus('not_found');
       }
     }, 600); 
@@ -213,6 +225,8 @@ export default function CertificateEnrollment({
     setProductName('');
     setShippingPackSize('');
     setCountryOfOrigin('Nigeria');
+    setDosageForm('Oral Powder');
+    setTherapeuticClass('Antibacterial');
     setSearchTerm('');
     setSubstanceSearch('');
     setSelectedCompany(null);
@@ -226,9 +240,14 @@ export default function CertificateEnrollment({
   const handleAction = async (formData: FormData) => {
     setIsPending(true);
     const mahName = selectedCompany ? selectedCompany.company_name : searchTerm;
+    
+    // Explicitly attaching interactive state boundaries to payload
     formData.set('company_name', mahName);
     formData.set('active_substance', selectedSubstance ? selectedSubstance.substance : (substanceSearch || '')); 
     formData.set('route_of_administration', selectedRoutes.join(', '));
+    formData.set('dosage_form', dosageForm);
+    formData.set('therapeutic_class', therapeuticClass);
+    
     if (selectedSubstance) formData.set('atc_id', selectedSubstance.id);
 
     try {
@@ -382,8 +401,8 @@ export default function CertificateEnrollment({
                 )}
               </div>
 
-              {/* Row 3: Strength & Route Groupings */}
-              <div className="space-y-3">
+              {/* Row 3: Strength, Dosage Form, & Therapeutic Class */}
+              <div className="grid grid-cols-3 gap-2">
                  <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block flex items-center gap-1">
                       <Zap size={10} /> Strength
@@ -391,49 +410,83 @@ export default function CertificateEnrollment({
                     <input 
                       name="strength" 
                       defaultValue={editData?.strength}
-                      placeholder="e.g. 100mg/ml" 
-                      className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium" 
+                      placeholder="e.g. 100mg" 
+                      className="w-full border border-slate-200 p-2.5 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs font-medium" 
                       required 
                     />
                  </div>
                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1">
-                      <Activity size={10} /> Route(s) of Administration
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block flex items-center gap-1">
+                      <Layers size={10} /> Form
                     </label>
-                    <div className="space-y-3">
-                      {Object.entries(ROUTE_GROUPS).map(([group, routes]) => (
-                        <div key={group} className="space-y-1">
-                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter flex items-center gap-1">
-                            <ChevronRight size={8} /> {group}
-                          </span>
-                          <div className="grid grid-cols-2 gap-2">
-                            {routes.map((route) => (
-                              <button
-                                key={route}
-                                type="button"
-                                onClick={() => toggleRoute(route)}
-                                className={`flex items-center gap-2 p-2 rounded-lg border text-[11px] font-bold transition-all ${
-                                  selectedRoutes.includes(route) 
-                                  ? 'bg-emerald-50 border-emerald-500 text-emerald-700' 
-                                  : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                                }`}
-                              >
-                                <div className={`w-3 h-3 rounded border flex items-center justify-center transition-colors ${
-                                  selectedRoutes.includes(route) ? 'bg-emerald-500 border-emerald-500' : 'bg-white border-slate-300'
-                                }`}>
-                                  {selectedRoutes.includes(route) && <Check size={8} className="text-white" strokeWidth={4} />}
-                                </div>
-                                {route}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                    <select 
+                      name="dosage_form"
+                      value={dosageForm}
+                      onChange={(e) => setDosageForm(e.target.value)}
+                      className="w-full border border-slate-200 p-2.5 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs font-medium bg-white cursor-pointer"
+                      required
+                    >
+                      {DOSAGE_FORMS.map(form => (
+                        <option key={form} value={form}>{form}</option>
                       ))}
-                    </div>
+                    </select>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block flex items-center gap-1">
+                      <Stethoscope size={10} /> Class
+                    </label>
+                    <select 
+                      name="therapeutic_class"
+                      value={therapeuticClass}
+                      onChange={(e) => setTherapeuticClass(e.target.value)}
+                      className="w-full border border-slate-200 p-2.5 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs font-medium bg-white cursor-pointer"
+                      required
+                    >
+                      {THERAPEUTIC_CLASSES.map(cls => (
+                        <option key={cls} value={cls}>{cls}</option>
+                      ))}
+                    </select>
                  </div>
               </div>
 
-              {/* Row 4: Pack Size & Country Dropdown */}
+              {/* Row 4: Route Groupings */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1">
+                  <Activity size={10} /> Route(s) of Administration
+                </label>
+                <div className="space-y-3">
+                  {Object.entries(ROUTE_GROUPS).map(([group, routes]) => (
+                    <div key={group} className="space-y-1">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter flex items-center gap-1">
+                        <ChevronRight size={8} /> {group}
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        {routes.map((route) => (
+                          <button
+                            key={route}
+                            type="button"
+                            onClick={() => toggleRoute(route)}
+                            className={`flex items-center gap-2 p-2 rounded-lg border text-[11px] font-bold transition-all ${
+                              selectedRoutes.includes(route) 
+                              ? 'bg-emerald-50 border-emerald-500 text-emerald-700' 
+                              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className={`w-3 h-3 rounded border flex items-center justify-center transition-colors ${
+                              selectedRoutes.includes(route) ? 'bg-emerald-500 border-emerald-500' : 'bg-white border-slate-300'
+                            }`}>
+                              {selectedRoutes.includes(route) && <Check size={8} className="text-white" strokeWidth={4} />}
+                            </div>
+                            {route}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Row 5: Pack Size & Country Dropdown */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 bg-emerald-50/30 rounded-xl border border-emerald-100/50">
                   <label className="text-[10px] font-bold text-emerald-700 uppercase mb-1 flex items-center gap-1">
@@ -466,7 +519,7 @@ export default function CertificateEnrollment({
                 </div>
               </div>
 
-              {/* Row 5: MAH Selection */}
+              {/* Row 6: MAH Selection */}
               <div className="relative pb-4"> 
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Marketing Authorization Holder (MAH)</label>
                 <div className="relative">

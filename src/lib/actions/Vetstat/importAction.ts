@@ -57,6 +57,40 @@ export async function submitLedgerEntry(previousState: any, formData: FormData):
   // QMS Requirement: Capture when the client-side interaction began processing
   const clientTimestamp = parseInt(formData.get('client_start_time') as string || '0') || Date.now();
 
+  // 🔴 CRITICAL QUANTITY DEFICIT CHECK FOR CONSUMPTION & DESTRUCTION LOGS
+  if (entryType === 'CONSUMPTION' || entryType === 'DESTRUCTION') {
+    const { data: historicalRecords, error: historyError } = await supabase
+      .from('ledger_entries')
+      .select('entry_type, pack_quantity')
+      .eq('entity_id', productId);
+
+    if (historyError) {
+      console.error("Ledger Balance Verification Failed:", JSON.stringify(historyError, null, 2));
+      return { success: false, message: 'Could not pull historical ledgers to verify safety balance.', timestamp: Date.now() };
+    }
+
+    if (historicalRecords) {
+      // Aggregate total supply vs demand from the historical log trail
+      const totalImported = historicalRecords
+        .filter(r => r.entry_type === 'IMPORT')
+        .reduce((sum, r) => sum + (parseFloat(r.pack_quantity) || 0), 0);
+      
+      const totalDeducted = historicalRecords
+        .filter(r => r.entry_type === 'CONSUMPTION' || r.entry_type === 'DESTRUCTION')
+        .reduce((sum, r) => sum + (parseFloat(r.pack_quantity) || 0), 0);
+
+      const availableBalance = totalImported - totalDeducted;
+
+      if (packQty > availableBalance) {
+        return {
+          success: false,
+          message: `Regulatory Deficit: Insufficient stock balance. Total imported: ${totalImported} packs. Already allocated: ${totalDeducted} packs. Current Available Balance: ${availableBalance} packs. Requested: ${packQty} packs.`,
+          timestamp: Date.now()
+        };
+      }
+    }
+  }
+
   // 3. Fetch Regulatory Reference Data from Updated Table Names
   const [atcResult, productResult] = await Promise.all([
     supabase.from('atc_codes').select('*').eq('id', atcId).maybeSingle(),
@@ -105,21 +139,17 @@ export async function submitLedgerEntry(previousState: any, formData: FormData):
   const totalQmsStaffSeconds = ((Date.now() - clientTimestamp) / 1000) + serverProcessingSeconds;
 
   // 7. Construct Unified Transactional Payload
-  // 7. Construct Unified Transactional Payload
   const payload: any = {
     atc_id: atcId || null,
     entity_id: productId, 
     entry_type: entryType,
     api_mass_mg: apiMassMg,
     ddd_consumed: dddConsumed,
-    
-    // Explicitly map table keys to your camelCase extraction variables:
     origin_warehouse: originWarehouse, 
     origin_state: originState,
     destination_state: destinationState,
     geopolitical_zone: geopoliticalZone,
     target_species: targetSpecies,
-    
     pack_quantity: packQty,
     metadata: { 
       risk_priority: atcRes.risk_priority || 'Low',
@@ -136,6 +166,7 @@ export async function submitLedgerEntry(previousState: any, formData: FormData):
       }
     },
   };
+
   // 8. Database Write to Synchronized Ledger Table Target
   let dbResult;
   if (entryId) {
