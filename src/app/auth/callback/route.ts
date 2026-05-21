@@ -6,6 +6,7 @@ import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function GET(request: Request) {
+  console.log('Getting auth: ')
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   
@@ -72,14 +73,23 @@ export async function GET(request: Request) {
   }
 
   // Route to high-level dashboard
-  if (userProfile.role === "Admin" || userProfile.role === "Director") {
-    return NextResponse.redirect(`${origin}/dashboard/director`);
-  }
+  if (userProfile) {
+      const division = userProfile.division?.toLowerCase() || "vmd";
+      const role = userProfile.role;
+      console.log('My role is: ', role);
+      let dashboardPath: string;
 
-  // Route to specific Technical Division (IRSD, VMD, PAD, AFPD)
-  // We lowercase the division name to match your folder structure exactly
-  const division = userProfile.division?.toLowerCase() || "vmd";
-  
-  console.log(`✅ Authentication successful. Routing to ${division} hub.`);
-  return NextResponse.redirect(`${origin}/dashboard/${division}`);
+      // Evaluate routing logic based on user role assignments
+      if (role === "Admin" || role === "Director") {
+        dashboardPath = "/dashboard/director";
+      } else if (role === "PID") {
+        dashboardPath = "/Vetstat/Ledger";
+      } else {
+        // The missing catch-all: falls back to the division-specific dashboard
+        console.log('Catch all?');
+        dashboardPath = `/dashboard/${division}`;
+      }
+        
+      return NextResponse.redirect(`${origin}${dashboardPath}`);
+    }
 }

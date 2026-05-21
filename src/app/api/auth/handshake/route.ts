@@ -43,6 +43,7 @@ export async function POST(request: Request) {
 // Inside app/api/auth/handshake/route.ts -> GET function
 
 export async function GET(request: Request) {
+    console.log('Getting api/auth: ')
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   
@@ -73,12 +74,32 @@ export async function GET(request: Request) {
       .where(eq(users.id, user.id))
       .limit(1);
 
+    // if (userProfile) {
+    //   // If profile exists, send them to their dashboard
+    //   const division = userProfile.division?.toLowerCase() || "vmd";
+    //   const dashboardPath = (userProfile.role === "Admin" || userProfile.role === "Director") 
+    //     ? "/dashboard/director" 
+    //     : `/dashboard/${division}`;
+        
+    //   return NextResponse.redirect(`${origin}${dashboardPath}`);
+    // }
+
     if (userProfile) {
-      // If profile exists, send them to their dashboard
       const division = userProfile.division?.toLowerCase() || "vmd";
-      const dashboardPath = (userProfile.role === "Admin" || userProfile.role === "Director") 
-        ? "/dashboard/director" 
-        : `/dashboard/${division}`;
+      const role = userProfile.role;
+      console.log('My role is: ', role);
+      let dashboardPath: string;
+
+      // Evaluate routing logic based on user role assignments
+      if (role === "Admin" || role === "Director") {
+        dashboardPath = "/dashboard/director";
+      } else if (role === "PID") {
+        dashboardPath = "/Vetstat/Ledger";
+      } else {
+        // The missing catch-all: falls back to the division-specific dashboard
+        console.log('Catch all?');
+        dashboardPath = `/dashboard/${division}`;
+      }
         
       return NextResponse.redirect(`${origin}${dashboardPath}`);
     }

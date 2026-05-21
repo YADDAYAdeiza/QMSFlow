@@ -122,6 +122,7 @@ export default async function StaffAdminPage(props: {
                     <option value="AFPD">AFPD (Animal Feed and Premixes)</option>
                     <option value="IRSD">IRSD (Inspection)</option>
                     <option value="VMAP">VMAP (Directorate)</option>
+                    <option value="PID">PID (Directorate)</option>
                   </select>
                 </div>
 
@@ -133,6 +134,7 @@ export default async function StaffAdminPage(props: {
                     <option value="Admin">System Administrator</option>
                     <option value="LOD">LOD</option>
                     <option value="Director">Director</option>
+                    <option value="PID_AMR">PID AMR</option>
                   </select>
                 </div>
 

@@ -60,7 +60,10 @@ export async function getRedirectPath(userId: string) {
     if (role === "Director") {
       return "/dashboard/director";
     }
-
+    
+    if (role === "PID_AMR") {
+      return "/Vetstat/Ledger";
+    }
     /** * D. TECHNICAL STAFF / SPECIALISTS
      * This redirects to the dynamic division segment.
      * Path: /dashboard/[division]
