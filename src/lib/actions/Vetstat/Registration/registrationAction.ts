@@ -43,8 +43,8 @@ export async function enrollFPPHeader(formData: FormData) {
       atc_id,
       strength,
       route_of_administration,
-      dosage_form,        // Saved to permits table
-      therapeutic_class,  // Saved to permits table
+      dosage_form,        
+      therapeutic_class,  
       status: 'Original',
       dir_type: 'VMD' 
     }])
@@ -67,10 +67,10 @@ export async function enrollFPPHeader(formData: FormData) {
   return { success: true, permit_id: data.id };
 }
 
-// Ensure your updateFPPRegistration matches this as well
 export async function updateFPPRegistration(id: string, formData: FormData) {
   const supabase = await createClient();
   
+  // Fully tracking the complete entity map during data modification events
   const payload = {
     permit_number: formData.get('nafdac_reg_no'),
     product_name: formData.get('product_name'),
@@ -79,6 +79,8 @@ export async function updateFPPRegistration(id: string, formData: FormData) {
     active_substance: formData.get('active_substance'),
     strength: formData.get('strength'),
     route_of_administration: formData.get('route_of_administration'),
+    dosage_form: formData.get('dosage_form'),        // Now safely retained on record updates
+    therapeutic_class: formData.get('therapeutic_class'),  // Now safely retained on record updates
   };
 
   const { error } = await supabase
@@ -86,30 +88,13 @@ export async function updateFPPRegistration(id: string, formData: FormData) {
     .update(payload)
     .eq('id', id);
 
-  if (error) return { success: false, message: error.message };
+  if (error) {
+    console.error("FPP Modification Error:", error);
+    return { success: false, message: error.message };
+  }
   
   revalidatePath('/Vetstat/Ledger');
+  revalidatePath('/Vetstat/Dashboard');
+  
   return { success: true };
 }
-
-// export async function updateFPPRegistration(id: string, formData: FormData) {
-//   const supabase = await createClient();
-  
-//   const updates = {
-//     permit_number: formData.get('nafdac_reg_no') as string,
-//     product_name: formData.get('product_name') as string,
-//     company_name: formData.get('company_name') as string,
-//     shipping_pack_size: formData.get('shipping_pack_size') as string,
-//     active_substance: formData.get('active_substance') as string,
-//   };
-
-//   const { error } = await supabase
-//     .from('permits')
-//     .update(updates)
-//     .eq('id', id);
-
-//   if (error) return { success: false, message: error.message };
-  
-//   revalidatePath('/Vetstat/Ledger');
-//   return { success: true };
-// }
