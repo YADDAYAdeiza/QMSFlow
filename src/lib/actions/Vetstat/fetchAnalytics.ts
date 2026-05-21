@@ -3,15 +3,20 @@
 
 import { createClient } from '@/utils/supabase/server';
 
-/**
- * Fetches aggregated AMS data filtered by Date and Species.
- * @param startDate - ISO string for the beginning of the range
- * @param endDate - ISO string for the end of the range
- * @param species - The target species filter (e.g., 'Poultry', 'Aquaculture', or 'All')
- */
-// lib/actions/Vetstat/fetchAnalytics.ts
+export interface SubstanceMetric {
+  substance: string;
+  class: string;
+  riskPriority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  volume: number;
+}
 
-// lib/actions/Vetstat/fetchAnalytics.ts
+export interface ZoneMetric {
+  zone: string;
+  value: number;
+  prevValue: number;
+  trend: number;
+  states: Array<{ name: string; value: number }>;
+}
 
 export async function getAMSRegionalAnalytics(
   startDate?: string, 
@@ -26,10 +31,12 @@ export async function getAMSRegionalAnalytics(
   const speciesFilter = species || 'All';
   const riskFilter = risk || 'All';
 
+  // Calculate matching historical window duration for tracking trends
   const duration = new Date(currentEnd).getTime() - new Date(currentStart).getTime();
   const prevStart = new Date(new Date(currentStart).getTime() - duration).toISOString();
   const prevEnd = currentStart;
 
+  // Execute both analytical queries simultaneously to boost performance
   const [currentReq, prevReq] = await Promise.all([
     supabase.rpc('get_ams_stats_v5', { 
       start_date: currentStart, 
@@ -45,52 +52,83 @@ export async function getAMSRegionalAnalytics(
     })
   ]);
 
-  // --- DEBUG LOGS ---
-  console.log("--- VMD DASHBOARD DEBUG ---");
-  console.log("Filters used:", { speciesFilter, riskFilter });
-  
   if (currentReq.error) {
-    console.error("SQL ERROR:", currentReq.error.message);
-  } else {
-    console.log("DATA RECEIVED FROM SQL:", currentReq.data);
+    console.error("SQL Error inside Analytics Action:", currentReq.error.message);
+    return { zones: [], topSubstances: [], rawRows: [], totalDDD: 0, globalTrend: 0 };
   }
-  // -------------------
 
-  if (currentReq.error) return { zones: [], totalDDD: 0, globalTrend: 0 };
-
+  const rawRows = currentReq.data || [];
   const zoneMap: Record<string, any> = {};
+  const substanceMap: Record<string, { class: string; riskPriority: string; volume: number }> = {};
 
-  currentReq.data?.forEach((row: any) => {
-    if (!zoneMap[row.geopolitical_zone]) {
-      zoneMap[row.geopolitical_zone] = { 
-        zone: row.geopolitical_zone, 
+  // 1. Parse Current Timeframe Stream
+  rawRows.forEach((row: any) => {
+    // Process Geopolitical Structural Loads
+    const zoneKey = row.zone || "Unassigned";
+    if (!zoneMap[zoneKey]) {
+      zoneMap[zoneKey] = { 
+        zone: zoneKey, 
         value: 0, 
         prevValue: 0, 
         states: [] 
       };
     }
     const val = parseFloat(row.total_ddd) || 0;
-    zoneMap[row.geopolitical_zone].value += val;
-    zoneMap[row.geopolitical_zone].states.push({ 
-      name: row.state_name, 
-      value: val 
-    });
+    zoneMap[zoneKey].value += val;
+    
+    if (row.state_name) {
+      // Look for an existing state record inside this zone to avoid duplicate row entries
+      const existingState = zoneMap[zoneKey].states.find((s: any) => s.name === row.state_name);
+      if (existingState) {
+        existingState.value += val;
+      } else {
+        zoneMap[zoneKey].states.push({ 
+          name: row.state_name, 
+          value: val 
+        });
+      }
+    }
+
+    // Process Unique Substance Models
+    const subKey = row.substance || "Unknown Substance";
+    if (!substanceMap[subKey]) {
+      substanceMap[subKey] = {
+        class: row.substance_class || "Unclassified",
+        riskPriority: row.risk_priority || "LOW",
+        volume: 0
+      };
+    }
+    substanceMap[subKey].volume += val;
   });
 
+  // 2. Parse Historical Timeframe Stream for Trends Computation
   prevReq.data?.forEach((row: any) => {
-    if (zoneMap[row.geopolitical_zone]) {
-      zoneMap[row.geopolitical_zone].prevValue += parseFloat(row.total_ddd) || 0;
+    const zoneKey = row.zone || "Unassigned";
+    const val = parseFloat(row.total_ddd) || 0;
+    if (zoneMap[zoneKey]) {
+      zoneMap[zoneKey].prevValue += val;
     }
   });
 
-  const zones = Object.values(zoneMap).map((z: any) => ({
+  // 3. Complete In-Memory Analytical Transformations
+  const zones: ZoneMetric[] = Object.values(zoneMap).map((z: any) => ({
     ...z,
     trend: z.prevValue > 0 ? ((z.value - z.prevValue) / z.prevValue) * 100 : 0
   }));
+
+  const topSubstances: SubstanceMetric[] = Object.entries(substanceMap)
+    .map(([substance, details]) => ({
+      substance,
+      class: details.class,
+      riskPriority: details.riskPriority as any,
+      volume: details.volume
+    }))
+    .sort((a, b) => b.volume - a.volume); // Sort by highest consumption volume
 
   const totalDDD = zones.reduce((sum, z) => sum + z.value, 0);
   const prevTotal = zones.reduce((sum, z) => sum + z.prevValue, 0);
   const globalTrend = prevTotal > 0 ? ((totalDDD - prevTotal) / prevTotal) * 100 : 0;
 
-  return { zones, totalDDD, globalTrend };
+  // Added rawRows to the structural return block
+  return { zones, topSubstances, rawRows, totalDDD, globalTrend };
 }
