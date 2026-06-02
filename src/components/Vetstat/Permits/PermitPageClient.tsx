@@ -1,79 +1,170 @@
-// components/Vetstat/Permits/PermitPageClient.tsx
 'use client';
-import { useState } from 'react';
+
+import { useState, useEffect } from 'react';
 import EnrollmentModal from './EnrollPermitModal';
 import PermitDashboard from './PermitDashboard';
 import RapidIntake from './RapidIntake';
+import PermitAuthDashboard from './PermitAuthDashboard';
+import { Layers, ShieldCheck, Landmark, Tractor, Activity } from 'lucide-react';
 
-export default function PermitPageClient({ initialPermits, atcCodes }: any) {
+interface PermitPageClientProps {
+  initialPermits: any[];
+  atcCodes: any[];
+}
+
+export default function PermitPageClient({ initialPermits, atcCodes }: PermitPageClientProps) {
   const [activeTab, setActiveTab] = useState('permits');
-  // State to hold the currently selected permit object
   const [selectedPermit, setSelectedPermit] = useState<any | null>(null);
+  
+  // Dynamic divisional array structures mapped as per VMD requirements
+  const divisions = ["VMD", "PAD", "AFPD", "IRSD"];
+
+  // Monitor background data updates to keep the active side-panel contextual node fresh
+  useEffect(() => {
+    if (selectedPermit) {
+      const match = initialPermits.find(p => p.id === selectedPermit.id);
+      if (match) {
+        setSelectedPermit(match);
+      }
+    }
+  }, [initialPermits]);
 
   const tabs = [
-    { id: 'permits', label: 'Import Permits' },
-    { id: 'local', label: 'Local Manufacturer Utilization' },
-    { id: 'farm', label: 'On-Farm Utilization' },
+    { id: 'permits', label: 'Import Permits', icon: ShieldCheck },
+    { id: 'local', label: 'Local Manufacturer Utilization', icon: Landmark },
+    { id: 'farm', label: 'On-Farm Utilization', icon: Tractor },
   ];
 
+  const CurrentIcon = tabs.find(t => t.id === activeTab)?.icon || Layers;
+
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Regulatory Oversight Console</h1>
-        <EnrollmentModal atcCodes={atcCodes} />
+    <div className="p-6 max-w-[1600px] mx-auto space-y-6">
+      
+      {/* Structural Header Area */}
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-slate-900 text-white p-6 rounded-2xl shadow-sm border border-slate-800">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-black px-2 py-0.5 rounded-md uppercase tracking-wider border border-emerald-500/30">
+              National Security Module
+            </span>
+            <div className="flex gap-1 text-[9px] font-bold text-slate-400">
+              {divisions.map((div, i) => (
+                <span key={div}>
+                  {div}{i < divisions.length - 1 && ' • '}
+                </span>
+              ))}
+            </div>
+          </div>
+          <h1 className="text-xl font-black tracking-tight">Antimicrobial Usage Surveillance Console</h1>
+          <p className="text-xs text-slate-400">Veterinary Medicine Directorate (VMD) Regulatory Tracking Workspace</p>
+        </div>
+        <div className="shrink-0">
+          <EnrollmentModal atcCodes={atcCodes} />
+        </div>
       </div>
 
-      <div className="border-b flex gap-8">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`pb-3 font-bold ${activeTab === tab.id ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Aggregate Analytical Dashboard Node */}
+      {activeTab === 'permits' && (
+        <PermitAuthDashboard permits={initialPermits} />
+      )}
+
+      {/* Segment Workspace Navigation Tabs */}
+      <div className="border-b border-slate-100 flex gap-6 overflow-x-auto custom-scrollbar">
+        {tabs.map(tab => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setActiveTab(tab.id);
+                setSelectedPermit(null); // Clear context tracking on node pivot
+              }}
+              className={`pb-3 text-xs font-black uppercase tracking-wider flex items-center gap-2 border-b-2 transition outline-none shrink-0 ${
+                isActive 
+                  ? 'border-emerald-600 text-emerald-700' 
+                  : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'
+              }`}
+            >
+              <Icon size={14} className={isActive ? "text-emerald-600" : "text-slate-400"} />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Side: The Dashboard (takes 2/3 space) */}
+      {/* Main Multi-Pane Grid Infrastructure */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        
+        {/* Left Side: Ledger Hub Grid (2/3 Grid Layout footprint) */}
         <div className="lg:col-span-2">
           {activeTab === 'permits' ? (
             <PermitDashboard 
               initialPermits={initialPermits} 
               atcCodes={atcCodes} 
-              onSelectPermit={setSelectedPermit} // Pass the setter
-              selectedId={selectedPermit?.id}    // Pass the current ID for highlighting
+              onSelectPermit={setSelectedPermit}
+              selectedId={selectedPermit?.id}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center p-20 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 text-gray-500">
-              <div className="text-8xl mb-6">🚧</div>
-              <h2 className="text-xl font-bold">{tabs.find(t => t.id === activeTab)?.label}</h2>
-              <p>This module is currently under development.</p>
+            <div className="flex flex-col items-center justify-center p-16 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 text-slate-400">
+              <div className="h-12 w-12 rounded-xl bg-slate-100 flex items-center justify-center mb-4 text-slate-500 animate-pulse">
+                <CurrentIcon size={20} />
+              </div>
+              <h2 className="text-sm font-black uppercase text-slate-700 tracking-wide">
+                {tabs.find(t => t.id === activeTab)?.label}
+              </h2>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs text-center">
+                This database pipeline layer is currently being staged to align with localized antimicrobial consumption data architectures.
+              </p>
             </div>
           )}
         </div>
 
-        {/* Right Side: The Rapid Intake (takes 1/3 space) */}
-        <div className="lg:col-span-1">
+        {/* Right Side: Sticky Split-Pane Processing Desk (1/3 Footprint) */}
+        <div className="lg:col-span-1 lg:sticky lg:top-6">
           {selectedPermit ? (
-            <div className="sticky top-6 space-y-4">
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                <p className="text-xs font-bold text-blue-600 uppercase">Active Context</p>
-                <h4 className="font-bold text-slate-800">{selectedPermit.company_name}</h4>
-                <p className="text-sm text-slate-500">{selectedPermit.permit_number}</p>
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200">
+              {/* Context Profile Header */}
+              <div className="p-4 bg-slate-50 border-b border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] bg-emerald-50 border border-emerald-200 text-emerald-700 font-black px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1">
+                    <Activity size={10} className="animate-pulse text-emerald-600" />
+                    Desk Context Bound
+                  </span>
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-800 text-xs truncate max-w-[280px]">
+                    {selectedPermit.company_name}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase tracking-wide font-medium">
+                    Permit Reference: <span className="text-slate-600 font-bold">{selectedPermit.permit_number}</span>
+                  </p>
+                </div>
               </div>
-              <RapidIntake 
-                companyName={selectedPermit.company_name} 
-                // You can add permitNumber={selectedPermit.permit_number} if you update RapidIntake props
-              />
+              
+              {/* Localized Execution Window Container */}
+              <div className="p-4 bg-white">
+                <RapidIntake 
+                  companyName={selectedPermit.company_name} 
+                  permitId={selectedPermit.id}
+                  mode="OUTAKE" // Default localized workflow pane tracking setting
+                  onComplete={() => {
+                    // Triggers inline reset variables or background validation cascades if necessary
+                    console.log(` सुरिक्षत context side-car operational action completed.`);
+                  }}
+                />
+              </div>
             </div>
           ) : (
-            <div className="h-full min-h-[300px] border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 p-10 text-center">
-              <p>Select a company row from the left to begin Rapid Intake scanning.</p>
+            <div className="border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center text-slate-400 p-8 text-center min-h-[260px] bg-slate-50/20">
+              <p className="text-xs font-medium italic">
+                Select an active registration header row from the tracking matrix ledger to slide in the dynamic Rapid Intake configuration module.
+              </p>
             </div>
           )}
         </div>
+
       </div>
     </div>
   );

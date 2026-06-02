@@ -12,9 +12,9 @@ import {
   Title,
   Tooltip,
   Legend,
+  ChartOptions
 } from 'chart.js';
 
-// Register all necessary components for Bar, Line, and Pie charts
 ChartJS.register(
   CategoryScale, 
   LinearScale, 
@@ -33,48 +33,57 @@ export function BarChart({ labels, values }: { labels: string[], values: number[
     datasets: [{
       label: 'Volume (DDD)',
       data: values,
-      backgroundColor: ['#2563eb', '#ef4444'], // Blue for Imports, Red for Consumption
-      borderRadius: 8,
+      backgroundColor: '#2563eb', // Clean solid blue fallback (or array if mapping unique indices)
+      borderRadius: 6,
     }],
   };
   
-  return <Bar data={chartData} options={{ responsive: true }} />;
+  const options: ChartOptions<'bar'> = {
+    responsive: true,
+    plugins: {
+      legend: { display: false } // Hiding redundant legend for single dataset bars
+    },
+    scales: {
+      y: { beginAtZero: true }
+    }
+  };
+  
+  return <Bar data={chartData} options={options} />;
 }
 
 export function LineChart({ 
   labels, 
   values, 
   datasets 
-    }: { 
-    labels: string[], 
-    values?: number[], 
-    datasets?: any[] 
+}: { 
+  labels: string[], 
+  values?: number[], 
+  datasets?: any[] 
 }) {
-    const chartData = {
-        labels: labels,
-        datasets: datasets || [{
-        label: 'Consumption Trend (DDD)',
-        data: values,
-        borderColor: '#2563eb',
-        backgroundColor: 'rgba(37, 99, 235, 0.1)',
-        tension: 0.3, // This is fine here, but the error relates to 'options' below
-        fill: true,
-        }],
-    };
+  const chartData = {
+    labels: labels,
+    datasets: datasets || [{
+      label: 'Consumption Trend (DDD)',
+      data: values,
+      borderColor: '#2563eb',
+      backgroundColor: 'rgba(37, 99, 235, 0.05)',
+      fill: true,
+    }],
+  };
 
-    const options = {
-        responsive: true,
-        elements: {
-        line: {
-            tension: 0.3, // MOVED HERE: This is where Chart.js v4 expects it
-        },
-        },
-        scales: {
-        y: { beginAtZero: true }
-        }
-    };
-    
-    return <Line data={chartData} options={options} />;
+  const options: ChartOptions<'line'> = {
+    responsive: true,
+    elements: {
+      line: {
+        tension: 0.3, // Globally configures curve aesthetics across all chart lines safely
+      },
+    },
+    scales: {
+      y: { beginAtZero: true }
+    }
+  };
+  
+  return <Line data={chartData} options={options} />;
 }
 
 export function PieChart({ labels, values }: { labels: string[], values: number[] }) {
@@ -94,5 +103,15 @@ export function PieChart({ labels, values }: { labels: string[], values: number[
     }],
   };
   
-  return <Pie data={chartData} options={{ responsive: true }} />;
+  const options: ChartOptions<'pie'> = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'right' as const,
+        labels: { boxWidth: 12, font: { weight: 'bold' } }
+      }
+    }
+  };
+  
+  return <Pie data={chartData} options={options} />;
 }

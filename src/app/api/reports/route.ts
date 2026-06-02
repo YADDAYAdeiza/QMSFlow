@@ -13,15 +13,14 @@ export async function GET(request: Request) {
     const species = searchParams.get('species') || 'All';
     const risk = searchParams.get('risk') || 'All';
 
-    // 1. Fetch raw data stream directly from Supabase via our action layout
+    // 1. Fetch raw data
     const analyticsData = await getAMSRegionalAnalytics(startDate, endDate, species, risk);
 
-    // 2. Compute Multiple QuickChart Graphics Path Definitions
+    // 2. Compute Graphics Configurations
     const zoneLabels = analyticsData.zones.map(z => z.zone);
     const zoneValues = analyticsData.zones.map(z => z.value);
-    const topSubstances = analyticsData.topSubstances.slice(0, 5); // top 5 for ranking chart
+    const topSubstances = analyticsData.topSubstances.slice(0, 5);
 
-    // Chart A: Vertical Bar Chart (Zones)
     const barChartConfig = {
       type: 'bar',
       data: {
@@ -30,17 +29,11 @@ export async function GET(request: Request) {
           label: 'Antimicrobial Volume (DDD)',
           data: zoneValues,
           backgroundColor: 'rgba(196, 98, 49, 0.75)',
-          borderColor: 'rgba(196, 98, 49, 1)',
-          borderWidth: 1
         }]
       },
-      options: {
-        legend: { display: false },
-        title: { display: true, text: 'Absolute Consumption (DDD) by Geopolitical Zone', fontSize: 14 }
-      }
+      options: { legend: { display: false }, title: { display: true, text: 'Consumption by Zone (DDD)' } }
     };
 
-    // Chart B: Proportional Doughnut Chart (Zone Market Breakdown)
     const doughnutChartConfig = {
       type: 'doughnut',
       data: {
@@ -50,13 +43,9 @@ export async function GET(request: Request) {
           backgroundColor: ['#1e293b', '#c46231', '#059669', '#ea580c', '#2563eb', '#7c3aed']
         }]
       },
-      options: {
-        title: { display: true, text: 'Geopolitical Percentage Breakdown', fontSize: 14 },
-        plugins: { legend: { position: 'right' } }
-      }
+      options: { title: { display: true, text: 'Percentage Breakdown' } }
     };
 
-    // Chart C: Horizontal Bar Chart (Top Substances)
     const horizontalChartConfig = {
       type: 'horizontalBar',
       data: {
@@ -65,58 +54,41 @@ export async function GET(request: Request) {
           label: 'Volume (DDD)',
           data: topSubstances.map(s => s.volume),
           backgroundColor: 'rgba(37, 99, 235, 0.75)',
-          borderColor: 'rgba(37, 99, 235, 1)',
-          borderWidth: 1
         }]
       },
-      options: {
-        legend: { display: false },
-        title: { display: true, text: 'Top 5 Active Substances Distribution Ranking', fontSize: 14 },
-        scales: { xAxes: [{ ticks: { beginAtZero: true } }] }
-      }
+      options: { legend: { display: false }, title: { display: true, text: 'Top 5 Active Substances' } }
     };
 
     const zoneBarUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(barChartConfig))}`;
     const zonePieUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(doughnutChartConfig))}`;
     const substanceBarUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(horizontalChartConfig))}`;
 
-    // 3. Render the layout directly into a printable Node streaming path
-  // src/app/api/reports/route.ts
+    // 3. Render PDF Stream
+    const reportElement = React.createElement(SurveillancePdfReport, {
+      zones: analyticsData.zones,
+      topSubstances: analyticsData.topSubstances,
+      totalDDD: analyticsData.totalDDD,
+      globalTrend: analyticsData.globalTrend,
+      charts: { zoneBarUrl, zonePieUrl, substanceBarUrl }
+    });
 
-// 3. Render the layout directly into a printable Node streaming path
-// src/app/api/reports/route.ts
+    const pdfStream = await renderToStream(reportElement as any);
 
-// 3. Render the layout directly into a printable Node streaming path
-// Dynamically instantiate the template component function as an explicit React Element factory
-const reportElement = React.createElement(SurveillancePdfReport, {
-  zones: analyticsData.zones,
-  topSubstances: analyticsData.topSubstances,
-  totalDDD: analyticsData.totalDDD,
-  globalTrend: analyticsData.globalTrend,
-  charts: {
-    zoneBarUrl,
-    zonePieUrl,
-    substanceBarUrl
-  }
-});
-
-// Explicitly cast to 'any' inside the render function argument 
-// to satisfy @react-pdf's internal DocumentProps definition
-const pdfStream = await renderToStream(reportElement as any);
-
-    // 4. Pipe binary responses straight back down to browser windows
-    const chunks: any[] = [];
+    // 4. Return Buffered Response with strict security headers
+    const chunks: Buffer[] = [];
     return new Promise<NextResponse>((resolve, reject) => {
-      pdfStream.on('data', (chunk) => chunks.push(chunk));
+      pdfStream.on('data', (chunk: Buffer) => chunks.push(chunk));
       pdfStream.on('end', () => {
         const result = Buffer.concat(chunks);
-        const response = new NextResponse(result, {
+        resolve(new NextResponse(result, {
           headers: {
             'Content-Type': 'application/pdf',
-            'Content-Disposition': 'attachment; filename="VMD_Surveillance_Report_2026.pdf"',
+            'Content-Disposition': `attachment; filename="VMD_Surveillance_Report_${new Date().toISOString().split('T')[0]}.pdf"`,
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
           },
-        });
-        resolve(response);
+        }));
       });
       pdfStream.on('error', (err) => reject(err));
     });

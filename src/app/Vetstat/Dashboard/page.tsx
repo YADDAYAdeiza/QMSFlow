@@ -1,5 +1,6 @@
+// app/Vetstat/Dashboard/page.tsx
 import { getAMSRegionalAnalytics } from "@/lib/actions/Vetstat/fetchAnalytics";
-import NigeriaMap from "@/components/Vetstat/NigeriaMap";
+import StructuralAnalyticsEngine from "@/components/Vetstat/NigeriaMap";
 import DateRangePicker from "@/components/Vetstat/DateRangePicker";
 import SectorToggle from "@/components/Vetstat/SectorToggle";
 import RiskToggle from "@/components/Vetstat/RiskToggle";
@@ -29,18 +30,18 @@ export default async function AMSDashboardPage({
   const risk = (params.risk as string) || 'All';
   const filterLabel = (params.label as string) || "All Time";
 
-  // Fetch returns { zones, totalDDD, globalTrend } based on filters
-  const analytics = await getAMSRegionalAnalytics(start, end, species, risk);
+  // Destructured the rawRows alongside analytical aggregates
+  const { zones, topSubstances, rawRows, totalDDD, globalTrend } = await getAMSRegionalAnalytics(start, end, species, risk);
   
-  const hasRealData = analytics.totalDDD > 0;
-  const isAnomaly = (analytics.globalTrend ?? 0) > 15;
+  const hasRealData = totalDDD > 0;
+  const isAnomaly = (globalTrend ?? 0) > 15;
   const isHighRiskMode = risk === 'HPCIA';
 
   // Dynamic Theme Utility for the Hero Highlight Card
   const getCardTheme = () => {
     if (isHighRiskMode) return 'bg-slate-900 ring-4 ring-rose-500/20 text-white';
     if (species === 'Poultry') return 'bg-emerald-600 text-white';
-    if (species === 'Swine') return 'bg-orange-600 text-white'; // Custom styling for Swine sector
+    if (species === 'Swine') return 'bg-orange-600 text-white'; 
     return 'bg-blue-600 text-white';
   };
 
@@ -53,7 +54,7 @@ export default async function AMSDashboardPage({
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
               <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">
-                VMD Surveillance Hub
+                AMR Surveillance Hub
               </h1>
               <div className="flex items-center gap-2 mt-2">
                 <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.2em]">
@@ -96,11 +97,11 @@ export default async function AMSDashboardPage({
                   </p>
                   <div className="flex items-baseline gap-2">
                     <p className={`text-lg font-black ${isHighRiskMode ? 'text-rose-600' : 'text-blue-600'}`}>
-                      {analytics.totalDDD?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {totalDDD?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </p>
-                    <span className={`text-[10px] font-black flex items-center ${analytics.globalTrend > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                       {analytics.globalTrend > 0 ? <TrendingUp size={10} className="mr-0.5" /> : <TrendingDown size={10} className="mr-0.5" />}
-                       {Math.abs(analytics.globalTrend ?? 0).toFixed(1)}%
+                    <span className={`text-[10px] font-black flex items-center ${globalTrend > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                       {globalTrend > 0 ? <TrendingUp size={10} className="mr-0.5" /> : <TrendingDown size={10} className="mr-0.5" />}
+                       {Math.abs(globalTrend ?? 0).toFixed(1)}%
                     </span>
                   </div>
                </div>
@@ -121,18 +122,25 @@ export default async function AMSDashboardPage({
 
         {/* --- MAIN CONTENT GRID --- */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-[3rem] shadow-xl border border-slate-100 p-10 flex flex-col h-full min-h-[600px] relative overflow-hidden">
-            <div className="mb-8 relative z-10">
+          <div className="lg:col-span-2 bg-white rounded-[3rem] shadow-xl border border-slate-100 p-10 flex flex-col h-full min-h-[650px] relative overflow-hidden">
+            <div className="mb-4 relative z-10">
                 <h3 className={`text-sm font-black uppercase flex items-center gap-2 ${isHighRiskMode ? 'text-rose-600' : 'text-slate-800'}`}>
                   {isHighRiskMode ? <Zap size={16} fill="currentColor" /> : <ShieldAlert size={16} className={isAnomaly ? "text-rose-500" : "text-blue-500"} />} 
-                  {isHighRiskMode ? 'HPCIA Distribution' : `${species} Heatmap`}
+                  {isHighRiskMode ? 'HPCIA Distribution Framework' : `${species} Analytics Matrix`}
                 </h3>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">
-                   {isHighRiskMode ? 'Critically Important Antimicrobials (WHO List)' : `Geopolitical Aggregate for ${species} sector`}
+                   {isHighRiskMode ? 'Highest Priority Critically Important Antimicrobials (WHO List)' : `Geopolitical Aggregate for ${species} sector`}
                 </p>
             </div>
-            <div className="flex-1 w-full relative z-0">
-                <NigeriaMap zones={analytics.zones} />
+            
+            {/* Component renders map/bar switch, and dynamically intercepts active regional rows */}
+            <div className="flex-1 w-full relative z-0 flex flex-col justify-between">
+                <StructuralAnalyticsEngine 
+                  zones={zones} 
+                  topSubstances={topSubstances}
+                  rawRows={rawRows} // <- Wired up raw dataset stream perfectly
+                  isHighRiskMode={isHighRiskMode}
+                />
             </div>
           </div>
 
@@ -146,7 +154,7 @@ export default async function AMSDashboardPage({
                  {isHighRiskMode ? '🔴 High Risk Load' : `${species} Impact`}
                </p>
                <h2 className="text-5xl font-black mt-1">
-                 {analytics.totalDDD?.toFixed(2)} 
+                 {totalDDD?.toFixed(2)} 
                  <span className="text-lg ml-2 font-medium opacity-70">DDD</span>
                </h2>
                <p className="mt-4 text-sm opacity-80 leading-tight font-bold">
@@ -158,7 +166,7 @@ export default async function AMSDashboardPage({
             </div>
 
             {/* INTERACTIVE SIDEBAR WITH TRENDS & DRILL-DOWN */}
-            <DrillDownSidebar zones={analytics.zones} totalDDD={analytics.totalDDD} />
+            <DrillDownSidebar zones={zones} totalDDD={totalDDD} />
           </div>
         </div>
       </div>

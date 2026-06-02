@@ -1,128 +1,138 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { Loader2, AlertCircle, Check, ChevronDown } from 'lucide-react';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { useState, useEffect } from 'react';
+import { Loader2, AlertCircle, Check, X } from 'lucide-react';
+import { fetchCompanyActiveAuthorizations } from '@/lib/actions/Vetstat/Permits/permitActions';
 
 interface AuthorizedSubstance {
   substance: string;
   permit_number: string;
 }
 
-export default function ManualMappingModal({ companyName, rawName, onClose, onConfirm }: any) {
+interface ManualMappingModalProps {
+  companyName: string;
+  rawName: string;
+  onClose: () => void;
+  onConfirm: (item: AuthorizedSubstance) => void;
+}
+
+export default function ManualMappingModal({ 
+  companyName, 
+  rawName, 
+  onClose, 
+  onConfirm 
+}: ManualMappingModalProps) {
   const [authorizedList, setAuthorizedList] = useState<AuthorizedSubstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchCompanyAuthorizations = async () => {
-      setLoading(true);
-      try {
-        // Fetching substances linked to active permits for this company
-        const { data, error: fetchError } = await supabase
-            .from('permit_substances')
-            .select(`
-                quantity_kg,
-                substance_id,
-                atc_codes!fk_atc_codes (
-                substance
-                ),
-                permits!inner (
-                permit_number,
-                company_name,
-                validity
-                )
-            `)
-            .ilike('permits.company_name', `%${companyName}%`)
-            .eq('permits.validity', 'Active');
+    let isMounted = true;
+    setLoading(true);
+    setError(null);
 
-        if (fetchError) throw fetchError;
+    async function loadData() {
+      const result = await fetchCompanyActiveAuthorizations(companyName);
+      
+      // Ignore execution state mutations if the user unmounted the modal workspace
+      if (!isMounted) return;
 
-        // Transform and deduplicate just in case
-        const formatted = (data as any[] || []).map(item => ({
-          substance: item.atc_codes.substance,
-          permit_number: item.permits.permit_number
-        }));
-
-        setAuthorizedList(formatted);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      if (result.success && result.data) {
+        setAuthorizedList(result.data);
+      } else {
+        setError(result.error || 'Failed to fetch authorized datasets.');
       }
-    };
+      setLoading(false);
+    }
 
-    fetchCompanyAuthorizations();
+    loadData();
+
+    // Cleanup phase: cancel pending state assertions if the modal vanishes
+    return () => {
+      isMounted = false;
+    };
   }, [companyName]);
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[85vh] animate-in scale-in-95 duration-150">
         
-        {/* Header */}
-        <div className="p-6 border-b bg-slate-50">
-          <h3 className="font-bold text-slate-800 text-lg">Manual Override</h3>
-          <div className="mt-2 p-2 bg-rose-50 rounded border border-rose-100">
-            <p className="text-[10px] text-rose-400 uppercase font-bold tracking-tight">Unrecognized Item</p>
-            <p className="text-sm font-mono text-rose-700">{rawName}</p>
+        {/* Header Block */}
+        <div className="p-6 border-b border-slate-100 bg-slate-50 relative shrink-0">
+          <h3 className="font-black text-slate-800 text-base tracking-tight">Manual System Override</h3>
+          <button 
+            type="button" 
+            onClick={onClose}
+            className="absolute top-5 right-5 p-1.5 rounded-lg text-slate-400 hover:bg-slate-200/60 hover:text-slate-600 transition"
+          >
+            <X size={16} />
+          </button>
+          
+          <div className="mt-3 p-3 bg-rose-50 rounded-xl border border-rose-100">
+            <p className="text-[10px] text-rose-500 uppercase font-black tracking-widest">Unrecognized Line Payload</p>
+            <p className="text-xs font-mono font-bold text-rose-700 break-all mt-0.5">{rawName}</p>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="p-6">
-          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-            Select Approved VMD Substance
+        {/* Content Node Container */}
+        <div className="p-6 overflow-y-auto grow flex flex-col min-h-[200px]">
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">
+            Select Approved VMD Substance Reference
           </label>
           
           {loading ? (
-            <div className="flex items-center justify-center py-10 gap-2 text-slate-400">
-              <Loader2 className="animate-spin" size={18} />
-              <span className="text-sm italic">Loading authorized list...</span>
+            <div className="flex flex-col items-center justify-center grow py-12 gap-2 text-slate-400">
+              <Loader2 className="animate-spin text-emerald-600" size={20} />
+              <span className="text-xs font-medium italic">Querying authorized regulatory registries...</span>
             </div>
           ) : error ? (
-            <div className="p-4 bg-red-50 text-red-600 rounded-lg text-xs flex items-center gap-2">
-              <AlertCircle size={14} /> {error}
+            <div className="p-3.5 bg-rose-50 border border-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-2">
+              <AlertCircle size={16} className="shrink-0" /> 
+              <span>{error}</span>
             </div>
           ) : authorizedList.length > 0 ? (
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+            <div className="space-y-1.5 pr-1 custom-scrollbar">
               {authorizedList.map((item, idx) => (
                 <button
-                  key={idx}
+                  key={`${item.permit_number}_${idx}`}
+                  type="button"
                   onClick={() => onConfirm(item)}
-                  className="w-full p-3 text-left border border-slate-100 rounded-xl hover:bg-emerald-50 hover:border-emerald-200 transition flex justify-between items-center group"
+                  className="w-full p-3 text-left border border-slate-100 rounded-xl hover:bg-emerald-50/60 hover:border-emerald-500/30 transition flex justify-between items-center group bg-slate-50/40"
                 >
-                  <div>
-                    <div className="font-bold text-slate-800 text-sm group-hover:text-emerald-700 transition">
+                  <div className="min-w-0 flex-1 pr-2">
+                    <div className="font-black text-slate-700 text-xs truncate group-hover:text-emerald-800 transition">
                       {item.substance}
                     </div>
-                    <div className="text-[10px] text-slate-400 font-mono">
-                      Permit: {item.permit_number}
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase tracking-wide">
+                      Permit ID: {item.permit_number}
                     </div>
                   </div>
-                  <div className="h-6 w-6 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-emerald-100 transition">
-                    <Check className="text-emerald-600 opacity-0 group-hover:opacity-100" size={14} />
+                  <div className="h-6 w-6 rounded-lg bg-white border border-slate-200 shrink-0 flex items-center justify-center group-hover:bg-emerald-600 group-hover:border-emerald-600 transition-colors">
+                    <Check className="text-slate-300 opacity-40 group-hover:text-white group-hover:opacity-100 transition-opacity" size={12} />
                   </div>
                 </button>
               ))}
             </div>
           ) : (
-            <div className="text-center py-10">
-              <p className="text-sm text-slate-400 italic">No active permits found for {companyName}.</p>
+            <div className="text-center py-12 grow flex flex-col justify-center items-center">
+              <p className="text-xs text-slate-400 font-medium italic">
+                No active authorized permits located for:
+              </p>
+              <p className="text-xs font-black text-slate-600 px-2 py-1 bg-slate-100 rounded-md mt-1">
+                {companyName}
+              </p>
             </div>
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 bg-slate-50 border-t flex justify-end">
+        {/* Footer Area */}
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end shrink-0">
           <button 
+            type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-slate-600 transition uppercase"
+            className="px-4 py-2 text-xs font-black text-slate-400 hover:text-slate-600 transition uppercase tracking-wider"
           >
-            Cancel
+            Close Window
           </button>
         </div>
       </div>
