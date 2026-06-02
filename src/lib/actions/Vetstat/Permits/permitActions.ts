@@ -325,9 +325,6 @@ export async function fetchPermitLedgerLogs(permitId: string) {
   }
 }
 
-'use server';
-
-import { createClient } from '@/lib/supabase/server'; // Path to your server-side client config
 
 /**
  * Executes a replacement log configuration for intake permits
