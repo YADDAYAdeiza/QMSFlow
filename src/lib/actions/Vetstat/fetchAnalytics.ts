@@ -24,12 +24,11 @@ export async function getAMSRegionalAnalytics(
   species: string = 'All',
   risk: string = 'All' 
 ) {
+  const startTimer = performance.now();
   const supabase = await createClient();
   
   const currentStart = startDate || '2026-01-01';
   const currentEnd = endDate || new Date().toISOString();
-  const speciesFilter = species || 'All';
-  const riskFilter = risk || 'All';
 
   // Calculate matching historical window duration for tracking trends
   const duration = new Date(currentEnd).getTime() - new Date(currentStart).getTime();
@@ -108,6 +107,19 @@ export async function getAMSRegionalAnalytics(
     if (zoneMap[zoneKey]) {
       zoneMap[zoneKey].prevValue += val;
     }
+    zoneMap[rawZone].statesMap[rawState] += rowDDD;
+
+    // Substance Accumulator Mapping
+    const rawSubstance = row.substance || 'Unknown Substance';
+    if (!substanceMap[rawSubstance]) {
+      substanceMap[rawSubstance] = { 
+        substance: rawSubstance, 
+        class: row.substance_class || 'Unclassified', 
+        riskPriority: row.risk_priority || 'LOW', 
+        volume: 0 
+      };
+    }
+    substanceMap[rawSubstance].volume += rowDDD;
   });
 
   // 3. Complete In-Memory Analytical Transformations
@@ -126,8 +138,6 @@ export async function getAMSRegionalAnalytics(
     .sort((a, b) => b.volume - a.volume); // Sort by highest consumption volume
 
   const totalDDD = zones.reduce((sum, z) => sum + z.value, 0);
-  const prevTotal = zones.reduce((sum, z) => sum + z.prevValue, 0);
-  const globalTrend = prevTotal > 0 ? ((totalDDD - prevTotal) / prevTotal) * 100 : 0;
 
   // Added rawRows to the structural return block
   return { zones, topSubstances, rawRows, totalDDD, globalTrend };

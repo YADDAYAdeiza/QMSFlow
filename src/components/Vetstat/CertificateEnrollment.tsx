@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, ShieldCheck, X, PackageSearch, 
-  Search, Building2, Microscope, AlertCircle, Edit3,
+  Microscope, AlertCircle, Edit3,
   Globe, Activity, Zap, Check, ChevronRight, Loader2, Sparkles,
   Layers, Stethoscope
 } from 'lucide-react';
@@ -38,6 +38,7 @@ const THERAPEUTIC_CLASSES = [
 interface Company { 
   id: string; 
   company_name: string; 
+  country_of_origin?: string | null;
 }
 
 interface ATCCode { 
@@ -52,12 +53,14 @@ const supabase = createClient();
 export default function CertificateEnrollment({ 
   companies = [], 
   atcCodes = [],
-  editData = null, 
+  editData = null,
+  companiesCatalog=[], 
   onClose 
 }: { 
   companies: Company[], 
   atcCodes: ATCCode[],
   editData?: any | null,
+  companiesCatalog: any,
   onClose?: () => void
 }) {
   const [isOpen, setIsOpen] = useState(!!editData);
@@ -73,17 +76,14 @@ export default function CertificateEnrollment({
   const [dosageForm, setDosageForm] = useState(editData?.dosage_form || "Oral Powder");
   const [therapeuticClass, setTherapeuticClass] = useState(editData?.therapeutic_class || "Antibacterial");
 
-  const [searchTerm, setSearchTerm] = useState('');
   const [substanceSearch, setSubstanceSearch] = useState('');
-  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(editData?.company_id || '');
   const [selectedSubstance, setSelectedSubstance] = useState<ATCCode | null>(null);
   const [selectedRoutes, setSelectedRoutes] = useState<string[]>([]);
   
   // API Reference Lookup Indicators
   const [lookupStatus, setLookupStatus] = useState<'idle' | 'checking' | 'found' | 'not_found'>('idle');
   const lookupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastInitializedIdRef = useRef<string | null>(null);
-
   const companiesRef = useRef(companies);
   const atcCodesRef = useRef(atcCodes);
 
@@ -94,8 +94,7 @@ export default function CertificateEnrollment({
 
   // Sync state when entering edit mode
   useEffect(() => {
-    if (editData && editData.id !== lastInitializedIdRef.current) {
-      lastInitializedIdRef.current = editData.id;
+    if (editData) {
       setIsOpen(true);
       setRegNumber(editData.permit_number || '');
       setProductName(editData.product_name || '');
@@ -103,7 +102,7 @@ export default function CertificateEnrollment({
       setCountryOfOrigin(editData.country_of_origin || "Nigeria");
       setDosageForm(editData.dosage_form || "Oral Powder");
       setTherapeuticClass(editData.therapeutic_class || "Antibacterial");
-      setSearchTerm(editData.company_name || '');
+      setSelectedCompanyId(editData.company_id || '');
       
       const matchedATC = atcCodes.find(a => a.substance === editData.active_substance);
       if (matchedATC) {
@@ -116,8 +115,6 @@ export default function CertificateEnrollment({
       
       if (editData.route_of_administration) {
         setSelectedRoutes(editData.route_of_administration.split(', '));
-      } else {
-        setSelectedRoutes([]);
       }
     }
   }, [editData, atcCodes]);
@@ -193,22 +190,16 @@ export default function CertificateEnrollment({
           }
 
           if (matchedRecord.applicant_name) {
-            const matchedCompany = companiesRef.current.find(c => c.company_name.toLowerCase() === matchedRecord.applicant_name.toLowerCase());
-            if (matchedCompany) {
-              setSelectedCompany(matchedCompany);
-              setSearchTerm('');
-            } else {
-              setSelectedCompany(null);
-              setSearchTerm(matchedRecord.applicant_name);
-            }
+            const matchedCompany = companiesRef.current.find(c => 
+              c?.company_name?.toLowerCase() === matchedRecord.applicant_name.toLowerCase()
+            );
+            if (matchedCompany) setSelectedCompanyId(matchedCompany.id);
           }
-
           setLookupStatus('found');
         } else {
           setLookupStatus('not_found');
         }
       } catch (err: any) {
-        console.error("Lookup error details:", err);
         setLookupStatus('not_found');
       }
     }, 600); 
@@ -235,35 +226,26 @@ export default function CertificateEnrollment({
     }).slice(0, 8);
   }, [substanceSearch, atcCodes, selectedSubstance]);
 
-  const filteredCompanies = useMemo(() => {
-    if (!searchTerm || selectedCompany) return [];
-    const search = searchTerm.toLowerCase();
-    return companies.filter(c => 
-      (c?.company_name?.toLowerCase() || '').includes(search)
-    ).slice(0, 5);
-  }, [searchTerm, companies, selectedCompany]);
-
   const handleClose = () => {
     setIsOpen(false);
-    setRegNumber('');
-    setProductName('');
-    setShippingPackSize('');
-    setCountryOfOrigin('Nigeria');
-    setDosageForm('Oral Powder');
-    setTherapeuticClass('Antibacterial');
-    setSearchTerm('');
-    setSubstanceSearch('');
-    setSelectedCompany(null);
-    setSelectedSubstance(null);
-    setSelectedRoutes([]);
-    setLookupStatus('idle');
-    lastInitializedIdRef.current = null;
+    if (!editData) {
+      setRegNumber('');
+      setProductName('');
+      setShippingPackSize('');
+      setCountryOfOrigin('Nigeria');
+      setDosageForm('Oral Powder');
+      setTherapeuticClass('Antibacterial');
+      setSubstanceSearch('');
+      setSelectedCompanyId('');
+      setSelectedSubstance(null);
+      setSelectedRoutes([]);
+      setLookupStatus('idle');
+    }
     if (onClose) onClose();
   };
 
   const handleAction = async (formData: FormData) => {
     setIsPending(true);
-    const mahName = selectedCompany ? selectedCompany.company_name : searchTerm;
     
     formData.set('company_name', mahName);
     formData.set('active_substance', selectedSubstance ? selectedSubstance.substance : (substanceSearch || '')); 
@@ -322,7 +304,6 @@ export default function CertificateEnrollment({
             
             <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto custom-scrollbar">
               
-              {/* Row 1: Reg No & Trade Name */}
               <div className="grid grid-cols-2 gap-3">
                  <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Reg Number</label>
@@ -348,7 +329,6 @@ export default function CertificateEnrollment({
                  </div>
               </div>
 
-              {/* API Verification Notice Box */}
               {!editData && lookupStatus !== 'idle' && (
                 <div className={`p-2.5 rounded-xl border text-[11px] font-bold flex items-center gap-2 transition-all duration-300 ${
                   lookupStatus === 'checking' ? 'bg-slate-50 border-slate-200 text-slate-600 animate-pulse' :
@@ -376,7 +356,6 @@ export default function CertificateEnrollment({
                 </div>
               )}
 
-              {/* Row 2: API Selection */}
               <div className="relative">
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Active Substance (API)</label>
                 <div className="relative">
@@ -394,13 +373,13 @@ export default function CertificateEnrollment({
                      required 
                     />
                     {(selectedSubstance || substanceSearch) && (
-                     <button 
-                       type="button" 
-                       onClick={() => { setSelectedSubstance(null); setSubstanceSearch(''); }} 
-                       className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-rose-500"
-                     >
-                       <X size={14} />
-                     </button>
+                      <button 
+                        type="button" 
+                        onClick={() => { setSelectedSubstance(null); setSubstanceSearch(''); }} 
+                        className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-rose-500"
+                      >
+                        <X size={14} />
+                      </button>
                     )}
                 </div>
                 
@@ -423,8 +402,7 @@ export default function CertificateEnrollment({
                   </div>
                 )}
               </div>
-
-              {/* Row 3: Strength, Dosage Form, & Therapeutic Class */}
+              
               <div className="grid grid-cols-3 gap-2">
                  <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block flex items-center gap-1">
@@ -472,7 +450,6 @@ export default function CertificateEnrollment({
                  </div>
               </div>
 
-              {/* Row 4: Route Groupings */}
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1">
                   <Activity size={10} /> Route(s) of Administration
@@ -509,7 +486,6 @@ export default function CertificateEnrollment({
                 </div>
               </div>
 
-              {/* Row 5: Pack Size & Country Dropdown */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 bg-emerald-50/30 rounded-xl border border-emerald-100/50">
                   <label className="text-[10px] font-bold text-emerald-700 uppercase mb-1 flex items-center gap-1">
@@ -542,58 +518,15 @@ export default function CertificateEnrollment({
                 </div>
               </div>
 
-              {/* Row 6: MAH Selection */}
-              <div className="relative pb-4"> 
-                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Marketing Authorization Holder (MAH)</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
-                    {selectedCompany ? <Building2 size={14} className="text-emerald-600"/> : <Search size={14} />}
-                  </div>
-                  <input 
-                    type="text"
-                    autoComplete="off"
-                    value={selectedCompany ? selectedCompany.company_name : (searchTerm || '')}
-                    onChange={(e) => { 
-                      setSearchTerm(e.target.value); 
-                      if (selectedCompany) setSelectedCompany(null); 
-                    }}
-                    placeholder="Search or type new company..." 
-                    className={`w-full border p-3 pl-9 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition text-sm font-medium ${selectedCompany ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'border-slate-200'}`}
-                    required 
-                  />
-                  {(selectedCompany || searchTerm) && (
-                    <button 
-                      type="button" 
-                      onClick={() => { setSelectedCompany(null); setSearchTerm(''); }} 
-                      className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-rose-500"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-
-                {filteredCompanies.length > 0 && (
-                  <div className="absolute mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-2xl z-[100] overflow-hidden">
-                    {filteredCompanies.map((company) => (
-                      <button 
-                        key={company.id} 
-                        type="button" 
-                        onClick={() => { setSelectedCompany(company); setSearchTerm(''); }} 
-                        className="w-full text-left p-3 hover:bg-emerald-50 flex items-center gap-2 border-b border-slate-50 last:border-0 transition-colors"
-                      >
-                        <Building2 size={14} className="text-slate-400" />
-                        <span className="text-sm font-semibold text-slate-700">{company.company_name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                
-                {searchTerm && !selectedCompany && filteredCompanies.length === 0 && (
-                  <div className="mt-2 flex items-center gap-2 text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-100">
-                    <AlertCircle size={12} />
-                    <span className="text-[10px] font-bold uppercase italic">Registering as a new entity</span>
-                  </div>
-                )}
+              <div className="relative pb-4">
+                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Company Name</label>
+                <input
+                  name="company_name"
+                  type="text"
+                  placeholder="Enter manufacturer or applicant name..."
+                  className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium"
+                  required
+                />
               </div>
             </div>
             

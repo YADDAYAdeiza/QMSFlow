@@ -40,30 +40,44 @@ const getRiskLevel = (score: number) => {
 };
 
 // --- HELPER COMPONENT: CREATABLE SELECT ---
-function CreatableSelect({ value, onChange, options, placeholder, onSelectOption }: any) {
+function CreatableSelect({ value, onChange, options, placeholder, onSelectOption, isAppNumber = false }: any) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setIsOpen(false);
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
     };
     window.addEventListener('mousedown', handleClick);
     return () => window.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const filteredOptions = (options || []).filter((opt: any) => 
-    opt.name?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Synchronize internal search text with hook form field values when selected
+  useEffect(() => {
+    if (value) {
+      setSearch(value);
+    } else {
+      setSearch("");
+    }
+  }, [value]);
+
+  const filteredOptions = useMemo(() => {
+    return (options || []).filter((opt: any) => 
+      opt.name?.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [options, search]);
   
-  const showCreateOption = search.length > PREFIX.length && !options?.some((opt: any) => opt.name?.toLowerCase() === search.toLowerCase());
+  const showCreateOption = search.trim().length > 0 && !options?.some((opt: any) => opt.name?.toLowerCase() === search.trim().toLowerCase());
 
   const handleSelect = (name: string, fullOption?: any) => {
     onChange(name);
-    if (onSelectOption && fullOption) onSelectOption(fullOption);
+    if (onSelectOption) {
+      onSelectOption(fullOption || { name, products: [{ name: "" }] });
+    }
     setIsOpen(false);
-    setSearch("");
   };
 
   return (
@@ -84,16 +98,29 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
             <input 
               autoFocus
               placeholder="Type or filter..."
-              className="w-full p-3 text-[10px] outline-none bg-slate-50 rounded-lg font-bold text-blue-600"
+              className="w-full p-3 text-[10px] outline-none bg-slate-50 rounded-lg font-bold text-blue-600 uppercase"
               value={search}
+              onClick={(e) => e.stopPropagation()} 
               onChange={(e) => {
+                e.stopPropagation();
                 const val = e.target.value.toUpperCase();
-                if (val.startsWith(PREFIX) || val === "" || PREFIX.startsWith(val)) {
+                
+                if (isAppNumber) {
+                  // Only restrict input layout if configuring the core App Number prefix string
+                  if (val.startsWith(PREFIX) || val === "" || PREFIX.startsWith(val)) {
+                    setSearch(val);
+                    onChange(val);
+                  }
+                } else {
+                  // Allow absolute vanilla text layout creation for products and lines
                   setSearch(val);
+                  onChange(val);
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && search.startsWith(PREFIX)) {
+                if (e.key === 'Enter' && search.trim() !== "") {
+                  e.preventDefault();
+                  e.stopPropagation();
                   handleSelect(search);
                 }
               }}
@@ -103,7 +130,10 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
             {filteredOptions.map((opt: any, idx: number) => (
               <div 
                 key={`${opt.id || idx}`}
-                onClick={() => handleSelect(opt.name, opt)}
+                onClick={(e) => {
+                  e.stopPropagation(); 
+                  handleSelect(opt.name, opt);
+                }}
                 className="p-3 text-[10px] font-bold uppercase text-slate-600 hover:bg-blue-600 hover:text-white cursor-pointer"
               >
                 {opt.name}
@@ -111,7 +141,10 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
             ))}
             {showCreateOption && (
               <div 
-                onClick={() => handleSelect(search)}
+                onClick={(e) => {
+                  e.stopPropagation(); 
+                  handleSelect(search);
+                }}
                 className="p-3 text-[10px] font-bold uppercase text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white cursor-pointer flex items-center gap-2"
               >
                 <Plus className="w-3 h-3" /> Use: "{search}"
@@ -285,6 +318,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
                   value={field.value}
                   options={existingApps}
                   placeholder="NAFDAC/VMAP/..."
+                  isAppNumber={true}
                   onChange={(val: string) => handleAppNumberChange(val, field.onChange)}
                   onSelectOption={(opt: any) => field.onChange(opt.name)}
                 />
@@ -367,6 +401,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
                             options={availableLines}
                             onChange={field.onChange}
                             placeholder="Line Category..."
+                            isAppNumber={false}
                             onSelectOption={(opt: any) => {
                               setValue(`productLines.${index}.products`, opt.products?.map((p: any) => ({ name: p.name })) || [{ name: "" }]);
                             }}
@@ -435,7 +470,7 @@ function NestedProductArray({ nestIndex, control }: any) {
         {fields.map((item, k) => (
           <div key={item.id} className="flex items-center gap-2">
             <Controller name={`productLines.${nestIndex}.products.${k}.name`} control={control} render={({ field }) => (
-              <CreatableSelect value={field.value} onChange={field.onChange} options={[]} placeholder="Product..." />
+              <CreatableSelect value={field.value} onChange={field.onChange} options={[]} placeholder="Product..." isAppNumber={false} />
             )}/>
             <button type="button" onClick={() => remove(k)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><X className="w-4 h-4" /></button>
           </div>

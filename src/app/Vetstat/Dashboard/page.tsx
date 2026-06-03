@@ -54,7 +54,7 @@ export default async function AMSDashboardPage({
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
               <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">
-                VMD Surveillance Hub
+                AMR Surveillance Hub
               </h1>
               <div className="flex items-center gap-2 mt-2">
                 <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.2em]">

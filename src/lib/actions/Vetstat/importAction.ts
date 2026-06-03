@@ -1,4 +1,4 @@
-"use server"
+'use server'
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
@@ -9,17 +9,10 @@ import { revalidatePath } from 'next/cache';
  */
 function parsePackMultiplier(packSize: string | null): number {
   if (!packSize) return 1;
-  // Matches all numbers in strings like "10 blisters x 10 tablets" or "50 x 2"
   const numbers = packSize.match(/\d+(\.\d+)?/g);
   if (!numbers) return 1;
   return numbers.reduce((acc, num) => acc * parseFloat(num), 1);
 }
-
-/**
- * VMD Antimicrobial Ledger - Server Action
- * Standardizes inputs to MG and calculates the Divisional Deputy Director (DDD) 
- * metrics for regulatory oversight.
- */
 
 interface ActionResponse {
   success: boolean;
@@ -27,12 +20,12 @@ interface ActionResponse {
   timestamp: number;
 }
 
-export async function submitLedgerEntry(previousState: any, formData: FormData): Promise<ActionResponse> {
-  // QMS Requirement: Anchor operational performance clock immediately upon execution
+export async function submitLedgerEntry(previousState: any, formData: FormData): Promise<any> {
   const executionStartTime = performance.now();
   const supabase = await createClient();
 
-  // 1. Extract Core Inputs
+  // 1. Extract Core & Meta Inputs
+  const isEdit = formData.get('is_edit') === 'true';
   const entryId = formData.get('entry_id') as string;
   const productId = formData.get('product_id') as string; 
   const atcId = formData.get('atc_id') as string; 
@@ -46,100 +39,60 @@ export async function submitLedgerEntry(previousState: any, formData: FormData):
   const geopoliticalZone = formData.get('geopolitical_zone') as string;
   const targetSpecies = formData.get('target_species') as string;
 
-  // Extract Regional Depot Distribution Overrides
   const isDepotDistribution = formData.get('is_depot_distribution') === 'true';
   const targetDepotId = formData.get('target_depot_id') as string || null;
 
   const strength = parseFloat(formData.get('strength') as string) || 0;
   const packQty = parseFloat(formData.get('pack_quantity') as string) || 0;
-  const submittedUnitsPerPack = parseFloat(formData.get('units_per_pack') as string) || 0;
-  
-  // QMS Requirement: Capture when the client-side interaction began processing
   const clientTimestamp = parseInt(formData.get('client_start_time') as string || '0') || Date.now();
 
-  // 🔴 CRITICAL QUANTITY DEFICIT CHECK FOR CONSUMPTION & DESTRUCTION LOGS
+  // 3. Regulatory Balance Check (Only for New entries or if quantity changed in Edit)
+  // Logic: In a professional audit, even edits should be checked against current ceilings.
   if (entryType === 'CONSUMPTION' || entryType === 'DESTRUCTION') {
     const { data: historicalRecords, error: historyError } = await supabase
       .from('ledger_entries')
-      .select('entry_type, pack_quantity')
+      .select('entry_type, pack_quantity, id')
       .eq('entity_id', productId);
 
-    if (historyError) {
-      console.error("Ledger Balance Verification Failed:", JSON.stringify(historyError, null, 2));
-      return { success: false, message: 'Could not pull historical ledgers to verify safety balance.', timestamp: Date.now() };
-    }
-
     if (historicalRecords) {
-      // Aggregate total supply vs demand from the historical log trail
+      // Exclude the current record from the "Available" calculation if we are editing
       const totalImported = historicalRecords
         .filter(r => r.entry_type === 'IMPORT')
         .reduce((sum, r) => sum + (parseFloat(r.pack_quantity) || 0), 0);
       
       const totalDeducted = historicalRecords
-        .filter(r => r.entry_type === 'CONSUMPTION' || r.entry_type === 'DESTRUCTION')
+        .filter(r => (r.entry_type === 'CONSUMPTION' || r.entry_type === 'DESTRUCTION') && r.id !== entryId)
         .reduce((sum, r) => sum + (parseFloat(r.pack_quantity) || 0), 0);
 
       const availableBalance = totalImported - totalDeducted;
 
       if (packQty > availableBalance) {
-        return {
-          success: false,
-          message: `Regulatory Deficit: Insufficient stock balance. Total imported: ${totalImported} packs. Already allocated: ${totalDeducted} packs. Current Available Balance: ${availableBalance} packs. Requested: ${packQty} packs.`,
-          timestamp: Date.now()
-        };
+        return { success: false, message: `Regulatory Deficit: Only ${availableBalance} packs available.`, timestamp: Date.now() };
       }
     }
   }
 
-  // 3. Fetch Regulatory Reference Data from Updated Table Names
+  // 4. Fetch Regulatory Reference Data
   const [atcResult, productResult] = await Promise.all([
     supabase.from('atc_codes').select('*').eq('id', atcId).maybeSingle(),
-    supabase.from('permits').select('shipping_pack_size, product_name').eq('id', productId).single()
+    supabase.from('permits').select(`shipping_pack_size, product_name, company_id, companies_amr(company_name)`).eq('id', productId).single()
   ]);
 
-  if (productResult.error) {
-    console.error("VMD Permits Validation Failure:", JSON.stringify(productResult.error, null, 2));
-    return { success: false, message: 'Product profile not authenticated in VMD Regulatory Database.', timestamp: Date.now() };
-  }
+  if (productResult.error) return { success: false, message: 'Product profile not authenticated.', timestamp: Date.now() };
 
-  // Fallback structural safety assignment
   const atcRes = atcResult?.data || { ddd_mg: 0, risk_priority: 'Low', iu_to_mg_factor: 1 };
   const officialPackSizeStr = productResult.data.shipping_pack_size;
+  const trackingCompanyId = productResult.data.company_id;
+  const trackingCompanyName = (productResult.data.companies_amr as any)?.company_name || 'N/A';
 
-  // 4. Calculate Units Per Pack via Pack Size Multiplier (e.g., "12x7" or "30x10x12")
-  let officialUnitsPerPack = 1; 
-  if (officialPackSizeStr) {
-    officialUnitsPerPack = officialPackSizeStr.split(/[xX*]/)
-      .reduce((acc: number, curr: string) => {
-        const num = parseInt(curr.replace(/[^0-9]/g, ''));
-        return !isNaN(num) ? acc * num : acc;
-      }, 1);
-  } else {
-    officialUnitsPerPack = submittedUnitsPerPack || 1;
-  }
+  // 5. Normalization & Calculations
+  const officialUnitsPerPack = officialPackSizeStr?.split(/[xX*]/).reduce((acc: number, curr: string) => acc * (parseInt(curr.replace(/[^0-9]/g, '')) || 1), 1) || 1;
+  let normalizedStrength = massUnit === 'g' ? strength * 1000 : massUnit === 'IU' ? strength / parseFloat(atcRes.iu_to_mg_factor || "1") : strength;
+  const apiMassMg = (packQty * officialUnitsPerPack) * normalizedStrength;
+  const dddConsumed = parseFloat(atcRes.ddd_mg || "0") > 0 ? apiMassMg / parseFloat(atcRes.ddd_mg) : 0;
 
-  // 5. Normalize Strength to MG
-  let normalizedStrength = strength;
-  if (massUnit === 'g') {
-    normalizedStrength = strength * 1000;
-  } else if (massUnit === 'IU') {
-    const factor = parseFloat(atcRes.iu_to_mg_factor?.toString() || "1");
-    normalizedStrength = strength / factor;
-  }
-
-  // 6. Calculate Final DDD and Mass
-  const totalUnitsCount = packQty * officialUnitsPerPack;
-  const apiMassMg = totalUnitsCount * normalizedStrength;
-  const referenceDdd = parseFloat(atcRes.ddd_mg?.toString() || "0");
-  const dddConsumed = referenceDdd > 0 ? apiMassMg / referenceDdd : 0;
-
-  // QMS Requirement: Compute staff transaction duration delta
-  const executionEndTime = performance.now();
-  const serverProcessingSeconds = (executionEndTime - executionStartTime) / 1000;
-  const totalQmsStaffSeconds = ((Date.now() - clientTimestamp) / 1000) + serverProcessingSeconds;
-
-  // 7. Construct Unified Transactional Payload
-  const payload: any = {
+  // 6. Final Payload Construction
+  const payload = {
     atc_id: atcId || null,
     entity_id: productId, 
     entry_type: entryType,
@@ -152,44 +105,27 @@ export async function submitLedgerEntry(previousState: any, formData: FormData):
     target_species: targetSpecies,
     pack_quantity: packQty,
     metadata: { 
-      risk_priority: atcRes.risk_priority || 'Low',
-      units_logged: totalUnitsCount,
+      risk_priority: atcRes.risk_priority,
       original_unit: massUnit,
       strength_at_log: strength,
-      verified_pack_size: officialPackSizeStr,
       is_depot_distribution: isDepotDistribution,
       target_depot_id: targetDepotId,
+      company_id: trackingCompanyId,
+      company_name: trackingCompanyName,
       qms_metrics: {
-        server_processing_seconds: parseFloat(serverProcessingSeconds.toFixed(4)),
-        total_staff_action_seconds: parseFloat(totalQmsStaffSeconds.toFixed(2)),
+        server_processing_seconds: parseFloat(((performance.now() - executionStartTime) / 1000).toFixed(4)),
         compliance_check: true
       }
-    },
+    }
   };
 
-  // 8. Database Write to Synchronized Ledger Table Target
-  let dbResult;
-  if (entryId) {
-    dbResult = await supabase.from('ledger_entries').update(payload).eq('id', entryId);
-  } else {
-    payload.created_at = new Date().toISOString();
-    dbResult = await supabase.from('ledger_entries').insert([payload]);
-  }
+  // 7. Database Persistence (The Switch)
+  const dbResult = isEdit 
+    ? await supabase.from('ledger_entries').update(payload).eq('id', entryId)
+    : await supabase.from('ledger_entries').insert([{ ...payload, created_at: new Date().toISOString() }]);
 
-  if (dbResult.error) {
-    console.error("VetStat Ledger Transaction Error:", JSON.stringify(dbResult.error, null, 2));
-    return { success: false, message: `Database persistence failure: ${dbResult.error.message}`, timestamp: Date.now() };
-  }
+  if (dbResult.error) return { success: false, message: `Persistence Error: ${dbResult.error.message}`, timestamp: Date.now() };
 
-  // 9. Revalidate Next.js Data Cache Paths completely
   revalidatePath('/Vetstat/Dashboard');
-  revalidatePath('/Vetstat/Ledger');
-  revalidatePath('/Vetstat/LogActivity'); 
-
-  // 10. Return Client State
-  return { 
-    success: true, 
-    timestamp: Date.now(), 
-    message: `Logged: ${apiMassMg.toLocaleString(undefined, {maximumFractionDigits: 2})}mg API (${dddConsumed.toFixed(4)} DDD) for ${targetSpecies} in ${destinationState}. Inventory snapshots synchronized successfully under QMS parameters.` 
-  };
+  return { success: true, timestamp: Date.now(), message: `Successfully ${isEdit ? 'updated' : 'logged'} transaction.` };
 }

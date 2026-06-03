@@ -26,56 +26,63 @@ export default async function LedgerPage({
   const params = await searchParams;
   const activeType = (params.type as 'IMPORT' | 'DESTRUCTION' | 'CONSUMPTION' | 'REGISTRY') || 'IMPORT';
 
-  // 1. Parallel fetch targeting updated master database schema layout tables
-  const [atcResponse, permitsResponse, ledgerResponse, inventoriesResponse, nodesResponse] = await Promise.all([
+  // 1. Parallel fetch with relational joins targeting our normalized schema
+  const [atcResponse, permitsResponse, ledgerResponse, inventoriesResponse, nodesResponse, companiesResponse] = await Promise.all([
     supabase
       .from('atc_codes')
       .select('*')
       .order('substance'),
+    
+    // >>> CHANGED: Relational join to pull structural company data
     supabase
       .from('permits')
-      .select('*')
-      .order('company_name', { ascending: true }),
+      .select('*, companies_amr(*)')
+      .order('product_name', { ascending: true }),
+    
     supabase
       .from('ledger_entries') 
       .select('*')
       .order('created_at', { ascending: false }),
+    
     supabase
       .from('importer_inventories')
       .select('*'),
+    
+    // >>> CHANGED: Relational join to pull structural company data for logistics hubs
     supabase
       .from('importer_logistics_nodes')
+      .select('*, companies_amr(*)')
+      .order('created_at', { ascending: false }),
+
+    // >>> ADDED: Fetch the clean company master directory for forms/dropdown list states
+    supabase
+      .from('companies_amr')
       .select('*')
-      .order('created_at', { ascending: false })
+      .order('company_name', { ascending: true })
   ]);
 
-  // Clean, explicit string serialization to catch hidden errors immediately
-  if (atcResponse.error) {
-    console.error("ATC Fetch Error Details:", JSON.stringify(atcResponse.error, null, 2));
-  }
-  if (permitsResponse.error) {
-    console.error("Permits Fetch Error Details:", JSON.stringify(permitsResponse.error, null, 2));
-  }
-  if (ledgerResponse.error) {
-    console.error("Ledger Fetch Error Details:", JSON.stringify(ledgerResponse.error, null, 2));
-  }
-  if (inventoriesResponse.error) {
-    console.error("Inventories Fetch Error Details:", JSON.stringify(inventoriesResponse.error, null, 2));
-  }
-  if (nodesResponse.error) {
-    console.error("Logistics Nodes Fetch Error Details:", JSON.stringify(nodesResponse.error, null, 2));
-  }
+  // Debug logging matches your original error-catching standards
+  if (atcResponse.error) console.error("ATC Fetch Error Details:", JSON.stringify(atcResponse.error, null, 2));
+  if (permitsResponse.error) console.error("Permits Fetch Error Details:", JSON.stringify(permitsResponse.error, null, 2));
+  if (ledgerResponse.error) console.error("Ledger Fetch Error Details:", JSON.stringify(ledgerResponse.error, null, 2));
+  if (inventoriesResponse.error) console.error("Inventories Fetch Error Details:", JSON.stringify(inventoriesResponse.error, null, 2));
+  if (nodesResponse.error) console.error("Logistics Nodes Fetch Error Details:", JSON.stringify(nodesResponse.error, null, 2));
+  if (companiesResponse.error) console.error("Companies Catalog Fetch Error Details:", JSON.stringify(companiesResponse.error, null, 2));
 
   const atcCodes = atcResponse.data || [];
   const permits = permitsResponse.data || [];
   const registrationHistory = ledgerResponse.data || [];
   const inventories = inventoriesResponse.data || [];
   const enrolledNodes = nodesResponse.data || [];
+  const masterCompanies = companiesResponse.data || [];
 
-  // 2. DATA STITCHING: Inject matching real-time inventory positions into each permit entity
+  console.log('This is masterCompanies: ', masterCompanies);
+
+  // 2. DATA STITCHING: Inject matching real-time inventory positions into each permit entity via UUIDs
   const allFppRegistrations = permits.map((product) => {
+    // >>> CHANGED: Matching is now structurally bound by company_id UUIDs instead of text strings
     const companyInventory = inventories.find(
-      (inv) => inv.company_name.toLowerCase() === product.company_name.toLowerCase()
+      (inv) => inv.company_id === product.company_id
     );
 
     const distribution = companyInventory?.inventory_distribution || { central_warehouse: [], depots: [] };
@@ -95,40 +102,18 @@ export default async function LedgerPage({
 
     return {
       ...product,
+      // Pull normalized company name uniformly from the joined relation object layer
+      resolved_company_name: product.companies_amr?.company_name || 'Unknown Entity',
       warehouse_balance: warehouseMatch ? warehouseMatch.balance : 0,
       depots: productDepots
     };
   });
 
   const tabConfig = {
-    IMPORT: {
-      label: 'Import',
-      icon: <Ship size={18} />,
-      color: 'text-emerald-600',
-      border: 'border-emerald-600',
-      bg: 'bg-emerald-50'
-    },
-    DESTRUCTION: {
-      label: 'Destruction',
-      icon: <Flame size={18} />,
-      color: 'text-rose-600',
-      border: 'border-rose-600',
-      bg: 'bg-rose-50'
-    },
-    CONSUMPTION: {
-      label: 'Consumption',
-      icon: <Stethoscope size={18} />,
-      color: 'text-amber-600',
-      border: 'border-amber-600',
-      bg: 'bg-amber-50'
-    },
-    REGISTRY: {
-      label: 'FPP Registry',
-      icon: <FileSearch size={18} />,
-      color: 'text-blue-600',
-      border: 'border-blue-600',
-      bg: 'bg-blue-50'
-    }
+    IMPORT: { label: 'Import', icon: <Ship size={18} />, color: 'text-emerald-600', border: 'border-emerald-600', bg: 'bg-emerald-50' },
+    DESTRUCTION: { label: 'Destruction', icon: <Flame size={18} />, color: 'text-rose-600', border: 'border-rose-600', bg: 'bg-rose-50' },
+    CONSUMPTION: { label: 'Consumption', icon: <Stethoscope size={18} />, color: 'text-amber-600', border: 'border-amber-600', bg: 'bg-amber-50' },
+    REGISTRY: { label: 'FPP Registry', icon: <FileSearch size={18} />, color: 'text-blue-600', border: 'border-blue-600', bg: 'bg-blue-50' }
   };
 
   return (
@@ -152,6 +137,7 @@ export default async function LedgerPage({
             <CertificateEnrollment 
               companies={allFppRegistrations} 
               atcCodes={atcCodes} 
+              companiesCatalog={masterCompanies} // >>> ADDED: Passing down normalized structural list
             />
             
             <div className="hidden md:block text-right border-r-2 border-slate-200 pr-3">
@@ -165,7 +151,10 @@ export default async function LedgerPage({
           
           {/* Administrative Step: Interactive Depot Enrollment Form Panel */}
           {activeType !== 'REGISTRY' && (
-            <DepotEnrollmentForm companies={allFppRegistrations} />
+            <DepotEnrollmentForm 
+              companies={allFppRegistrations} 
+              companiesCatalog={masterCompanies} // >>> ADDED: Passing down normalized structural list
+            />
           )}
 
           {/* Section 1: Dynamic Work Area */}
@@ -217,7 +206,7 @@ export default async function LedgerPage({
                   <FPPEnrolledRegistry 
                     data={allFppRegistrations} 
                     atcCodes={atcCodes} 
-                    companies={allFppRegistrations} 
+                    companiesCatalog={masterCompanies} // >>> ADDED
                   />
                 ) : (
                   <LedgerForm
@@ -225,8 +214,9 @@ export default async function LedgerPage({
                     atcCodes={atcCodes}
                     companies={allFppRegistrations}
                     enrolledDepots={enrolledNodes}
-                  />
-                )}
+                    companiesCatalog={masterCompanies} // >>> ADDED
+                    />
+                  )}
               </div>
             </div>
           </section>
@@ -243,6 +233,7 @@ export default async function LedgerPage({
                 initialData={registrationHistory} 
                 atcCodes={atcCodes}
                 companies={allFppRegistrations}
+                companiesCatalog={masterCompanies} // >>> ADDED
               />
             </section>
           )}

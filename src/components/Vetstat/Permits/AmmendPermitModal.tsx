@@ -1,75 +1,159 @@
 'use client';
-import { useState } from 'react';
+
+import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { AlertTriangle, ShieldCheck, X } from 'lucide-react';
 import { createAmendment } from '@/lib/actions/Vetstat/Permits/permitActions';
+
+interface SubstanceEntry {
+  substance_id: string;
+  quantity_kg: number;
+  additional_qty: number;
+}
+
+interface PermitAmendmentProps {
+  permit: {
+    id: string;
+    permit_substances: Array<{ substance_id: string; quantity_kg: number }>;
+  };
+  atcCodes: Array<{ id: string; substance: string }>;
+  onClose: () => void;
+}
 
 export default function AmmendPermitModal({ 
   permit, 
   atcCodes, 
   onClose 
-}: { 
-  permit: any, 
-  atcCodes: any[], 
-  onClose: () => void 
-}) {
+}: PermitAmendmentProps) {
   const router = useRouter();
-  const [isPending, setIsPending] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
-  const [substances, setSubstances] = useState(
-    permit.permit_substances.map((s: any) => ({
-      ...s,
+  const [substances, setSubstances] = useState<SubstanceEntry[]>(() =>
+    permit.permit_substances.map((s) => ({
+      substance_id: s.substance_id,
+      quantity_kg: s.quantity_kg,
       additional_qty: 0 
     }))
   );
 
-  const updateAdditionalQty = (index: number, val: number) => {
+  const updateAdditionalQty = (index: number, rawValue: string) => {
+    // If input is cleared, track internally as 0 but manage gracefully
+    if (rawValue === '') {
+      const next = [...substances];
+      next[index].additional_qty = 0;
+      setSubstances(next);
+      return;
+    }
+
+    const parsed = parseFloat(rawValue);
+    // Block negative values and safeguard against non-numeric inputs
+    if (isNaN(parsed) || parsed < 0) return;
+
     const next = [...substances];
-    next[index].additional_qty = val;
+    next[index].additional_qty = parsed;
     setSubstances(next);
   };
 
-  const handleAmend = async () => {
-    setIsPending(true);
-    try {
-      await createAmendment(permit.id, substances);
-      router.refresh();
-      onClose();
-    } catch (error) {
-      console.error(error);
-      alert('Failed to process amendment');
-    } finally {
-      setIsPending(false);
+  const handleAmend = () => {
+    setErrorMessage(null);
+    
+    // Safety check: Don't submit if all extensions are zero
+    const totalAdditional = substances.reduce((sum, s) => sum + s.additional_qty, 0);
+    if (totalAdditional <= 0) {
+      setErrorMessage("Please specify an extension quantity for at least one substance.");
+      return;
     }
+
+    // Execute Server Action inside transition context
+    startTransition(async () => {
+      try {
+        const result = await createAmendment(permit.id, substances);
+        
+        // Assuming your action structure returns an explicit error payload if DB validations fail
+        if (result?.error) {
+          setErrorMessage(result.error);
+          return;
+        }
+
+        router.refresh();
+        onClose();
+      } catch (error) {
+        console.error("Amendment Error:", error);
+        setErrorMessage('Failed to process quantitative extension. Please verify connections.');
+      }
+    });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
-      <div className="bg-white p-6 rounded-xl shadow-2xl w-[500px]">
-        <h2 className="text-xl font-bold mb-1 text-slate-800">Quantity Amendment</h2>
-        <p className="text-xs text-amber-600 font-bold mb-6 uppercase tracking-wider">Permit Extension Protocol</p>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-[520px] overflow-hidden flex flex-col max-h-[90vh]">
         
-        <div className="space-y-4 mb-6">
-          <div className="grid grid-cols-3 text-[10px] font-black uppercase text-slate-400 gap-2 px-2">
-            <div>Substance</div>
-            <div className="text-center">Authorized</div>
-            <div className="text-right">Extension</div>
+        {/* Header Block */}
+        <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50">
+          <div>
+            <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+              <ShieldCheck className="text-amber-500" size={22} />
+              Quantity Amendment
+            </h2>
+            <p className="text-[10px] text-amber-600 font-black uppercase tracking-widest mt-1">
+              Permit Extension Protocol
+            </p>
+          </div>
+          <button 
+            type="button" 
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-200/60 hover:text-slate-600 transition"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        
+        {/* Scrollable Substance Form Content */}
+        <div className="p-6 overflow-y-auto space-y-4 grow">
+          {errorMessage && (
+            <div className="p-3 bg-rose-50 border border-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-2">
+              <AlertTriangle size={16} className="shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 text-[10px] font-black uppercase text-slate-400 gap-2 px-2 tracking-wider">
+            <div>Substance Description</div>
+            <div className="text-center">Authorized Base</div>
+            <div className="text-right">Extension Delta</div>
           </div>
           
-          <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1">
-            {substances.map((sub: any, i: number) => {
-              const name = atcCodes.find(a => a.id === sub.substance_id)?.substance || 'Unknown';
+          <div className="space-y-2">
+            {substances.map((sub, i) => {
+              const matchingCode = atcCodes.find(a => a.id === sub.substance_id);
+              const name = matchingCode ? matchingCode.substance : 'Unknown Substance';
+              
               return (
-                <div key={i} className="grid grid-cols-3 gap-2 items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
-                  <span className="text-xs font-bold text-slate-700 truncate">{name}</span>
-                  <span className="text-xs text-center font-mono bg-white border rounded px-1">{sub.quantity_kg}kg</span>
-                  <div className="flex items-center gap-1">
+                <div 
+                  key={sub.substance_id} 
+                  className="grid grid-cols-3 gap-2 items-center bg-slate-50/60 p-3 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors"
+                >
+                  <span className="text-xs font-black text-slate-700 truncate" title={name}>
+                    {name}
+                  </span>
+                  
+                  <span className="text-xs text-center font-mono font-bold bg-white border border-slate-200 text-slate-600 rounded-lg py-1 px-2 shadow-sm">
+                    {sub.quantity_kg.toLocaleString()} kg
+                  </span>
+                  
+                  <div className="flex items-center gap-1.5">
                     <input 
                       type="number"
-                      className="border p-1 text-xs rounded w-full text-right font-black text-amber-700 focus:ring-1 focus:ring-amber-500 outline-none"
-                      placeholder="0"
-                      onChange={(e) => updateAdditionalQty(i, Number(e.target.value))}
+                      min="0"
+                      step="any"
+                      disabled={isPending}
+                      value={sub.additional_qty === 0 ? '' : sub.additional_qty}
+                      className="border border-slate-200 p-1.5 text-xs rounded-lg w-full text-right font-black text-amber-700 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-white shadow-sm disabled:bg-slate-100"
+                      placeholder="0.00"
+                      onChange={(e) => updateAdditionalQty(i, e.target.value)}
                     />
-                    <span className="text-[10px] font-bold text-slate-400">KG</span>
+                    <span className="text-[10px] font-black text-slate-400">KG</span>
                   </div>
                 </div>
               );
@@ -77,14 +161,29 @@ export default function AmmendPermitModal({
           </div>
         </div>
 
-        <div className="flex gap-3 border-t pt-4">
-          <button onClick={onClose} className="flex-1 border p-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition">Cancel</button>
+        {/* Action Triggers Footer */}
+        <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
           <button 
-            onClick={handleAmend} 
+            type="button" 
             disabled={isPending}
-            className="flex-1 bg-amber-600 text-white p-2 rounded-lg font-bold text-sm hover:bg-amber-700 disabled:opacity-50 transition shadow-lg shadow-amber-100"
+            onClick={onClose} 
+            className="flex-1 bg-white border border-slate-200 text-slate-700 p-2.5 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-slate-100 transition disabled:opacity-50"
           >
-            {isPending ? 'Processing...' : 'Apply Extension'}
+            Cancel
+          </button>
+          
+          <button 
+            type="button"
+            disabled={isPending}
+            onClick={handleAmend} 
+            className="flex-1 bg-amber-600 text-white p-2.5 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-amber-700 disabled:opacity-50 transition shadow-lg shadow-amber-600/10 flex items-center justify-center min-h-[38px]"
+          >
+            {isPending ? (
+              <span className="flex items-center gap-2">
+                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Processing...
+              </span>
+            ) : 'Apply Extension'}
           </button>
         </div>
       </div>

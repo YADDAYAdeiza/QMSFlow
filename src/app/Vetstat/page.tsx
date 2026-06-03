@@ -1,15 +1,21 @@
 import { createClient } from '@/utils/supabase/server';
 import PermitAuthDashboard from '@/components/Vetstat/Permits/PermitAuthDashboard';
 import FinishedGoodsDashboard from '@/components/Vetstat/FinishedGoodsDashboard';
-import DownloadMenu from '@/components/Vetstat/DownloadMenu'; // Re-importing your export tool
+import DownloadMenu from '@/components/Vetstat/DownloadMenu'; 
 
 export default async function ConsolePage() {
   const supabase = await createClient();
   
-  // Parallel fetch
-  const [ledger, permits] = await Promise.all([
+  // Parallel fetch: We now pull ledger entries, permits with their joined companies, 
+  // and the entire company directory for enrollment dropdown forms.
+  const [ledger, permits, companies] = await Promise.all([
     supabase.from('ledger_entries').select('*, atc_codes(*)'),
-    supabase.from('permits').select('*')
+    
+    // >>> CHANGED: Relational join to pull the company data directly from companies_amr
+    supabase.from('permits').select('*, companies_amr(*)'),
+    
+    // >>> ADDED: Fetch the active company catalog for searchable comboboxes/dropdowns
+    supabase.from('companies_amr').select('*').order('company_name', { ascending: true })
   ]);
 
   return (
@@ -31,7 +37,11 @@ export default async function ConsolePage() {
         historicalData={ledger.data?.filter(i => i.entry_type === 'CONSUMPTION') || []} 
       />
       
-      <PermitAuthDashboard permits={permits.data || []} />
+      {/* >>> OPTIMIZED: Passing down both the normalized permits and the company master list */}
+      <PermitAuthDashboard 
+        permits={permits.data || []} 
+        companiesCatalog={companies.data || []}
+      />
     </div>
   );
 }

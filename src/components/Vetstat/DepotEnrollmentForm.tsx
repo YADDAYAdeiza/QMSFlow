@@ -1,9 +1,9 @@
-'use client'
+'use client';
 
 import { useState, useRef, useEffect } from 'react';
 import { useActionState } from 'react';
 import { enrollDepotLocation } from "@/lib/actions/Vetstat/depotAction";
-import { Building2, MapPin, Warehouse, PlusCircle, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Layers } from 'lucide-react';
+import { Building2, MapPin, Warehouse, PlusCircle, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Layers, Timer } from 'lucide-react';
 
 interface DepotEnrollmentFormProps {
   companies: any[];
@@ -26,6 +26,15 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
   const [selectedCompany, setSelectedCompany] = useState("");
   const [selectedState, setSelectedState] = useState("");
   const [nodeType, setNodeType] = useState<'WAREHOUSE' | 'DEPOT'>('DEPOT');
+  
+  // QMS Workflow metric tracking stopwatch state
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+
+  // Auto-calculate the matching geopolitical zone based on active dropdown selection
+  const calculatedZone = Object.keys(GEO_ZONES).find(zone => 
+    GEO_ZONES[zone].includes(selectedState)
+  ) || "";
 
   const [state, action, isPending] = useActionState(enrollDepotLocation, {
     success: false,
@@ -35,12 +44,38 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
 
   const uniqueCompanies = Array.from(new Set(companies.map(c => c.company_name))).sort();
 
+  // Start workflow tracking whenever the form layout container expands open
+  useEffect(() => {
+    if (isOpen) {
+      setStartTime(Date.now());
+    } else {
+      setStartTime(null);
+      setElapsedSeconds(0);
+    }
+  }, [isOpen]);
+
+  // Keep a running update loop for visible workflow auditing feedback
+  useEffect(() => {
+    if (!startTime || isPending || state.success) return;
+
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [startTime, isPending, state.success]);
+
+  // Handle post-submission routines smoothly
   useEffect(() => {
     if (state.success && state.timestamp !== 0) {
-      setSelectedCompany("");
-      setSelectedState("");
-      formRef.current?.reset();
-      setTimeout(() => setIsOpen(false), 2000);
+      const timer = setTimeout(() => {
+        setSelectedCompany("");
+        setSelectedState("");
+        formRef.current?.reset();
+        setIsOpen(false);
+      }, 2000);
+      
+      return () => clearTimeout(timer);
     }
   }, [state.success, state.timestamp]);
 
@@ -60,13 +95,25 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
             <p className="text-xs text-slate-500 font-medium">Enroll verified central warehouses and regional distribution depots</p>
           </div>
         </div>
-        <div className="text-slate-400">
+        <div className="flex items-center gap-4 text-slate-400">
+          {isOpen && startTime && (
+            <div className="flex items-center gap-1 bg-slate-200/60 px-2 py-1 rounded-md text-[10px] font-mono font-bold text-slate-600">
+              <Timer size={11} className="animate-pulse" />
+              <span>{elapsedSeconds}s</span>
+            </div>
+          )}
           {isOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
         </div>
       </button>
 
       {isOpen && (
         <form ref={formRef} action={action} className="p-6 space-y-5 border-t-2 border-slate-100 animate-in slide-in-from-top-2 duration-200">
+          
+          {/* Hidden metadata payloads passed downstream securely to server actions */}
+          <input type="hidden" name="node_type" value={nodeType} />
+          <input type="hidden" name="geopolitical_zone" value={calculatedZone} />
+          <input type="hidden" name="qms_completion_duration_seconds" value={elapsedSeconds} />
+
           {/* Subsegment Selector: Node Type Specification Toggle */}
           <div className="flex flex-col gap-1.5 border-b border-slate-100 pb-4">
             <label className="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
@@ -88,7 +135,6 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
                 Central Strategic Warehouse Hub
               </button>
             </div>
-            <input type="hidden" name="node_type" value={nodeType} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -100,7 +146,7 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
                 name="company_name"
                 value={selectedCompany} 
                 onChange={(e) => setSelectedCompany(e.target.value)}
-                className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-bold text-slate-700 text-sm"
+                className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-bold text-slate-700 text-sm cursor-pointer"
                 required
               >
                 <option value="">Select Corporate MAH...</option>
@@ -131,7 +177,7 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
                 name="state"
                 value={selectedState} 
                 onChange={(e) => setSelectedState(e.target.value)}
-                className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-bold text-slate-700 text-sm"
+                className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-bold text-slate-700 text-sm cursor-pointer"
                 required
               >
                 <option value="">Select State...</option>
@@ -143,14 +189,22 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-black text-slate-500 uppercase tracking-wider">
-              Physical Footprint Address
-            </label>
+            <div className="flex justify-between items-center">
+              <label className="text-xs font-black text-slate-500 uppercase tracking-wider">
+                Physical Footprint Address
+              </label>
+              {calculatedZone && (
+                <span className="text-[10px] font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                  Zone: {calculatedZone}
+                </span>
+              )}
+            </div>
             <input 
               type="text"
               name="physical_address"
               placeholder="e.g. Plot 14, Industrial Layout, Phase II, State Nigeria"
               className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-bold text-slate-700 text-sm"
+              required
             />
           </div>
 
@@ -166,11 +220,11 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
 
             <button 
               type="submit" 
-              disabled={isPending}
-              className="px-6 py-3.5 bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2 disabled:bg-slate-300 shadow-md"
+              disabled={isPending || state.success}
+              className="px-6 py-3.5 bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2 disabled:bg-slate-300 shadow-md cursor-pointer disabled:cursor-not-allowed"
             >
               <PlusCircle size={14} />
-              {isPending ? 'Processing Authorization...' : `Authorize & Register ${nodeType === 'WAREHOUSE' ? 'Warehouse Hub' : 'Distribution Depot'}`}
+              {isPending ? 'Processing Authorization...' : state.success ? 'Success Registered' : `Authorize & Register ${nodeType === 'WAREHOUSE' ? 'Warehouse Hub' : 'Distribution Depot'}`}
             </button>
           </div>
         </form>
