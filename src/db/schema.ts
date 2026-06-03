@@ -4,11 +4,14 @@ import { relations } from "drizzle-orm";
 // 1. Master Company List
 export const companies = pgTable("companies", {
   id: serial("id").primaryKey(),
-  name: varchar("name", { length: 255 }).notNull().unique(), 
+  name: varchar("name", { length: 255 }).notNull(), // FIX: Removed .unique() from here
   address: text("address"),
   category: varchar("category", { length: 50 }).notNull().default('LOCAL'), 
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  // FIX: This composite index enforces uniqueness across the name + address combination
+  companySiteComboUnique: uniqueIndex("companies_name_address_unique").on(table.name, table.address),
+}));
 
 // 2. Affiliation Bridge
 export const companyAffiliations = pgTable("company_affiliations", {
@@ -82,14 +85,14 @@ export const qmsTimelines = pgTable("qms_timelines", {
   details: jsonb("details"), 
 });
 
-// 7. Users (MODIFIED)
+// 7. Users
 export const users = pgTable("users", {
-  id: uuid("id").primaryKey(), // Removed .defaultRandom()
+  id: uuid("id").primaryKey(), 
   name: varchar("name", { length: 255 }).notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   role: varchar("role", { length: 50 }).default('Staff'), 
   division: varchar("division", { length: 100 }),
-  linkedAt: timestamp("linked_at"), // NEW: Presence determines 'Connected' status
+  linkedAt: timestamp("linked_at"), 
   createdAt: timestamp("created_at").defaultNow(),
 });
 

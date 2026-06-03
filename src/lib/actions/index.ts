@@ -23,7 +23,7 @@ export async function submitLODApplication(
   rawData: any, 
   userId: string, 
   userName: string, 
-  userRole: string // Ensure this passes "Divisional Deputy Director" per QMS
+  userRole: string // "Divisional Deputy Director" used per QMS
 ) {
   const validated = lodFormSchema.safeParse(rawData);
   if (!validated.success) return { success: false, error: "Validation Failed" };
@@ -48,14 +48,29 @@ export async function submitLODApplication(
       // Determine if this is a Pass 2 (Compliance Review) update
       const isActuallyRound2 = isUpdate && (existingApp.status === 'TECHNICAL_PASSED' || existingApp.details?.isComplianceReview === true);
 
-      // 2. Upsert Companies (Master Data Protection)
+      // 2. Upsert Companies (Master Data Protection - Scaled to evaluate distinct Sites)
       const upsertCompany = async (name: string, address: string, category: 'LOCAL' | 'FOREIGN') => {
         const cleanName = normalize(name);
+        const cleanAddress = address?.trim() || ""; // Kept original casing for address presentation clarity
+
+        // FIX: Match by Name, Category AND Address to prevent cross-site layout collapse
         const existing = await tx.query.companies.findFirst({
-          where: and(eq(companies.name, cleanName), eq(companies.category, category))
+          where: and(
+            eq(companies.name, cleanName), 
+            eq(companies.category, category),
+            eq(companies.address, cleanAddress)
+          )
         });
+
         if (existing) return existing;
-        const [inserted] = await tx.insert(companies).values({ name: cleanName, address, category }).returning();
+
+        // If no match matches this specific company site combination, insert it as a unique layout
+        const [inserted] = await tx.insert(companies).values({ 
+          name: cleanName, 
+          address: cleanAddress, 
+          category 
+        }).returning();
+
         return inserted;
       };
 
@@ -121,7 +136,6 @@ export async function submitLODApplication(
       if (isUpdate && existingApp) {
         appId = existingApp.id;
         
-        // Update application
         await tx.update(applications)
           .set({
             status: isActuallyRound2 ? 'PENDING_DIRECTOR_FINAL' : 'PENDING_DIRECTOR',
@@ -132,13 +146,11 @@ export async function submitLODApplication(
           })
           .where(eq(applications.id, appId));
 
-        // Close ANY open timeline record for this app
         await tx.update(qmsTimelines)
           .set({ endTime: sql`now()` })
           .where(and(eq(qmsTimelines.applicationId, appId), isNull(qmsTimelines.endTime)));
 
       } else {
-        // Create Fresh Application
         const [newApp] = await tx.insert(applications).values({
           applicationNumber: normalizedAppNumber,
           type: data.type,
@@ -151,7 +163,7 @@ export async function submitLODApplication(
         appId = newApp.id;
       }
 
-      // SHARED QMS REQUIREMENT: Start the clock for Director Review
+      // Start the clock for Director Review as per QMS
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         staffId: userId,
@@ -160,7 +172,7 @@ export async function submitLODApplication(
         startTime: sql`now()`
       });
 
-      // 6. Risk Assessment Logic (Always keep in sync with current Dossier)
+      // 6. Risk Assessment Logic
       const score = maxComp * maxCrit;
       const level = score <= 2 ? "Low" : score <= 4 ? "Medium" : "High";
 
@@ -203,7 +215,7 @@ export async function getApplications() {
         applicationNumber: true,
       },
       orderBy: [desc(applications.id)],
-      limit: 50, // Grab enough to give the officer a good history
+      limit: 50,
     });
     
     return data;

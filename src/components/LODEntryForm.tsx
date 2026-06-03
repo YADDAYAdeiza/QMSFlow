@@ -30,6 +30,9 @@ const RISK_CATEGORIES = [
   { name: "POWDER BETA-LACTAMS", comp: 2, crit: 3 },
   { name: "TABLETS (GENERAL)", comp: 1, crit: 2 },
   { name: "MULTIVITAMINS", comp: 1, crit: 1 },
+  { name: "LIQUID Pesticides and Agrochemicals", comp: 1, crit: 1 },
+  { name: "SOLID Pesticides and Agrochemicals", comp: 1, crit: 1 },
+  { name: "Aerosol Pesticides and Agrochemicals", comp: 1, crit: 1 },
 ];
 
 const getRiskLevel = (score: number) => {
