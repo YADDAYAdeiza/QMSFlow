@@ -50,17 +50,19 @@ export async function enrollFPPHeader(formData: FormData) {
   const { data, error } = await supabase
     .from('permits')
     .insert([{
-      permit_number: formData.get('nafdac_reg_no'),
-      product_name: formData.get('product_name'),
-      shipping_pack_size: formData.get('shipping_pack_size'),
-      dir_type: 'VMD', // Hardcoded as per current requirements
-      active_substance: formData.get('active_substance'),
-      route_of_administration: formData.get('route_of_administration'),
-      strength: formData.get('strength'),
-      dosage_form: formData.get('dosage_form'),
-      therapeutic_class: formData.get('therapeutic_class'),
-      atc_id: formData.get('atc_id'),
-      company_id: companyId // Correctly using the UUID
+      permit_number: nafdac_reg_no,
+      product_name,
+      company_name,
+      shipping_pack_size,
+      country_of_origin,
+      active_substance,
+      atc_id,
+      strength,
+      route_of_administration,
+      dosage_form,        
+      therapeutic_class,  
+      status: 'Original',
+      dir_type: 'VMD' 
     }])
     .select('id')
     .single();
@@ -74,25 +76,21 @@ export async function enrollFPPHeader(formData: FormData) {
   return { success: true, permit_id: data.id };
 }
 
-/**
- * Updates an existing FPP Registration.
- * Handles the normalized company relationship update.
- */
-/**
- * Updates an existing FPP Registration.
- * Handles the normalized company relationship update.
- */
 export async function updateFPPRegistration(id: string, formData: FormData) {
   const supabase = await createClient();
-  const start = performance.now();
-
-  const company_name = formData.get('company_name') as string;
-  // Resolve or create the company link if the user changes the manufacturer/company
-  const companyId = await getOrCreateCompanyAmr(
-    supabase, 
-    company_name, 
-    formData.get('country_of_origin') as string
-  );
+  
+  // Fully tracking the complete entity map during data modification events
+  const payload = {
+    permit_number: formData.get('nafdac_reg_no'),
+    product_name: formData.get('product_name'),
+    company_name: formData.get('company_name'),
+    shipping_pack_size: formData.get('shipping_pack_size'),
+    active_substance: formData.get('active_substance'),
+    strength: formData.get('strength'),
+    route_of_administration: formData.get('route_of_administration'),
+    dosage_form: formData.get('dosage_form'),        // Now safely retained on record updates
+    therapeutic_class: formData.get('therapeutic_class'),  // Now safely retained on record updates
+  };
 
   const { error } = await supabase
     .from('permits')
@@ -111,10 +109,13 @@ export async function updateFPPRegistration(id: string, formData: FormData) {
     })
     .eq('id', id);
 
-  console.log(`QMS Audit: Update for '${id}' took ${performance.now() - start}ms`);
-
-  if (error) return { success: false, message: error.message };
-
+  if (error) {
+    console.error("FPP Modification Error:", error);
+    return { success: false, message: error.message };
+  }
+  
   revalidatePath('/Vetstat/Ledger');
+  revalidatePath('/Vetstat/Dashboard');
+  
   return { success: true };
 }

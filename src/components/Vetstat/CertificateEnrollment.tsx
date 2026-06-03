@@ -23,16 +23,16 @@ const ROUTE_GROUPS = {
   "Other": ["Topical", "Intramammary", "Intrauterine"]
 };
 
-// VMD Master Categorization Lists
+// VMD Uniform Master Categorization Lists
 const DOSAGE_FORMS = [
   "Oral Powder", "Tablet", "Bolus", "Oral Solution", 
   "Injectable Solution", "Injectable Suspension", "Premix", 
-  "Intramammary Ointment", "Vial", "Ampoule"
+  "Intramammary Ointment", "Vial", "Ampoule", "Capsule"
 ];
 
 const THERAPEUTIC_CLASSES = [
   "Antibacterial", "Antiviral", "Antifungal", "Anti-protozoal", 
-  "Anthelmintic", "Coccidiostat", "Ectoparasiticide"
+  "Anthelmintic", "Coccidiostat", "Ectoparasiticide", "Nonsteroidal Anti-Inflammatory Drug (NSAID)"
 ];
 
 interface Company { 
@@ -151,8 +151,32 @@ export default function CertificateEnrollment({
             setCountryOfOrigin(matchedRecord.manufacturer_country);
           }
 
-          if (matchedRecord.dosage_form) setDosageForm(matchedRecord.dosage_form);
-          if (matchedRecord.therapeutic_class) setTherapeuticClass(matchedRecord.therapeutic_class);
+          // --- NORMALIZATION RUNWAY ---
+          if (matchedRecord.dosage_form) {
+            const rawForm = matchedRecord.dosage_form.trim().toLowerCase();
+            const matchedForm = DOSAGE_FORMS.find(f => f.toLowerCase() === rawForm);
+            if (matchedForm) {
+              setDosageForm(matchedForm);
+            } else {
+              // Graceful title case conversion fallback if string doesn't match perfectly
+              setDosageForm(rawForm.charAt(0).toUpperCase() + rawForm.slice(1));
+            }
+          }
+
+          if (matchedRecord.pharmacological_class) {
+            const rawClass = matchedRecord.pharmacological_class.trim().toLowerCase();
+            const matchedClass = THERAPEUTIC_CLASSES.find(c => c.toLowerCase() === rawClass);
+            if (matchedClass) {
+              setTherapeuticClass(matchedClass);
+            } else {
+              // Handle special edge layouts like acronym parsing (e.g., NSAID)
+              if (rawClass.includes('nsaid')) {
+                setTherapeuticClass("Nonsteroidal Anti-Inflammatory Drug (NSAID)");
+              } else {
+                setTherapeuticClass(rawClass.charAt(0).toUpperCase() + rawClass.slice(1));
+              }
+            }
+          }
 
           if (matchedRecord.active_substance) {
             const matchedATC = atcCodesRef.current.find(a => a.substance.toLowerCase() === matchedRecord.active_substance.toLowerCase());
@@ -223,7 +247,7 @@ export default function CertificateEnrollment({
   const handleAction = async (formData: FormData) => {
     setIsPending(true);
     
-    // Company is now resolved server-side from 'company_name'
+    formData.set('company_name', mahName);
     formData.set('active_substance', selectedSubstance ? selectedSubstance.substance : (substanceSearch || '')); 
     formData.set('route_of_administration', selectedRoutes.join(', '));
     formData.set('dosage_form', dosageForm);
