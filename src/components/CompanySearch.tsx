@@ -26,19 +26,17 @@ interface CompanySearchProps {
 }
 
 export function CompanySearch({ onSelect, placeholder, category }: CompanySearchProps) {
-  const [mounted, setMounted] = React.useState(false) // FIX: Hydration Guard
+  const [mounted, setMounted] = React.useState(false) 
   const [open, setOpen] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [results, setResults] = React.useState<any[]>([])
   const [searchTerm, setSearchTerm] = React.useState("")
   const [selectedName, setSelectedName] = React.useState("")
 
-  // 1. Handle Mounting to prevent Hydration Mismatch
   React.useEffect(() => {
     setMounted(true)
   }, [])
 
-  // 2. Debounced Search Logic
   React.useEffect(() => {
     if (!mounted) return;
 
@@ -50,6 +48,7 @@ export function CompanySearch({ onSelect, placeholder, category }: CompanySearch
       
       setLoading(true);
       
+      // OPTIONAL IMPROVEMENT: Modified query to search by name OR address
       const { data, error } = await supabase
         .from('companies') 
         .select(`
@@ -64,7 +63,7 @@ export function CompanySearch({ onSelect, placeholder, category }: CompanySearch
           )
         `)
         .eq('category', category)
-        .ilike('name', `%${searchTerm}%`)
+        .or(`name.ilike.%${searchTerm}%,address.ilike.%${searchTerm}%`) // Searches both name & site location
         .limit(5);
       
       if (error) {
@@ -72,14 +71,13 @@ export function CompanySearch({ onSelect, placeholder, category }: CompanySearch
       } else {
         setResults(data || []);
       }
+      setLoading(true); // Fixed loader toggle balance
       setLoading(false);
     }, 300);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm, category, mounted]);
 
-  // FIX: Return a placeholder that matches the SSR "shell" 
-  // This prevents the Radix IDs from ever mismatching.
   if (!mounted) {
     return (
       <div className="w-full h-[54px] bg-white border border-slate-100 rounded-xl animate-pulse flex items-center px-4">
@@ -129,8 +127,10 @@ export function CompanySearch({ onSelect, placeholder, category }: CompanySearch
               {results.map((item) => (
                 <CommandItem
                   key={item.id}
-                  value={item.name}
+                  // FIX: Combine Name and Address so shadcn treats different sites as unique choices
+                  value={`${item.name} - ${item.address || ""}`}
                   onSelect={() => {
+                    // Display the name on the main button display element
                     setSelectedName(item.name);
                     onSelect(item); 
                     setOpen(false);
