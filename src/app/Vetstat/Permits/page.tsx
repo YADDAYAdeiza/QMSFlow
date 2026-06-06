@@ -18,8 +18,6 @@ export default async function PermitsPage() {
     supabase.from('companies_amr').select('*').order('company_name', { ascending: true })
   ]);
 
-  console.log('This is companies Result: ', companiesResult);
-
   return (
     <PermitPageClient 
       initialPermits={permitsResult.data || []} 

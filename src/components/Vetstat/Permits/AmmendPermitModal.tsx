@@ -6,7 +6,6 @@ import { AlertTriangle, ShieldCheck, X } from 'lucide-react';
 import { createAmendment } from '@/lib/actions/Vetstat/Permits/permitActions';
 
 interface SubstanceEntry {
-  id:string;
   substance_id: string;
   quantity_kg: number;
   additional_qty: number;
@@ -15,11 +14,7 @@ interface SubstanceEntry {
 interface PermitAmendmentProps {
   permit: {
     id: string;
-    permit_substances: Array<{ 
-      id: string;      // <-- Ensure the parent signature maps it
-      substance_id: string; 
-      quantity_kg: number 
-    }>;
+    permit_substances: Array<{ substance_id: string; quantity_kg: number }>;
   };
   atcCodes: Array<{ id: string; substance: string }>;
   onClose: () => void;
@@ -33,12 +28,9 @@ export default function AmmendPermitModal({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  console.log('This is permit: ', permit);
   
   const [substances, setSubstances] = useState<SubstanceEntry[]>(() =>
     permit.permit_substances.map((s) => ({
-      id: s.id,
       substance_id: s.substance_id,
       quantity_kg: s.quantity_kg,
       additional_qty: 0 

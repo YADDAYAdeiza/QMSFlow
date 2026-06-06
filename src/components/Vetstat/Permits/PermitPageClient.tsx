@@ -10,10 +10,9 @@ import { Layers, ShieldCheck, Landmark, Tractor, Activity } from 'lucide-react';
 interface PermitPageClientProps {
   initialPermits: any[];
   atcCodes: any[];
-  companiesCatalog:any[];
 }
 
-export default function PermitPageClient({ initialPermits, atcCodes, companiesCatalog }: PermitPageClientProps) {
+export default function PermitPageClient({ initialPermits, atcCodes }: PermitPageClientProps) {
   const [activeTab, setActiveTab] = useState('permits');
   const [selectedPermit, setSelectedPermit] = useState<any | null>(null);
   
@@ -106,7 +105,6 @@ export default function PermitPageClient({ initialPermits, atcCodes, companiesCa
               atcCodes={atcCodes} 
               onSelectPermit={setSelectedPermit}
               selectedId={selectedPermit?.id}
-              companiesCatalog={companiesCatalog}
             />
           ) : (
             <div className="flex flex-col items-center justify-center p-16 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 text-slate-400">
