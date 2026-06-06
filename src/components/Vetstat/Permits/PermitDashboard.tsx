@@ -46,6 +46,8 @@ export default function PermitDashboard({
     mode: 'INTAKE' | 'OUTAKE' 
   } | null>(null);
 
+  console.log('This is initialPermits: ', initialPermits);
+
   // Synchronize state with incoming Server Component payload updates safely
   useEffect(() => {
     setPermits(initialPermits);
@@ -67,7 +69,7 @@ export default function PermitDashboard({
 
   const filtered = permits.filter(p => 
     p?.permit_number?.toLowerCase().includes(search.toLowerCase()) || 
-    p?.company_name?.toLowerCase().includes(search.toLowerCase())
+    p?.companies_amr?.company_name?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -130,7 +132,7 @@ export default function PermitDashboard({
                               {expandedId === permit.id ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
                             </span>
                           </button>
-                          <span className="font-bold text-slate-700 max-w-[280px] truncate block">{permit.company_name}</span>
+                          <span className="font-bold text-slate-700 max-w-[280px] truncate block">{permit?.companies_amr?.company_name}</span>
                         </div>
                       </td>
                       

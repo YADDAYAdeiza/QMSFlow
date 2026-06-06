@@ -44,7 +44,7 @@ export default function RapidIntake({ companyName, mode, permitId, onComplete }:
 
       // Safe isolated upload targeted to the authorized 'Documents' storage bucket
       const { error: uploadError } = await supabaseClient.storage
-        .from('Documents') 
+        .from('Permit') 
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
