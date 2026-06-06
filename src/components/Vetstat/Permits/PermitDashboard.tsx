@@ -23,13 +23,15 @@ interface PermitDashboardProps {
   atcCodes: any[];
   onSelectPermit: (permit: any) => void;
   selectedId?: string;
+  companiesCatalog:any[]
 }
 
 export default function PermitDashboard({ 
   initialPermits, 
   atcCodes,
   onSelectPermit,
-  selectedId 
+  selectedId,
+  companiesCatalog
 }: PermitDashboardProps) {
   const [permits, setPermits] = useState(initialPermits);
   const [search, setSearch] = useState('');
@@ -43,6 +45,8 @@ export default function PermitDashboard({
     permit: any; 
     mode: 'INTAKE' | 'OUTAKE' 
   } | null>(null);
+
+  console.log('This is initialPermits: ', initialPermits);
 
   // Synchronize state with incoming Server Component payload updates safely
   useEffect(() => {
@@ -65,7 +69,7 @@ export default function PermitDashboard({
 
   const filtered = permits.filter(p => 
     p?.permit_number?.toLowerCase().includes(search.toLowerCase()) || 
-    p?.company_name?.toLowerCase().includes(search.toLowerCase())
+    p?.companies_amr?.company_name?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -128,7 +132,7 @@ export default function PermitDashboard({
                               {expandedId === permit.id ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
                             </span>
                           </button>
-                          <span className="font-bold text-slate-700 max-w-[280px] truncate block">{permit.company_name}</span>
+                          <span className="font-bold text-slate-700 max-w-[280px] truncate block">{permit?.companies_amr?.company_name}</span>
                         </div>
                       </td>
                       
@@ -258,7 +262,7 @@ export default function PermitDashboard({
 
             <div className="p-6 overflow-y-auto grow">
               <RapidIntake 
-                companyName={activeScanner.permit.company_name} 
+                companyName={activeScanner.permit?.companies_amr?.company_name} 
                 mode={activeScanner.mode}
                 permitId={activeScanner.permit.id}
                 onComplete={() => {

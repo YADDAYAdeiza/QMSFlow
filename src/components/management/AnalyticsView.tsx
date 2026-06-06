@@ -160,4 +160,4 @@ function StatCard({ title, value, icon, color, subtitle }: any) {
       </div>
     </div>
   );
-}
+}   
