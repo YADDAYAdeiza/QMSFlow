@@ -62,7 +62,7 @@ export default async function DDDInboxPage({
             eq(qmsTimelines.staffId, loggedInUserId),
             eq(applications.currentPoint, 'Technical DD Review'),
             eq(applications.currentPoint, 'IRSD Hub Clearance'),
-            eq(applications.currentPoint, 'IRSD Staff Vetting Return') // ✅ THE CRITICAL FIX
+            eq(applications.currentPoint, 'IRSD Staff Vetting Return') // ✅ THE CRITICAL FIX;  I als use this as test account
 
           )
     ));
