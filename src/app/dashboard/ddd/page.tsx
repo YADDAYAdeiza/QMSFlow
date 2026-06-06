@@ -61,7 +61,9 @@ export default async function DDDInboxPage({
         : or(
             eq(qmsTimelines.staffId, loggedInUserId),
             eq(applications.currentPoint, 'Technical DD Review'),
-            eq(applications.currentPoint, 'IRSD Hub Clearance')
+            eq(applications.currentPoint, 'IRSD Hub Clearance'),
+            eq(applications.currentPoint, 'IRSD Staff Vetting Return') // ✅ THE CRITICAL FIX
+
           )
     ));
   // 4. Formatting Logic

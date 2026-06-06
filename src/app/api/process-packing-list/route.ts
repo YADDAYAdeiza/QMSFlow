@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function POST(req: Request) {
   try {
-    const { companyName, filePath, mode } = await req.json(); 
-    console.log(`Processing ${mode} for Company:`, companyName);
+    // 0. Extract permitId from request payload
+    const { companyName, filePath, mode, permitId } = await req.json(); 
+    console.log(`Processing ${mode} for Company: ${companyName}, Permit ID: ${permitId}`);
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,12 +37,26 @@ export async function POST(req: Request) {
       Only return the JSON array, no other text.
     `;
 
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: base64Data, mimeType: fileData.type } }
-    ]);
+    let result;
+    let maxRetries = 3;
+    let delay = 1500;
 
-    // FIXED REGEX: ensures no hidden line breaks break the string cleaning
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        result = await model.generateContent([
+          prompt,
+          { inlineData: { data: base64Data, mimeType: fileData.type } }
+        ]);
+        break; 
+      } catch (aiError: any) {
+        if (attempt === maxRetries) throw aiError;
+        await sleep(delay);
+        delay *= 2; 
+      }
+    }
+
+    if (!result) throw new Error("Vision AI response context targets missing.");
+
     const aiText = result.response.text().replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(aiText);
 
@@ -47,10 +64,9 @@ export async function POST(req: Request) {
     const validationResult = [];
 
     for (const item of extractedData) {
-      // Logic: Search by the first word of the raw drug name
       const searchName = item.rawName.trim().split(' ')[0];
 
-      // A. Master List Check (atc_codes)
+      // A. Master List Check (atc_codes) - Proven working for INTAKE
       const { data: atcEntries } = await supabase
         .from('atc_codes')
         .select('id, substance')
@@ -59,39 +75,51 @@ export async function POST(req: Request) {
 
       const atc = atcEntries?.[0] || null;
 
-      // B. Permit Assignment Check
+      // B. Robust Permit Assignment Check for OUTAKE
+      // B. Robust Permit Assignment Check (Direct lookup, no volatile joins)
       let permitMatch = null;
       if (atc) {
-        const { data } = await supabase
-          .from('permit_substances')
-          .select(`
-            quantity_kg,
-            permits!inner (permit_number, company_name, validity)
-          `)
-          .eq('substance_id', atc.id)
-          .ilike('permits.company_name', `%${companyName.trim()}%`) 
-          .eq('permits.validity', 'Active')
+        let query = supabase.from('permits').select('permit_number, validity');
+
+        if (permitId) {
+          // 1. Direct Primary Key targeting (Bulletproof)
+          query = query.eq('id', permitId);
+        } else {
+          // 2. Direct lookup fallback by company_id if you have it, 
+          // or skip company checks entirely if tracking globally.
+          console.warn("No permitId provided, running substance-only validation context.");
+        }
+
+        const { data, error } = await query
+          .eq('atc_id', atc.id)
+          .ilike('validity', 'Active') // Case-insensitive protection for 'Active' vs 'active'
           .limit(1);
 
-        permitMatch = (data && data.length > 0) ? (data[0] as any) : null;
+        if (error) {
+          console.error("Database Direct Query Error:", error.message);
+        } else {
+          permitMatch = (data && data.length > 0) ? data[0] : null;
+        }
+        console.log('permitId: ', permitId);
+        console.log('Data: ', data)
+        console.log('ATC: ', atc.id)
       }
-
       // 4. Branching Logic for INTAKE vs OUTAKE
       let status = "REVIEW_REQUIRED";
       
       if (mode === 'INTAKE') {
-        // For INTAKE: Only requires the substance to exist in the national master list
         status = atc ? "READY" : "REVIEW_REQUIRED";
       } else {
-        // For OUTAKE: Must exist in master list AND be already authorized on this permit
+        // OUTAKE relies on matching the active permit profile explicitly
+        console.log('This is permitMatch: ', permitMatch);
         status = (atc && permitMatch) ? "READY" : "REVIEW_REQUIRED";
       }
 
       validationResult.push({
         ...item,
-        substanceId: atc?.id || null, // Critical for the 'not-null' database constraint
+        substanceId: atc?.id || null, 
         confirmed: atc?.substance || "Unknown",
-        permit: permitMatch?.permits?.permit_number || "NO PRIOR AUTHORIZATION",
+        permit: permitMatch?.permit_number || "NO PRIOR AUTHORIZATION",
         status: status
       });
     }

@@ -23,13 +23,15 @@ interface PermitDashboardProps {
   atcCodes: any[];
   onSelectPermit: (permit: any) => void;
   selectedId?: string;
+  companiesCatalog:any[]
 }
 
 export default function PermitDashboard({ 
   initialPermits, 
   atcCodes,
   onSelectPermit,
-  selectedId 
+  selectedId,
+  companiesCatalog
 }: PermitDashboardProps) {
   const [permits, setPermits] = useState(initialPermits);
   const [search, setSearch] = useState('');
@@ -258,7 +260,7 @@ export default function PermitDashboard({
 
             <div className="p-6 overflow-y-auto grow">
               <RapidIntake 
-                companyName={activeScanner.permit.company_name} 
+                companyName={activeScanner.permit?.companies_amr?.company_name} 
                 mode={activeScanner.mode}
                 permitId={activeScanner.permit.id}
                 onComplete={() => {

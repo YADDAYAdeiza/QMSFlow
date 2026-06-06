@@ -171,3 +171,4 @@ export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => 
   facility: one(companies, { fields: [riskAssessments.facilityId], references: [companies.id] }),
   application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),
 }));
+
