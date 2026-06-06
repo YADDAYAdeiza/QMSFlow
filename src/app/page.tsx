@@ -16,7 +16,7 @@ export default function Home() {
         {/* Messaging */}
         <div className="space-y-3">
           <h1 className="text-3xl font-black text-white uppercase italic tracking-tighter italic">
-            QMS Flow <span className="text-blue-500">Personnel</span>
+            NigVetStat <span className="text-blue-500">Personnel</span>
           </h1>
           <p className="text-slate-400 text-sm font-medium leading-relaxed">
             Authorized Regulatory Access Only. <br />
