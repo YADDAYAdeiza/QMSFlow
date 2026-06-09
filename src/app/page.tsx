@@ -15,13 +15,13 @@ export default function Home() {
 
         {/* Messaging */}
         <div className="space-y-3">
-          <h1 className="text-3xl font-black text-white uppercase italic tracking-tighter italic">
-            NigVetStat <span className="text-blue-500">Personnel</span>
+          <h1 className="text-6xl font-black text-white italic tracking-tighter italic">
+            NigVetStat <span className="text-blue-500 ml-5"></span>
           </h1>
-          <p className="text-slate-400 text-sm font-medium leading-relaxed">
+          <p className="text-slate-400 text-2xl font-medium leading-relaxed">
             Authorized Regulatory Access Only. <br />
-            Please authenticate to access the LOD Workstation and Registry.
           </p>
+            {/* <span className='text-2xl'>Please authenticate to access the LOD Workstation and Registry.</span> */}
         </div>
 
         {/* Action Area */}

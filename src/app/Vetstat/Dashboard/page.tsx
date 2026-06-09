@@ -30,8 +30,13 @@ export default async function AMSDashboardPage({
   const risk = (params.risk as string) || 'All';
   const filterLabel = (params.label as string) || "All Time";
 
-  // Destructured the rawRows alongside analytical aggregates
-  const { zones, topSubstances, rawRows, totalDDD, globalTrend } = await getAMSRegionalAnalytics(start, end, species, risk);
+  // 🔴 FIXED: Wrapped variables in a configuration object parameter block to match action definition
+  const { zones, topSubstances, rawRows, totalDDD, globalTrend } = await getAMSRegionalAnalytics({
+    startDate: start,
+    endDate: end,
+    species: species,
+    risk: risk
+  });
   
   const hasRealData = totalDDD > 0;
   const isAnomaly = (globalTrend ?? 0) > 15;
@@ -133,12 +138,11 @@ export default async function AMSDashboardPage({
                 </p>
             </div>
             
-            {/* Component renders map/bar switch, and dynamically intercepts active regional rows */}
             <div className="flex-1 w-full relative z-0 flex flex-col justify-between">
                 <StructuralAnalyticsEngine 
                   zones={zones} 
                   topSubstances={topSubstances}
-                  rawRows={rawRows} // <- Wired up raw dataset stream perfectly
+                  rawRows={rawRows}
                   isHighRiskMode={isHighRiskMode}
                 />
             </div>

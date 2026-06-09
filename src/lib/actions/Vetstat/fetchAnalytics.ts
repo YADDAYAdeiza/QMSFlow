@@ -18,12 +18,20 @@ export interface ZoneMetric {
   states: Array<{ name: string; value: number }>;
 }
 
-export async function getAMSRegionalAnalytics(
-  startDate?: string, 
-  endDate?: string, 
-  species: string = 'All',
-  risk: string = 'All' 
-) {
+// Convert parameters to a clean, structured interface for easier page/filter invocations
+export interface FetchAnalyticsParams {
+  startDate?: string;
+  endDate?: string;
+  species?: string;
+  risk?: string;
+}
+
+export async function getAMSRegionalAnalytics({
+  startDate,
+  endDate,
+  species = 'All',
+  risk = 'All'
+}: FetchAnalyticsParams = {}) {
   const startTimer = performance.now();
   const supabase = await createClient();
   
@@ -36,18 +44,19 @@ export async function getAMSRegionalAnalytics(
   const prevEnd = currentStart;
 
   // Execute both analytical queries simultaneously to boost performance
+  // Parameters are now correctly mapped to the parameters declared above
   const [currentReq, prevReq] = await Promise.all([
     supabase.rpc('get_ams_stats_v5', { 
       start_date: currentStart, 
       end_date: currentEnd, 
-      species_filter: speciesFilter,
-      risk_filter: riskFilter 
+      species_filter: species,
+      risk_filter: risk 
     }),
     supabase.rpc('get_ams_stats_v5', { 
       start_date: prevStart, 
       end_date: prevEnd, 
-      species_filter: speciesFilter,
-      risk_filter: riskFilter
+      species_filter: species,
+      risk_filter: risk
     })
   ]);
 
@@ -62,7 +71,6 @@ export async function getAMSRegionalAnalytics(
 
   // 1. Parse Current Timeframe Stream
   rawRows.forEach((row: any) => {
-    // Process Geopolitical Structural Loads
     const zoneKey = row.zone || "Unassigned";
     if (!zoneMap[zoneKey]) {
       zoneMap[zoneKey] = { 
@@ -76,7 +84,6 @@ export async function getAMSRegionalAnalytics(
     zoneMap[zoneKey].value += val;
     
     if (row.state_name) {
-      // Look for an existing state record inside this zone to avoid duplicate row entries
       const existingState = zoneMap[zoneKey].states.find((s: any) => s.name === row.state_name);
       if (existingState) {
         existingState.value += val;
@@ -88,7 +95,6 @@ export async function getAMSRegionalAnalytics(
       }
     }
 
-    // Process Unique Substance Models
     const subKey = row.substance || "Unknown Substance";
     if (!substanceMap[subKey]) {
       substanceMap[subKey] = {
@@ -101,25 +107,29 @@ export async function getAMSRegionalAnalytics(
   });
 
   // 2. Parse Historical Timeframe Stream for Trends Computation
+  let totalPrevDDD = 0; // Local counter to calculate our global analytical trend percentage
+  
   prevReq.data?.forEach((row: any) => {
     const zoneKey = row.zone || "Unassigned";
     const val = parseFloat(row.total_ddd) || 0;
+    totalPrevDDD += val;
+
     if (zoneMap[zoneKey]) {
       zoneMap[zoneKey].prevValue += val;
     }
-    zoneMap[rawZone].statesMap[rawState] += rowDDD;
-
-    // Substance Accumulator Mapping
-    const rawSubstance = row.substance || 'Unknown Substance';
-    if (!substanceMap[rawSubstance]) {
-      substanceMap[rawSubstance] = { 
-        substance: rawSubstance, 
+    
+    // Fixed historical substance accumulator to correctly reference local scope bindings
+    const subKey = row.substance || 'Unknown Substance';
+    if (!substanceMap[subKey]) {
+      substanceMap[subKey] = { 
         class: row.substance_class || 'Unclassified', 
         riskPriority: row.risk_priority || 'LOW', 
         volume: 0 
       };
     }
-    substanceMap[rawSubstance].volume += rowDDD;
+    // We are analyzing overall consumption context profiles; historical trends 
+    // are driven off the primary zone parameters, but you can track historical 
+    // substance volumes here if your UI needs it.
   });
 
   // 3. Complete In-Memory Analytical Transformations
@@ -135,10 +145,12 @@ export async function getAMSRegionalAnalytics(
       riskPriority: details.riskPriority as any,
       volume: details.volume
     }))
-    .sort((a, b) => b.volume - a.volume); // Sort by highest consumption volume
+    .sort((a, b) => b.volume - a.volume); 
 
   const totalDDD = zones.reduce((sum, z) => sum + z.value, 0);
+  
+  // Calculate Global Trend precisely to avoid undefined crash returns
+  const globalTrend = totalPrevDDD > 0 ? ((totalDDD - totalPrevDDD) / totalPrevDDD) * 100 : 0;
 
-  // Added rawRows to the structural return block
   return { zones, topSubstances, rawRows, totalDDD, globalTrend };
 }

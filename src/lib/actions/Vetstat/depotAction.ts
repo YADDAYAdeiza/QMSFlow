@@ -10,58 +10,23 @@ interface ActionResponse {
 }
 
 /**
- * Normalized lookup/insertion for company entities.
- * Ensures deduplication across the registry (VMD/PAD/AFPD/IRSD).
- */
-async function getOrCreateCompanyAmr(supabase: any, name: string) {
-  if (!name) return null;
-  const trimmedName = name.trim();
-
-  // 1. Search for existing entry
-  const { data: existing } = await supabase
-    .from('companies_amr')
-    .select('id')
-    .ilike('company_name', trimmedName)
-    .maybeSingle();
-
-  if (existing) return existing.id;
-
-  // 2. Insert if missing
-  const { data: created, error } = await supabase
-    .from('companies_amr')
-    .insert([{ company_name: trimmedName }])
-    .select('id')
-    .single();
-
-  if (error) {
-    // Defensive fallback for race conditions
-    const { data: retry } = await supabase
-      .from('companies_amr')
-      .select('id')
-      .ilike('company_name', trimmedName)
-      .maybeSingle();
-    return retry?.id || null;
-  }
-
-  return created?.id || null;
-}
-
-/**
  * Registers master data for Finished Pharmaceutical Products (FPP).
+ * Completely normalized to remove legacy permits text columns (company_name, country_of_origin)
  */
 export async function enrollFPPHeader(formData: FormData) {
   const supabase = await createClient();
-  const company_name = formData.get('company_name') as string;
-  const companyId = await getOrCreateCompanyAmr(supabase, company_name);
+  const start = performance.now(); // QMS Compliance timing requirement
 
+  const nafdac_reg_no = formData.get('nafdac_reg_no') as string;
+  const product_name = formData.get('product_name') as string;
+  const companyId = formData.get('company_id') as string; // Normalized structural UUID incoming from client dropdown list
+  
   const { data, error } = await supabase
     .from('permits')
     .insert([{
-      permit_number: formData.get('nafdac_reg_no'),
-      product_name: formData.get('product_name'),
-      company_name: company_name,        // Legacy dual-write
-      company_id: companyId,             // Normalized link
-      country_of_origin: formData.get('country_of_origin'), // Legacy dual-write
+      permit_number: nafdac_reg_no,
+      product_name,
+      company_id: companyId, // Safe relational key association mapping
       shipping_pack_size: formData.get('shipping_pack_size'),
       active_substance: formData.get('active_substance'),
       atc_id: formData.get('atc_id') || null,
@@ -70,12 +35,17 @@ export async function enrollFPPHeader(formData: FormData) {
       dosage_form: formData.get('dosage_form'),
       therapeutic_class: formData.get('therapeutic_class'),
       status: 'Original',
-      dir_type: 'VMD'
+      dir_type: 'VMD' // Uniform Master Directorate Routing Code
     }])
     .select('id')
     .single();
 
-  if (error) return { success: false, message: error.message };
+  console.log(`QMS Audit: Enrollment registration process for '${product_name}' took ${performance.now() - start}ms`);
+
+  if (error) {
+    console.error("FPP Registration Error Details:", error);
+    return { success: false, message: error.message };
+  }
 
   revalidatePath('/Vetstat/Ledger');
   return { success: true, permit_id: data.id };
@@ -83,29 +53,66 @@ export async function enrollFPPHeader(formData: FormData) {
 
 /**
  * Registers infrastructure logistics nodes (Warehouses/Depots).
+ * Stripped of 'geopolitical_zone' to match actual schema fields exactly.
  */
 export async function enrollDepotLocation(prevState: any, formData: FormData): Promise<ActionResponse> {
   const supabase = await createClient();
-  const company_name = formData.get('company_name') as string;
-  const companyId = await getOrCreateCompanyAmr(supabase, company_name);
+  const start = performance.now(); // QMS Compliance timing requirement
 
+  const companyId = formData.get('company_id') as string;
+  const depot_name = formData.get('depot_name') as string;
+  const state = formData.get('state') as string;
+  const physical_address = formData.get('physical_address') as string;
+  const node_type = formData.get('node_type') as string;
+  const duration = formData.get('qms_completion_duration_seconds');
+
+  if (!companyId) {
+    return { 
+      success: false, 
+      message: "Validation Exception: Marketing Authorization Holder is required.", 
+      timestamp: Date.now() 
+    };
+  }
+
+  // Look up master catalog plain text name to safely pass your table's NOT NULL column constraint
+  const { data: companyRecord, error: companyFetchError } = await supabase
+    .from('companies_amr')
+    .select('company_name')
+    .eq('id', companyId)
+    .maybeSingle();
+
+  if (companyFetchError || !companyRecord) {
+    console.error("Relational Mapping Error Details:", companyFetchError);
+    return { 
+      success: false, 
+      message: "Validation Exception: Failed to securely resolve structural company references.", 
+      timestamp: Date.now() 
+    };
+  }
+
+  // Database insert matches your actual column schema fields explicitly
   const { error } = await supabase
     .from('importer_logistics_nodes')
     .insert([{
-      company_name: company_name,        // Legacy dual-write
-      company_id: companyId,             // Normalized link
-      depot_name: formData.get('depot_name'),
-      state: formData.get('state'),
-      physical_address: formData.get('physical_address'),
-      node_type: formData.get('node_type')
+      company_id: companyId,                    // Modern tracking primary key layout reference
+      company_name: companyRecord.company_name, // Resolves the database's literal string constraint block
+      depot_name,
+      state,
+      physical_address,
+      node_type
     }]);
 
-  if (error) return { success: false, message: error.message, timestamp: Date.now() };
+  console.log(`QMS Audit: Supply chain node registration took ${performance.now() - start}ms (Staff desk workflow time: ${duration}s)`);
+
+  if (error) {
+    console.error("Logistics Node Enrollment System Exception:", error);
+    return { success: false, message: error.message, timestamp: Date.now() };
+  }
 
   revalidatePath('/Vetstat/Ledger');
   return { 
     success: true, 
-    message: "Infrastructure node registered successfully.", 
+    message: "Infrastructure node registered successfully under VMD Oversight.", 
     timestamp: Date.now() 
   };
 }
