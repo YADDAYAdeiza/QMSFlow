@@ -27,7 +27,7 @@ export default function DossierLink({ url }: DossierLinkProps) {
       }`}
     >
       {hasFile ? <FileText className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-      {hasFile ? "View Dossier" : "Missing File"}
+      {hasFile ? "View Documents" : "Missing File"}
     </a>
   );
 }
