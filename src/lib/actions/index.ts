@@ -24,7 +24,7 @@ const normalize = (str: string) => str?.trim().toUpperCase() || "";
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
   port: parseInt(process.env.SMTP_PORT || "465"),
-  secure: process.env.SMTP_SECURE === "true", 
+  secure: true, // Configured to use explicit secure SSL/TLS connection pathway
   auth: {
     user: process.env.SMTP_USER, 
     pass: process.env.SMTP_PASS, 
@@ -56,10 +56,10 @@ export async function sendDirectorOversightEmail(appDetails: {
 
     console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
     console.log(`👉 Target Destination (DIRECTOR_EMAIL): ${directorEmail}`);
-    console.log(`⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${process.env.SMTP_PORT || "587"}`);
+    console.log(`⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${process.env.SMTP_PORT || "465"}`);
 
     if (!senderEmail || !process.env.SMTP_PASS) {
-      console.log("❌ ERROR: Missing SMTP credentials in .env.local file!");
+      console.log("❌ ERROR: Missing SMTP credentials in Vercel / Environment settings!");
       return { success: false, error: "SMTP credentials are misconfigured." };
     }
 
@@ -112,7 +112,7 @@ export async function sendDirectorOversightEmail(appDetails: {
     console.log("⚡ Connecting to server and attempting handshake transmission...");
     const info = await transporter.sendMail(mailOptions);
     
-    console.log("✅ SUCCESS: Email passed verification checks!");
+    console.log("✅ SUCCESS: Email passed verification checks and handshakes completed!");
     console.log(`🆔 Message ID Reference: ${info.messageId}`);
     console.log("================ [EMAIL DISPATCH PIPELINE END] ================\n");
     return { success: true, messageId: info.messageId };
@@ -129,7 +129,7 @@ export async function submitLODApplication(
   rawData: any,
   userId: string, 
   userName: string, 
-  userRole: string // "Divisional Deputy Director" used per QMS requirements
+  userRole: string // Must evaluate to 'Divisional Deputy Director' as per formal QMS requirements
 ) {
   const validated = lodFormSchema.safeParse(rawData);
   if (!validated.success) return { success: false, error: "Validation Failed" };
@@ -137,7 +137,6 @@ export async function submitLODApplication(
   const data = validated.data;
   const normalizedAppNumber = normalize(data.appNumber);
   
-  // FIX 1: Read safely from parsed Zod output data instead of rawData payload
   const shouldNotifyDirector = !!data.sendEmailNotification; 
 
   try {
@@ -308,23 +307,24 @@ export async function submitLODApplication(
       return { success: true, id: appId, appNumber: normalizedAppNumber, type: data.type, lodRemarks: data.lodRemarks, companyName: data.companyName, facilityName: data.facilityName };
     });
 
-    // 7. ASYNCHRONOUS OUT-OF-TRANSACTION EMAIL DISPATCH
+    // 7. AWAITED OUT-OF-TRANSACTION EMAIL DISPATCH (Prevents Vercel serverless worker execution truncation)
     if (result.success && shouldNotifyDirector) {
       const directorUser = await db.query.users.findFirst({
         where: and(eq(users.role, "Director"), eq(users.division, "VMAP"))
       });
 
-      // FIX 2: Trigger our robust SMTP nodemailer handshake rather than a console template utility
-      sendDirectorOversightEmail({
-        appNumber: result.appNumber,
-        type: result.type,
-        companyName: result.companyName,
-        facilityName: result.facilityName,
-        lodRemarks: result.lodRemarks,
-        customRecipient: directorUser?.email // Falls back to process.env.DIRECTOR_EMAIL if missing
-      }).catch(err => 
-        console.error("Non-blocking notification system error:", err)
-      );
+      try {
+        await sendDirectorOversightEmail({
+          appNumber: result.appNumber,
+          type: result.type,
+          companyName: result.companyName,
+          facilityName: result.facilityName,
+          lodRemarks: result.lodRemarks,
+          customRecipient: directorUser?.email // Falls back to process.env.DIRECTOR_EMAIL if missing
+        });
+      } catch (err) {
+        console.error("Non-blocking notification system error captured at edge execution context:", err);
+      }
     }
 
     return { success: true, id: result.id };
