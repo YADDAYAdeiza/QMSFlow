@@ -20,7 +20,7 @@ const RISK_CATEGORIES: Record<string, { complexity: number, criticality: number 
 const normalize = (str: string) => str?.trim().toUpperCase() || "";
 
 export async function submitLODApplication(
-  rawData: any, 
+  rawData: any,
   userId: string, 
   userName: string, 
   userRole: string // "Divisional Deputy Director" used per QMS
