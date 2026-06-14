@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 const CURRENT_USER = { 
   id: "477d0494-3cfc-44c1-979d-5602eb01aabe", 
   name: "LOD", 
-  role: "Specialist" 
+  role: "Divisional Deputy Director" // Standardized for QMS profile accountability
 };
 
 const DIVISION_OPTIONS = ["VMD", "PAD", "AFPD", "IRSD"];
@@ -58,7 +58,6 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
     return () => window.removeEventListener('mousedown', handleClick);
   }, []);
 
-  // Synchronize internal search text with hook form field values when selected
   useEffect(() => {
     if (value) {
       setSearch(value);
@@ -109,13 +108,11 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
                 const val = e.target.value.toUpperCase();
                 
                 if (isAppNumber) {
-                  // Only restrict input layout if configuring the core App Number prefix string
                   if (val.startsWith(PREFIX) || val === "" || PREFIX.startsWith(val)) {
                     setSearch(val);
                     onChange(val);
                   }
                 } else {
-                  // Allow absolute vanilla text layout creation for products and lines
                   setSearch(val);
                   onChange(val);
                 }
@@ -168,7 +165,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
   const [existingApps, setExistingApps] = useState<{name: string}[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Fetch application numbers for the dropdown reference
   useEffect(() => {
     async function loadHistory() {
       const apps = await getApplications();
@@ -195,12 +191,13 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     productLines: initialData?.productLines || [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
     divisions: initialData?.divisions || ["VMD"], 
     poaUrl: initialData?.poaUrl || "", 
-    inspectionReportUrl: initialData?.inspectionReportUrl || ""
+    inspectionReportUrl: initialData?.inspectionReportUrl || "",
+    sendEmailNotification: false 
   }), [initialData, isUpdate]);
 
   const { 
     register, handleSubmit, watch, setValue, control, reset, 
-    formState: { isSubmitting } 
+    formState: { isSubmitting, errors } 
   } = useForm({
     resolver: zodResolver(lodFormSchema),
     defaultValues
@@ -208,6 +205,8 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
 
   const { fields: lineFields, append: appendLine, remove: removeLine } = useFieldArray({ control, name: "productLines" });
   const watchProductLines = watch("productLines");
+  const watchType = watch("type");
+  const selectedDivs = watch("divisions") || [];
 
   useEffect(() => {
     if (initialData && !initialized.current) {
@@ -234,9 +233,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     router.refresh();
   };
 
-  const watchType = watch("type");
-  const selectedDivs = watch("divisions") || [];
-
   const toggleDivision = (div: string) => {
     const updated = selectedDivs.includes(div) 
         ? (selectedDivs.length > 1 ? selectedDivs.filter(d => d !== div) : selectedDivs)
@@ -245,9 +241,14 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
   };
 
   const onSubmit = async (data: any) => {
+    console.log("🚀 FORM SUBMITTED: Processing database commit step...");
     const result = await submitLODApplication(data, CURRENT_USER.id, CURRENT_USER.name, CURRENT_USER.role);
+    
     if (result.success) {
-        setShowSuccess(true);
+      console.log("💾 Database write verified successfully!");
+      setShowSuccess(true);
+    } else {
+      console.log("❌ Error committed during structural database validation execution step.");
     }
   };
 
@@ -297,7 +298,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
       >
         <div className="flex items-center justify-between mb-4">
             <div className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2", isUpdate ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700")}>
-                {isUpdate ? <RefreshCcw className="w-3 h-3 animate-spin-slow" /> : <Plus className="w-3 h-3" />}
+                {isUpdate ? <RefreshCcw className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
                 {isUpdate ? "Compliance Review" : "Initial Intake"}
             </div>
         </div>
@@ -309,8 +310,19 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
           </div>
         </header>
 
+        {/* Global Schema Validation Alerts */}
+        {Object.keys(errors).length > 0 && (
+          <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl space-y-1">
+            <h5 className="text-[11px] font-black uppercase text-rose-600 flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4" /> Validation Warnings Found
+            </h5>
+            <p className="text-[10px] text-rose-500 font-medium">
+              Please check all document uploads, required fields, and line classifications before submitting.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* APP NUMBER WITH LOCKED PREFIX AND DROPDOWN REFERENCE */}
           <div className="flex flex-col gap-2">
             <label className="text-[10px] font-black uppercase text-slate-400 ml-2 italic">App Number (Ref Latest in Dropdown)</label>
             <Controller
@@ -368,7 +380,10 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             )}
             <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
             <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
-            <FileUpload label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true })} />
+            <FileUpload 
+              label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} 
+              onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true, shouldValidate: true })} 
+            />
           </div>
         </div>
 
@@ -447,6 +462,43 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             ))}
           </div>
         </div>
+
+        {/* INTEGRATED EMAIL OVERSIGHT FIELD */}
+        <Controller
+          name="sendEmailNotification"
+          control={control}
+          render={({ field }) => (
+            <div className="p-6 bg-slate-50 border border-slate-200/60 rounded-[2rem] flex items-center justify-between gap-4 transition-all hover:border-blue-200">
+              <div className="space-y-1 pl-2">
+                <label className="text-[11px] font-black uppercase text-slate-800 tracking-tight block">
+                  Email Director Oversight
+                </label>
+                <span className="text-[10px] text-slate-400 font-medium block">
+                  Dispatch a live processing alert message directly to the VMAP Director.
+                </span>
+              </div>
+              
+              <div 
+                onClick={() => {
+                  const newValue = !field.value;
+                  console.log(`🎛️ Switch UI Clicked: Changing state to -> ${newValue}`);
+                  setValue("sendEmailNotification", newValue, { shouldValidate: true, shouldDirty: true });
+                }}
+                className="relative inline-flex items-center cursor-pointer select-none"
+              >
+                <div className={cn(
+                  "w-14 h-8 rounded-full transition-all duration-300 relative",
+                  field.value ? "bg-blue-600" : "bg-slate-200"
+                )}>
+                  <div className={cn(
+                    "absolute top-[4px] left-[4px] bg-white border border-slate-300 rounded-full h-6 w-6 transition-all duration-300 shadow-sm",
+                    field.value ? "translate-x-6" : "translate-x-0"
+                  )} />
+                </div>
+              </div>
+            </div>
+          )}
+        />
 
         <div className="space-y-2">
           <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2"><MessageSquare className="w-3 h-3" /> Specialist Remarks</label>

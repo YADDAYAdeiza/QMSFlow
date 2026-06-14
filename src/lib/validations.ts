@@ -34,16 +34,29 @@ export const lodFormSchema = z.object({
   // URLs from FileUpload
   poaUrl: z.string().optional().default(""),
   inspectionReportUrl: z.string().optional().default(""),
-}).refine((data) => {
+
+  // INTEGRATED OVERSIGHT EMAIL TOGGLE FIELD
+  sendEmailNotification: z.boolean().optional().default(false),
+}).superRefine((data, ctx) => {
   // Logic: If 'Facility Verification', poaUrl MUST exist. 
-  // If 'Inspection Report Review', inspectionReportUrl MUST exist.
+  // If 'Inspection Report Review (Foreign)', inspectionReportUrl MUST exist.
   if (data.type === "Facility Verification") {
-    return data.poaUrl && data.poaUrl.length > 5; // Simple check for a valid URL string
+    if (!data.poaUrl || data.poaUrl.length <= 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Required Power of Attorney (POA) document is missing.",
+        path: ["poaUrl"],
+        params: { i18n: "upload_required" }
+      });
+    }
+  } else if (data.type === "Inspection Report Review (Foreign)") {
+    if (!data.inspectionReportUrl || data.inspectionReportUrl.length <= 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Required Inspection Report document is missing.",
+        path: ["inspectionReportUrl"],
+        params: { i18n: "upload_required" }
+      });
+    }
   }
-  return data.inspectionReportUrl && data.inspectionReportUrl.length > 5;
-}, {
-  // This dynamic path ensures the error highlights the correct upload field
-  params: { i18n: "upload_required" },
-  message: "Required document missing for this application type",
-  path: ["poaUrl"], 
 });

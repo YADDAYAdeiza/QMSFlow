@@ -74,9 +74,10 @@ export const applications = pgTable("applications", {
 });
 
 // 6. QMS Timelines
+// 6. QMS Timelines (Updated for automatic cascade delete support)
 export const qmsTimelines = pgTable("qms_timelines", {
   id: serial("id").primaryKey(),
-  applicationId: integer("application_id").references(() => applications.id),
+  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }), // <-- Added here
   staffId: text("staff_id"),
   division: text("division"),
   point: text("point"),

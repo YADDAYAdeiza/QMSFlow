@@ -8,6 +8,7 @@ import {
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { lodFormSchema } from "@/lib/validations";
+import nodemailer from "nodemailer";
 
 const RISK_CATEGORIES: Record<string, { complexity: number, criticality: number }> = {
   "VACCINES / BIOLOGICALS": { complexity: 3, criticality: 3 },
@@ -19,20 +20,128 @@ const RISK_CATEGORIES: Record<string, { complexity: number, criticality: number 
 
 const normalize = (str: string) => str?.trim().toUpperCase() || "";
 
+// Configure your SMTP Transporter using environment variables
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
+  port: parseInt(process.env.SMTP_PORT || "465"),
+  secure: process.env.SMTP_SECURE === "true", 
+  auth: {
+    user: process.env.SMTP_USER, 
+    pass: process.env.SMTP_PASS, 
+  },
+  tls: {
+    ciphers: "SSLv3",
+    rejectUnauthorized: false
+  }
+});
+
+/**
+ * Sends an email notification regarding an LOD application with active progress tracking.
+ */
+export async function sendDirectorOversightEmail(appDetails: {
+  appNumber: string;
+  type: string;
+  companyName: string;
+  facilityName: string;
+  lodRemarks?: string;
+  customRecipient?: string; // Support dynamic routing from the database if provided
+}) {
+  console.log("\n================ [EMAIL DISPATCH PIPELINE START] ================");
+  console.log(`⏱️  Timestamp: ${new Date().toISOString()}`);
+  console.log(`📥 Initiating dispatch for Application: ${appDetails.appNumber}`);
+  
+  try {
+    const senderEmail = process.env.SMTP_USER;
+    const directorEmail = appDetails.customRecipient || process.env.DIRECTOR_EMAIL || "director@nafdac.gov.ng";
+
+    console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
+    console.log(`👉 Target Destination (DIRECTOR_EMAIL): ${directorEmail}`);
+    console.log(`⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${process.env.SMTP_PORT || "587"}`);
+
+    if (!senderEmail || !process.env.SMTP_PASS) {
+      console.log("❌ ERROR: Missing SMTP credentials in .env.local file!");
+      return { success: false, error: "SMTP credentials are misconfigured." };
+    }
+
+    const mailOptions = {
+      from: `"VMAP Digital Portal" <${senderEmail}>`,
+      to: directorEmail,
+      subject: `🚨 LIVE PROCESSING ALERT: Application #${appDetails.appNumber}`,
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 16px;">
+          <h2 style="color: #0f172a; text-transform: uppercase; font-size: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">
+            Director Oversight Notification
+          </h2>
+          <p style="font-size: 14px; color: #475569;">
+            A high-priority application workflow has been initiated/updated within the VMAP portal.
+          </p>
+          <table style="width: 100%; font-size: 13px; border-collapse: collapse; margin-top: 20px;">
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b; width: 140px;">App Number:</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #1e3a8a;">${appDetails.appNumber}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Review Type:</td>
+              <td style="padding: 8px 0; color: #334155;">${appDetails.type}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Local Applicant:</td>
+              <td style="padding: 8px 0; color: #334155; text-transform: uppercase;">${appDetails.companyName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Manufacturing Site:</td>
+              <td style="padding: 8px 0; color: #334155; text-transform: uppercase;">${appDetails.facilityName}</td>
+            </tr>
+            ${appDetails.lodRemarks ? `
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b; vertical-align: top;">Specialist Notes:</td>
+              <td style="padding: 8px 0; color: #475569; background: #f8fafc; padding: 10px; border-radius: 8px; font-style: italic;">
+                "${appDetails.lodRemarks}"
+              </td>
+            </tr>
+            ` : ""}
+          </table>
+          <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 25px 0;" />
+          <p style="font-size: 11px; color: #94a3b8; text-align: center; text-transform: uppercase; letter-spacing: 0.1em;">
+            Veterinary Medicines Directorate (VMD) • QMS Automated Dispatch
+          </p>
+        </div>
+      `,
+    };
+
+    console.log("⚡ Connecting to server and attempting handshake transmission...");
+    const info = await transporter.sendMail(mailOptions);
+    
+    console.log("✅ SUCCESS: Email passed verification checks!");
+    console.log(`🆔 Message ID Reference: ${info.messageId}`);
+    console.log("================ [EMAIL DISPATCH PIPELINE END] ================\n");
+    return { success: true, messageId: info.messageId };
+
+  } catch (error: any) {
+    console.log("❌ CRITICAL FAILURE: Nodemailer was blocked by the host server!");
+    console.error("📋 Error Breakdown Details:", error);
+    console.log("================ [EMAIL DISPATCH PIPELINE END] ================\n");
+    return { success: false, error: error.message || "Failed to dispatch email." };
+  }
+}
+
 export async function submitLODApplication(
   rawData: any, 
   userId: string, 
   userName: string, 
-  userRole: string // "Divisional Deputy Director" used per QMS
+  userRole: string // "Divisional Deputy Director" used per QMS requirements
 ) {
   const validated = lodFormSchema.safeParse(rawData);
   if (!validated.success) return { success: false, error: "Validation Failed" };
 
   const data = validated.data;
   const normalizedAppNumber = normalize(data.appNumber);
+  
+  // FIX 1: Read safely from parsed Zod output data instead of rawData payload
+  const shouldNotifyDirector = !!data.sendEmailNotification; 
 
   try {
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // 1. Context Fetching
       const existingApp = await tx.query.applications.findFirst({
         where: eq(applications.applicationNumber, normalizedAppNumber)
@@ -44,16 +153,13 @@ export async function submitLODApplication(
 
       const isUpdate = !!existingApp;
       const userDivision = submittingUser?.division || "LOD";
-      
-      // Determine if this is a Pass 2 (Compliance Review) update
       const isActuallyRound2 = isUpdate && (existingApp.status === 'TECHNICAL_PASSED' || existingApp.details?.isComplianceReview === true);
 
-      // 2. Upsert Companies (Master Data Protection - Scaled to evaluate distinct Sites)
+      // 2. Upsert Companies (Master Data Protection)
       const upsertCompany = async (name: string, address: string, category: 'LOCAL' | 'FOREIGN') => {
         const cleanName = normalize(name);
-        const cleanAddress = address?.trim() || ""; // Kept original casing for address presentation clarity
+        const cleanAddress = address?.trim() || "";
 
-        // FIX: Match by Name, Category AND Address to prevent cross-site layout collapse
         const existing = await tx.query.companies.findFirst({
           where: and(
             eq(companies.name, cleanName), 
@@ -64,7 +170,6 @@ export async function submitLODApplication(
 
         if (existing) return existing;
 
-        // If no match matches this specific company site combination, insert it as a unique layout
         const [inserted] = await tx.insert(companies).values({ 
           name: cleanName, 
           address: cleanAddress, 
@@ -131,6 +236,8 @@ export async function submitLODApplication(
       };
 
       let appId: number;
+      const targetPoint = 'Director Review';
+      const nextStatus = isActuallyRound2 ? 'PENDING_DIRECTOR_FINAL' : 'PENDING_DIRECTOR';
 
       // 5. Unified Application & Timeline Logic
       if (isUpdate && existingApp) {
@@ -138,8 +245,8 @@ export async function submitLODApplication(
         
         await tx.update(applications)
           .set({
-            status: isActuallyRound2 ? 'PENDING_DIRECTOR_FINAL' : 'PENDING_DIRECTOR',
-            currentPoint: 'Director Review',
+            status: nextStatus,
+            currentPoint: targetPoint,
             details: enhancedDetails,
             type: data.type,
             updatedAt: sql`now()`
@@ -156,19 +263,19 @@ export async function submitLODApplication(
           type: data.type,
           companyId: localComp.id,
           foreignFactoryId: foreignFact.id,
-          status: 'PENDING_DIRECTOR',
-          currentPoint: 'Director Review',
+          status: nextStatus,
+          currentPoint: targetPoint,
           details: enhancedDetails
         }).returning();
         appId = newApp.id;
       }
 
-      // Start the clock for Director Review as per QMS
+      // Start the clock tracking system metrics as per QMS requirements
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         staffId: userId,
         division: userDivision as any, 
-        point: 'Director Review',
+        point: targetPoint,
         startTime: sql`now()`
       });
 
@@ -197,8 +304,30 @@ export async function submitLODApplication(
 
       revalidatePath("/dashboard/director");
       revalidatePath("/dashboard/lod");
-      return { success: true, id: appId };
+      
+      return { success: true, id: appId, appNumber: normalizedAppNumber, type: data.type, lodRemarks: data.lodRemarks, companyName: data.companyName, facilityName: data.facilityName };
     });
+
+    // 7. ASYNCHRONOUS OUT-OF-TRANSACTION EMAIL DISPATCH
+    if (result.success && shouldNotifyDirector) {
+      const directorUser = await db.query.users.findFirst({
+        where: and(eq(users.role, "Director"), eq(users.division, "VMAP"))
+      });
+
+      // FIX 2: Trigger our robust SMTP nodemailer handshake rather than a console template utility
+      sendDirectorOversightEmail({
+        appNumber: result.appNumber,
+        type: result.type,
+        companyName: result.companyName,
+        facilityName: result.facilityName,
+        lodRemarks: result.lodRemarks,
+        customRecipient: directorUser?.email // Falls back to process.env.DIRECTOR_EMAIL if missing
+      }).catch(err => 
+        console.error("Non-blocking notification system error:", err)
+      );
+    }
+
+    return { success: true, id: result.id };
   } catch (e: any) {
     console.error("LOD Submission Error:", e);
     return { success: false, error: e.message };
