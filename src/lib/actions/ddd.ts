@@ -512,7 +512,8 @@ export async function forwardToHub(appId: number, remarks: string) {
  */
 
 export async function recallApplication(applicationId: string, actingDivision: string) {
-  const supabase = createClient();
+  // 1. Properly await the server client configuration footprint
+  const supabase = await createClient(); 
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session) {
@@ -522,10 +523,9 @@ export async function recallApplication(applicationId: string, actingDivision: s
   const loggedInUserId = session.user.id;
   const numericAppId = Number(applicationId);
   const divisionKey = actingDivision.toUpperCase();
-  console.log('This is the division: ', divisionKey);
+  console.log('Processing recall for division: ', divisionKey);
 
   // Determine the "Home Desk" point based on the division
-  // IRSD recalls to Hub Clearance; Technical Divisions recall to DD Review
   const recallPoint = divisionKey === "IRSD" 
     ? "IRSD Hub Clearance" 
     : "Technical DD Review";
@@ -568,13 +568,13 @@ export async function recallApplication(applicationId: string, actingDivision: s
         },
       ];
 
-      // 3. Terminate the Staff's timed session (QMS Compliance)
+      // 3. Terminate the Staff's timed session (QMS Compliance tracking)
       await tx
         .update(qmsTimelines)
         .set({ endTime: new Date() })
         .where(eq(qmsTimelines.id, activeTimeline.id));
 
-      // 4. Reset the Application's point to the Executive Desk
+      // 4. Reset the Application's point back to the Executive Desk
       await tx
         .update(applications)
         .set({
@@ -583,7 +583,7 @@ export async function recallApplication(applicationId: string, actingDivision: s
         })
         .where(eq(applications.id, numericAppId));
 
-      // 5. Start the new timed session for the DD
+      // 5. Start the new timed session tracking for the Divisional Deputy Director
       await tx.insert(qmsTimelines).values({
         applicationId: numericAppId,
         staffId: loggedInUserId,
@@ -592,8 +592,8 @@ export async function recallApplication(applicationId: string, actingDivision: s
       });
     });
 
-    // Revalidate the inbox path to refresh the UI immediately
-    revalidatePath("/dashboard/ddd/inbox");
+    // Revalidate the workspace route context to instantly update the UI layout tree
+    revalidatePath("/dashboard/ddd");
     
     return { success: true };
   } catch (error) {

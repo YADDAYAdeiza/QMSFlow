@@ -46,7 +46,9 @@ export default async function StaffDashboard({
   }
 
   const userDivision = (profile.division || "VMD").toUpperCase();
+  
   console.log('Profile Division and role: ', profile.division, profile.role )
+  console.log('Profile: ', profile)
   const requestedDivision = urlDivision.toUpperCase();
 
   // Enforce Zoned Access
