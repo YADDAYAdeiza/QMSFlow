@@ -1,14 +1,19 @@
 "use client"
 
-import React, { useState, useEffect, useTransition } from 'react';
+import React, { useState, useEffect, useTransition, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { pdf, BlobProvider } from '@react-pdf/renderer'; // 👈 Added for dynamic document rendering
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
   History, UserPlus, Gavel, FileText, Zap, AlertCircle, ClipboardList,
-  Building2, FileCheck, Globe, Diff
+  Building2, FileCheck, Globe, Diff, Eye
 } from 'lucide-react';
 import { approveToDirector, assignToStaff, forwardToHub } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
+
+// --- IMPORT REGULATORY PDF TEMPLATES ---
+import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
+import { GmpCertificate } from "@/components/documents/GmpCertificate";
 
 // Helper to prevent hydration mismatch for dates
 function SafeTimestamp({ timestamp }: { timestamp?: string }) {
@@ -33,15 +38,15 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
   const appDetails = app?.details || {};
   const history = app?.narrativeHistory || [];
+  const isInspection = app?.isInspection ?? false;
 
- // Define the actions that signify a staff member has completed their task
+  // Define the actions that signify a staff member has completed their task
   const submissionActions = [
     'TECHNICAL_VETTING_SUBMITTED', 
     'COMPLIANCE_AUDIT_COMPLETED'
   ];
 
   // 1. Find the history entry of the person who last worked on the application
-  // We look for any action in our defined list
   const lastWorkEntry = [...history]
     .reverse()
     .find(h => submissionActions.includes(h.action));
@@ -49,7 +54,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   // 2. Extract the name and map to ID
   const lastSubmitterName = lastWorkEntry?.from;
   const lastAssignedStaffId = staffList.find(s => s.name === lastSubmitterName)?.id || "";
-console.log('This is the last staff id: ', lastAssignedStaffId);
 
   // --- DELTA DATA EXTRACTION ---
   const lastRework = [...history].reverse().find(h => h.action === "REWORK_REQUIRED");
@@ -63,7 +67,8 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
   const staffReportUrl = isPass2 ? inspectionReportUrl : verificationReportUrl;
   const hasStaffSubmission = !!staffReportUrl;
   
-  const [viewMode, setViewMode] = useState<'dossier' | 'report'>(
+  // Adjusted viewMode state typing to accept 'preview' view
+  const [viewMode, setViewMode] = useState<'dossier' | 'report' | 'preview'>(
     hasStaffSubmission ? 'report' : 'dossier'
   );
 
@@ -87,6 +92,65 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
   const filteredStaff = staffList.filter((s: any) => 
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
+
+  // --- COMPLIANCE RISK NORMALIZATION (From Director Client for document generation safety) ---
+  const complianceRisk = useMemo(() => {
+    const baseRisk = app?.complianceRisk || {};
+    const ledger = appDetails.findings_ledger || findings || [];
+    const summarySource = appDetails.compliance_summary || baseRisk.summary || {};
+
+    return {
+      ...baseRisk,
+      summary: {
+        criticalCount: summarySource.criticalCount ?? 0,
+        majorCount: summarySource.majorCount ?? 0,
+        otherCount: summarySource.otherCount ?? 0,
+      },
+      findings: baseRisk.findings?.length > 0 ? baseRisk.findings : ledger,
+      intrinsicLevel: baseRisk.intrinsicLevel || appDetails.intrinsic_level || intrinsicLevel,
+      overallRating: baseRisk.overallRating || appDetails.overall_risk_rating || complianceLevel || "N/A",
+      isSra: baseRisk.isSra ?? (appDetails.sra_status === "TRUE" || isSRA)
+    };
+  }, [app, appDetails, findings, intrinsicLevel, complianceLevel, isSRA]);
+
+  // --- DYNAMIC PDF CONFIGURATION BLOCK ---
+  const docConfig = useMemo(() => {
+    const appNumber = app.applicationNumber;
+    const date = new Date().toLocaleDateString('en-GB');
+
+    const factory = appDetails.facilityName || appDetails.factory_name || "N/A";
+    const address = appDetails.facilityAddress || appDetails.factory_address || "N/A";
+    const rawLines = appDetails.productLines || [];
+
+    if (isInspection) {
+      const certData = {
+        appNumber,
+        date,
+        facilityName: factory,
+        facilityAddress: address,
+        productLines: rawLines.map((line: any) => ({
+          lineName: line.lineName,
+          riskCategory: line.riskCategory || complianceRisk.overallRating || "Compliant"
+        }))
+      };
+      return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
+    } else {
+      const flatProducts = rawLines.flatMap((line: any) => 
+        (line.products || []).map((p: any) => p.name)
+      );
+
+      const clearanceData = {
+        appNumber,
+        date,
+        factoryName: factory,
+        factoryAddress: address,
+        localApplicantName: appDetails.companyName || "N/A",
+        localApplicantAddress: appDetails.companyAddress || "N/A",
+        products: flatProducts.length > 0 ? flatProducts : (appDetails.products || [])
+      };
+      return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
+    }
+  }, [app, appDetails, isInspection, complianceRisk]);
 
   const handleAssign = async () => {
     if (!selectedStaffId) return alert(`Please select an officer.`);
@@ -140,6 +204,13 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
                     <FileCheck className="w-3.5 h-3.5" /> {isPass2 ? 'Inspection Report' : 'Verification Report'}
                   </button>
                 )}
+                {/* 👈 PREVIEW GMP CLEARANCE / CERTIFICATE OUTPUT BUTTON */}
+                <button 
+                  onClick={() => setViewMode('preview')} 
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'preview' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <Eye className="w-3.5 h-3.5" /> Preview {isInspection ? "GMP Certificate" : "GMP Clearance"}
+                </button>
             </div>
             <div className="flex items-center gap-4 pr-4">
               <div className="flex flex-col items-end">
@@ -166,7 +237,19 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
         </div>
 
         <div className="bg-white p-3 rounded-[3rem] shadow-2xl border border-slate-200 h-[82vh] relative overflow-hidden">
-          {iframeSrc ? (
+          {viewMode === 'preview' ? (
+            /* Rendering Dynamic PDF Output for the Deputy Director to preview readiness */
+            <BlobProvider document={docConfig.component}>
+              {({ url, loading }) => loading ? (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                  <p className="text-[10px] font-black uppercase tracking-widest italic">Compiling Executive Draft Preview...</p>
+                </div>
+              ) : (
+                <iframe src={`${url}#toolbar=0`} className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" key="preview-pdf" />
+              )}
+            </BlobProvider>
+          ) : iframeSrc ? (
             <iframe src={`${iframeSrc}#toolbar=0`} className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" key={viewMode} />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-3">
@@ -214,20 +297,17 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
             </h3>
             <div className="space-y-4">
               {[...history].reverse().map((note: any, idx: number) => {
-                // Define if this is a rework/rejection action
                 const isRework = note?.action === 'REWORK_REQUIRED';
 
                 return (
                   <div key={idx} className="group relative pl-6 border-l-2 border-slate-100 pb-2">
-                    {/* Change bullet color for rework items */}
                     <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isRework ? 'bg-rose-500 border-rose-100' : 'bg-white border-slate-100'}`} />
                     
                     <div className="flex justify-between items-center mb-1 font-mono text-[8px] text-slate-400 uppercase font-black">
-                      <span>{note?.from === 'DDD' ? 'Divisional Deputy Director' : note?.from}</span>
+                      <span>{(note?.from === 'DDD' || note?.from === 'Divisional Deputy Director') ? 'Divisional Deputy Director' : note?.from}</span>
                       <SafeTimestamp timestamp={note?.timestamp} />
                     </div>
                     
-                    {/* Apply specific styling for rework comments */}
                     <div className={`p-4 rounded-2xl ${isRework ? 'bg-rose-50 border border-rose-100' : 'bg-slate-50'}`}>
                       {isRework && (
                         <span className="block text-[8px] font-black uppercase text-rose-600 mb-1 tracking-widest">
@@ -282,7 +362,7 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
             <div className="space-y-3">
               <button onClick={handleEndorse} disabled={isPending} className={`w-full py-5 rounded-[2rem] font-black uppercase text-[11px] flex items-center justify-center gap-3 transition-all active:scale-95 ${isTechnicalReturn ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-                  <> {isTechnicalReturn ? 'Send to Hub' : 'Approve to Director'} <ArrowRight className="w-4 h-4" /> </>
+                  <> {isTechnicalReturn ? 'Send to Hub' : 'Recommend to Director'} <ArrowRight className="w-4 h-4" /> </>
                 )}
               </button>
               <button type="button" onClick={() => setIsReworkModalOpen(true)} className="w-full py-5 rounded-[2rem] font-black uppercase text-[10px] border-2 border-slate-800 text-slate-500 hover:text-white transition-colors">
