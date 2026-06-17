@@ -35,7 +35,7 @@ export default async function DDDInboxPage({
   const actingDivision = as?.toUpperCase() || "VMD";
   const isAssignedView = view === "assigned";
   
-  // 3. Your Original Working Database Query (Completely safe from collisions)
+  // 3. Database Query (Updated to safely catch staff processing returns alongside incoming pools)
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -45,7 +45,7 @@ export default async function DDDInboxPage({
       currentPoint: applications.currentPoint,
       companyName: companies.name,
       startTime: qmsTimelines.startTime,
-      staffId: qmsTimelines.staffId, // Capture the staffId from the timeline metric row
+      staffId: qmsTimelines.staffId, 
     })
     .from(applications)
     .leftJoin(companies, eq(applications.companyId, companies.id))
@@ -62,7 +62,8 @@ export default async function DDDInboxPage({
             eq(qmsTimelines.staffId, loggedInUserId),
             eq(applications.currentPoint, 'Technical DD Review'),
             eq(applications.currentPoint, 'IRSD Hub Clearance'),
-            eq(applications.currentPoint, 'IRSD Staff Vetting Return') 
+            eq(applications.currentPoint, 'IRSD Staff Vetting Return'),
+            eq(applications.currentPoint, 'Technical DD Review Return') 
           )
     ));
 
@@ -70,7 +71,6 @@ export default async function DDDInboxPage({
   let staffMap: Record<string, string> = {};
   
   if (isAssignedView && rawInbox.length > 0) {
-    // Extract unique staff IDs from the queue items safely
     const uniqueStaffIds = Array.from(
       new Set(rawInbox.map(app => String(app.staffId || "")).filter(Boolean))
     );
@@ -81,17 +81,13 @@ export default async function DDDInboxPage({
         .from(users)
         .where(inArray(users.id, uniqueStaffIds));
       
-      // Build dictionary map casting keys explicitly to lowercase strings
       staffMap = Object.fromEntries(
         fetchedStaff.map(u => [String(u.id).toLowerCase(), u.name])
       );
-      console.log('This is fetchedStaff: ', fetchedStaff);
     }
   }
-  console.log('This is staffMap: ', staffMap);
 
-
-  // 5. Formatting Logic
+  // 5. Formatting & Runtime Evaluation Logic
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -108,11 +104,17 @@ export default async function DDDInboxPage({
     const details = (app.details as any) || {};
     const isRound2 = details.isComplianceReview === true || !!details.inspectionReportUrl;
     
-    // Fetch officer's name out of dictionary by forcing key string normalization match
     const lookupKey = String(app.staffId || "").toLowerCase();
     const staffName = lookupKey ? staffMap[lookupKey] || null : null;
 
-    return { ...app, displayTime, isRound2, staffName };
+    // Evaluate on-the-fly whether this application is an incoming delegation task or a staff return review
+    const isReturningFromStaff = 
+      app.currentPoint === "Technical DD Review Return" || 
+      app.currentPoint === "IRSD Staff Vetting Return" ||
+      app.status === "PENDING_DD_RECOMMENDATION" ||
+      app.status === "AWAITING_HUB_ENDORSEMENT";
+
+    return { ...app, displayTime, isRound2, staffName, isReturningFromStaff };
   });
 
   return (
@@ -193,7 +195,10 @@ export default async function DDDInboxPage({
                         </div>
                       ) : (
                         <span className="text-[9px] font-bold text-slate-400 uppercase italic">
-                          {app.currentPoint}
+                          {app.currentPoint === 'Technical DD Review Return' || app.currentPoint === 'IRSD Staff Vetting Return'
+                            ? "Returned from Staff Evaluation"
+                            : app.currentPoint
+                          }
                         </span>
                       )}
                     </div>
@@ -209,8 +214,8 @@ export default async function DDDInboxPage({
                   <td className="p-6 text-xs italic text-slate-400">
                     <div className="flex flex-col gap-2 max-w-md">
                        <DossierLink url={details.inspectionReportUrl || details.poaUrl} />
-                       <p className="line-clamp-1 border-l-2 border-slate-200 pl-2">
-                         {lastComment?.text || "New assignment."}
+                       <p className="line-clamp-1 border-l-2 border-slate-200 pl-2 text-slate-500">
+                         {lastComment?.text ? `"${lastComment.text}"` : "New assignment tracking session initiated."}
                        </p>
                     </div>
                   </td>
@@ -235,10 +240,18 @@ export default async function DDDInboxPage({
                         href={`/dashboard/ddd/review/${app.id}?as=${actingDivision.toLowerCase()}`}
                         className={cn(
                           "inline-flex items-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-md group-hover:-translate-x-1",
-                          isAssignedView ? "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50" : "bg-slate-900 text-white hover:bg-blue-600"
+                          isAssignedView 
+                            ? "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50" 
+                            : app.isReturningFromStaff
+                              ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-100/50" 
+                              : "bg-slate-900 text-white hover:bg-blue-600" 
                         )}
                       >
-                        {isAssignedView ? 'Track' : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
+                        {isAssignedView 
+                          ? 'Track' 
+                          : app.isReturningFromStaff 
+                            ? 'Recommend' 
+                            : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
                       </Link>
                     </div>
                   </td>

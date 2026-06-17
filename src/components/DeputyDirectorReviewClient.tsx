@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useTransition, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { pdf, BlobProvider } from '@react-pdf/renderer'; // 👈 Added for dynamic document rendering
+import { pdf, BlobProvider } from '@react-pdf/renderer'; 
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
   History, UserPlus, Gavel, FileText, Zap, AlertCircle, ClipboardList,
@@ -67,7 +67,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const staffReportUrl = isPass2 ? inspectionReportUrl : verificationReportUrl;
   const hasStaffSubmission = !!staffReportUrl;
   
-  // Adjusted viewMode state typing to accept 'preview' view
+  // Adjusted viewMode state typing to accommodate the dynamic 'preview' layout
   const [viewMode, setViewMode] = useState<'dossier' | 'report' | 'preview'>(
     hasStaffSubmission ? 'report' : 'dossier'
   );
@@ -93,7 +93,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
 
-  // --- COMPLIANCE RISK NORMALIZATION (From Director Client for document generation safety) ---
+  // --- STRICT IRSD DIVISION GATING ---
+  const isIRSD = currentActingAs.toLowerCase() === 'irsd' || activeAssignmentDivision.toUpperCase() === 'IRSD';
+
+  // --- COMPLIANCE RISK DATA NORMALIZATION ---
   const complianceRisk = useMemo(() => {
     const baseRisk = app?.complianceRisk || {};
     const ledger = appDetails.findings_ledger || findings || [];
@@ -113,7 +116,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     };
   }, [app, appDetails, findings, intrinsicLevel, complianceLevel, isSRA]);
 
-  // --- DYNAMIC PDF CONFIGURATION BLOCK ---
+  // --- DYNAMIC PDF DOCUMENT CONFIGURATION ---
   const docConfig = useMemo(() => {
     const appNumber = app.applicationNumber;
     const date = new Date().toLocaleDateString('en-GB');
@@ -204,13 +207,16 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                     <FileCheck className="w-3.5 h-3.5" /> {isPass2 ? 'Inspection Report' : 'Verification Report'}
                   </button>
                 )}
-                {/* 👈 PREVIEW GMP CLEARANCE / CERTIFICATE OUTPUT BUTTON */}
-                <button 
-                  onClick={() => setViewMode('preview')} 
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'preview' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
-                >
-                  <Eye className="w-3.5 h-3.5" /> Preview {isInspection ? "GMP Certificate" : "GMP Clearance"}
-                </button>
+                
+                {/* GATED FOR DD(IRSD) ONLY: This button renders exclusively if the desk is IRSD */}
+                {isIRSD && (
+                  <button 
+                    onClick={() => setViewMode('preview')} 
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'preview' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    <Eye className="w-3.5 h-3.5" /> Preview {isInspection ? "GMP Certificate" : "GMP Clearance"}
+                  </button>
+                )}
             </div>
             <div className="flex items-center gap-4 pr-4">
               <div className="flex flex-col items-end">
@@ -237,8 +243,8 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         </div>
 
         <div className="bg-white p-3 rounded-[3rem] shadow-2xl border border-slate-200 h-[82vh] relative overflow-hidden">
-          {viewMode === 'preview' ? (
-            /* Rendering Dynamic PDF Output for the Deputy Director to preview readiness */
+          {/* Renders compilation engine preview panel only if viewMode is preview and user is DD(IRSD) */}
+          {viewMode === 'preview' && isIRSD ? (
             <BlobProvider document={docConfig.component}>
               {({ url, loading }) => loading ? (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-2">
@@ -304,6 +310,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                     <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isRework ? 'bg-rose-500 border-rose-100' : 'bg-white border-slate-100'}`} />
                     
                     <div className="flex justify-between items-center mb-1 font-mono text-[8px] text-slate-400 uppercase font-black">
+                      {/* Enforces full title string display logic over abbreviations */}
                       <span>{(note?.from === 'DDD' || note?.from === 'Divisional Deputy Director') ? 'Divisional Deputy Director' : note?.from}</span>
                       <SafeTimestamp timestamp={note?.timestamp} />
                     </div>
