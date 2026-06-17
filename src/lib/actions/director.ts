@@ -263,19 +263,33 @@ export async function issueFinalClearance(
       attachmentUrl: publicUrl
     };
 
-    // 4. Update the DB with the merged details
-    await db.update(applications)
-      .set({
-        details: {
-          ...currentDetails,
-          ...metadataUpdate, 
-          comments: [...currentComments, newComment]
-        },
-        // Both passes mark status as CLEARED so they appear in the Archive
-        status: "CLEARED",
-        updatedAt: new Date()
-      })
-      .where(eq(applications.id, appId));
+    // 4. Update the DB with the merged details and complete the QMS timeline
+    await Promise.all([
+      // A. Update application status to archive it out
+      db.update(applications)
+        .set({
+          details: {
+            ...currentDetails,
+            ...metadataUpdate, 
+            comments: [...currentComments, newComment]
+          },
+          status: "CLEARED",
+          updatedAt: new Date()
+        })
+        .where(eq(applications.id, appId)),
+
+      // B. Clock out the active QMS timeline tracker for the Director's current view
+      db.update(qmsTimelines)
+        .set({
+          endTime: new Date() // Concludes the desk time tracking metric session
+        })
+        .where(
+          and(
+            eq(qmsTimelines.applicationId, appId),
+            isNull(qmsTimelines.endTime) // Safely targeted only at the open tracker session
+          )
+        )
+    ]);
 
     revalidatePath('/dashboard/director');
     revalidatePath('/dashboard/lod');
