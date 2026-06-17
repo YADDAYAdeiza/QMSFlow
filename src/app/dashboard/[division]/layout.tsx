@@ -32,7 +32,6 @@ export default async function StaffLayout({
 
   if (!profile) redirect("/login?error=unregistered");
 
-  // Normalize for comparison
   const userDivision = (profile.division || "").toLowerCase().trim();
   const requestedDivision = urlDivision.toLowerCase().trim();
 
@@ -42,18 +41,19 @@ export default async function StaffLayout({
   }
   
   const navItems = [
-    { name: 'Active Queue', 
+    { 
+      name: 'Active Queue', 
       href: `/dashboard/${userDivision}`, 
       icon: ClipboardCheck 
     },
-    { name: 'My History', 
-      href: `/dashboard/${userDivision}`, 
-      // href: `/dashboard/${userDivision}/history`, 
+    { 
+      name: 'My History', 
+      href: `/dashboard/${userDivision}/history`, // <-- Uncommented and targeted
       icon: History
     },
-    { name: 'Dossier Search', 
-      href: `/dashboard/${userDivision}`,
-      // href: `/dashboard/${userDivision}/search`,
+    { 
+      name: 'Dossier Search', 
+      href: `/dashboard/${userDivision}/search`, // <-- Targeted for future implementation
       icon: FileSearch
     },
   ];
