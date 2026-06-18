@@ -26,7 +26,9 @@ const styles = StyleSheet.create({
   },
   
   logo: { width: 84, height: 84, marginRight: 15 },
-  signatureImage: { width: 70, height: 70, marginBottom: 5 },
+  
+  // ✅ ALTERED: Enlarged signature dimensions by 3x (from 70x70 to 210x210)
+  signatureImage: { width: 210, height: 210, marginBottom: 5 },
   
   header: { 
     marginBottom: 15, 
@@ -62,7 +64,6 @@ const styles = StyleSheet.create({
   
   refDateRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 15 },
   
-  // ✅ ALTERED: Decreased lineHeight to 0.95 to tightly package the addressee block lines
   addressBlock: { 
     width: '35%', 
     marginBottom: 15, 
@@ -76,7 +77,7 @@ const styles = StyleSheet.create({
   productItem: { marginBottom: 3 },
   
   signatureBlockWrapper: { 
-    marginTop: 25 
+    marginTop: 12 
   },
   signatureBlock: { marginTop: 5 },
   signatureName: { fontWeight: 'bold', fontSize: 12, marginTop: 5 },
@@ -186,18 +187,18 @@ export const ClearanceLetter = ({ data }: ClearanceLetterProps) => (
         ))}
       </View>
 
-      <Text style={styles.body}>
+      <Text style style={styles.body}>
         I write to inform you that your application for facility verification has been reviewed in line with the Agency's policy and procedures. 
         You shall be communicated in due course by the Agency for the physical inspection of the facility.
       </Text>
 
-      {/* Dynamic Sign-off Authorization Pushing Block */}
+      {/* Dynamic Sign-off Authorization Block */}
       <View style={styles.signatureBlockWrapper}>
         <Text>Thank you.</Text>
         <View style={styles.signatureBlock}>
           <Image src="/MudSig-removebg-preview.png" style={styles.signatureImage} />
           <Text style={styles.signatureName}>Mudashir, I. A</Text>
-          <Text>Deputy Director i/c, Veterinary Medicine & Allied Products</Text>
+          <Text>Divisional Deputy Director i/c, Veterinary Medicine & Allied Products</Text>
           <Text>For: Director-General (NAFDAC)</Text>
         </View>
       </View>
