@@ -1,99 +1,3 @@
-// import React from 'react';
-// import { Page, Text, View, Document, StyleSheet, Image } from '@react-pdf/renderer';
-
-// const styles = StyleSheet.create({
-//   page: { 
-//     padding: 60, 
-//     fontSize: 11, 
-//     fontFamily: 'Helvetica', 
-//     lineHeight: 1.5,
-//     backgroundColor: '#FCFBF4' // ✅ ALTERED: Added premium Ivory / Light Yellow background
-//   },
-//   logo: { width: 70, height: 70, marginBottom: 10 },
-//   header: { marginBottom: 20, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-//   nafdacTitle: { fontSize: 14, fontWeight: 'bold', color: '#004d00', textTransform: 'uppercase' },
-//   subTitle: { fontSize: 10, marginBottom: 10, fontWeight: 'bold' },
-//   refDateRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, marginTop: 20 },
-//   addressBlock: { marginBottom: 20, lineHeight: 1.2 },
-//   companyName: { fontWeight: 'bold', textTransform: 'uppercase' },
-//   subject: { fontWeight: 'bold', textDecoration: 'underline', marginBottom: 15, marginTop: 10, textAlign: 'center' },
-//   body: { 
-//     marginBottom: 12, 
-//     textAlign: 'justify' 
-//     // ✅ ALTERED: Removed harsh highlight backgroundColor: 'yellow' 
-//   },
-//   productList: { marginLeft: 30, marginBottom: 15 },
-//   productItem: { marginBottom: 4 },
-//   signatureBlock: { marginTop: 30 },
-//   signatureName: { fontWeight: 'bold', fontSize: 12, marginTop: 5 },
-//   footer: { position: 'absolute', bottom: 30, left: 60, right: 60, borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 8, fontSize: 8, textAlign: 'center', color: 'gray' }
-// });
-
-// export const ClearanceLetter = ({ data }: { data: any }) => (
-//   <Document>
-//     <Page size="A4" style={styles.page}>
-//       {/* Official NAFDAC Header */}
-//       <View style={styles.header}>
-//         <Image src="/nafdac_logo2-removebg-preview.png" style={styles.logo} />
-//         <Text style={styles.nafdacTitle}>NATIONAL AGENCY FOR FOOD AND DRUG</Text>
-//         <Text style={styles.nafdacTitle}>ADMINISTRATION AND CONTROL</Text>
-//         <Text style={styles.subTitle}>(NAFDAC)</Text>
-//       </View>
-
-//       {/* References and Tracking Timeline Details */}
-//       <View style={styles.refDateRow}>
-//         <Text>Ref: {data.appNumber || 'NAFDAC/VMAP/...'}</Text>
-//         <Text>Date: {data.date}</Text>
-//       </View>
-
-//       {/* Addressee Block */}
-//       <View style={styles.addressBlock}>
-//         <Text>The Managing Director,</Text>
-//         <Text style={styles.companyName}>{data.localApplicantName}</Text>
-//         <Text>{data.localApplicantAddress}</Text>
-//       </View>
-
-//       <Text style={styles.subject}>RE: APPLICATION FOR FACILITY VERIFICATION OF OVERSEAS PRODUCTION FACILITY</Text>
-
-//       <Text style={styles.body}>The above refers, please.</Text>
-      
-//       {/* Fixed text alignment formatting for react-pdf compilation */}
-//       <Text style={styles.body}>
-//         We refer to your letter requesting the verification of your overseas manufacturing facility; {data.factoryName || 'Unspecified Site'}, {data.factoryAddress || 'Unspecified Address'} for the purpose of registration of the following products:
-//       </Text>
-
-//       {/* Tracked Product List mapping section */}
-//       <View style={styles.productList}>
-//         {data.products?.map((p: string, i: number) => (
-//           <Text key={i} style={styles.productItem}>{i + 1}. {p}</Text>
-//         ))}
-//       </View>
-
-//       <Text style={styles.body}>
-//         I write to inform you that your application for facility verification has been reviewed in line with the Agency's policy and procedures. 
-//         You shall be communicated in due course by the Agency for the physical inspection of the facility.
-//       </Text>
-
-//       {/* Sign-off Authorization Block */}
-//       <View style={{ marginTop: 20 }}>
-//         <Text>Thank you.</Text>
-//         <View style={styles.signatureBlock}>
-//           <Image src="/MudSig-removebg-preview.png" style={styles.logo} />
-//           <Text style={styles.signatureName}>Mudashir, I. A</Text>
-//           <Text>Divisional Deputy Director i/c, Veterinary Medicine & Allied Products</Text>
-//           <Text>For: Director-General (NAFDAC)</Text>
-//         </View>
-//       </View>
-        
-//       {/* Official Footing Registry */}
-//       <View style={styles.footer}>
-//         <Text>NAFDAC CORPORATE HQ: Plot 2932 Olusegun Obasanjo Way, Wuse Zone 7, Abuja.</Text>
-//         <Text>www.nafdac.gov.ng</Text>
-//       </View>
-//     </Page>
-//   </Document>
-// );
-
 import React from 'react';
 import { Page, Text, View, Document, StyleSheet, Image } from '@react-pdf/renderer';
 
@@ -111,18 +15,19 @@ interface ClearanceLetterProps {
 
 const styles = StyleSheet.create({
   page: { 
-    padding: 35, // ✅ LEARNING: Reduced padding to increase printable real estate area
+    paddingTop: 35,       
+    paddingBottom: 35,    
+    paddingHorizontal: 55, 
     fontSize: 11, 
     fontFamily: 'Helvetica', 
     lineHeight: 1.25,
-    backgroundColor: '#FCFBF4', // ✅ PRESERVED: Premium Ivory / Light Yellow background
+    backgroundColor: '#FCFBF4', 
     position: 'relative'
   },
   
   logo: { width: 84, height: 84, marginRight: 15 },
-  signatureImage: { width: 70, height: 70, marginBottom: 5 }, // Specific sizing for signature capture asset
+  signatureImage: { width: 70, height: 70, marginBottom: 5 },
   
-  // ✅ LEARNING: Side-by-side header row design layout
   header: { 
     marginBottom: 15, 
     display: 'flex', 
@@ -144,7 +49,8 @@ const styles = StyleSheet.create({
     color: '#006600', 
     textTransform: 'uppercase', 
     letterSpacing: 0.5,
-    textAlign: 'center' 
+    textAlign: 'center',
+    lineHeight: 1.4 
   },
   
   headerLine: {
@@ -155,26 +61,32 @@ const styles = StyleSheet.create({
   },
   
   refDateRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 15 },
-  addressBlock: { marginBottom: 15, lineHeight: 1.1 },
+  
+  // ✅ ALTERED: Decreased lineHeight to 0.95 to tightly package the addressee block lines
+  addressBlock: { 
+    width: '35%', 
+    marginBottom: 15, 
+    lineHeight: 0.85 
+  },
+  
   companyName: { fontWeight: 'bold', textTransform: 'uppercase' },
   subject: { fontWeight: 'bold', textDecoration: 'underline', marginBottom: 15, marginTop: 10, textAlign: 'center' },
   body: { marginBottom: 10, textAlign: 'justify' },
   productList: { marginLeft: 30, marginBottom: 12 },
   productItem: { marginBottom: 3 },
   
-  // ✅ LEARNING: Pushes the sign-off block downwards toward the footer to prevent page stranding
   signatureBlockWrapper: { 
-    marginTop: 110 
+    marginTop: 25 
   },
-  signatureBlock: { marginTop: 10 },
+  signatureBlock: { marginTop: 5 },
   signatureName: { fontWeight: 'bold', fontSize: 12, marginTop: 5 },
 
-  // ==================== LEARNING: HIGH REFINEMENT FOOTER SYSTEM ====================
+  // ==================== FOOTER LAYOUT SYSTEM ====================
   footerWrapper: {
     position: 'absolute',
     bottom: 25, 
-    left: 35,
-    right: 35,
+    left: 55,  
+    right: 55, 
     display: 'flex',
     flexDirection: 'column'
   },
@@ -194,7 +106,7 @@ const styles = StyleSheet.create({
     width: '46%',
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center', // Centers the entire wrapper block as a single cohesive unit
+    alignItems: 'center', 
     justifyContent: 'center'
   },
   footerPartition: {
@@ -203,20 +115,20 @@ const styles = StyleSheet.create({
     marginHorizontal: 5
   },
   hqTextContainer: {
-    lineHeight: 0.45, // Halved line-height factor for ultra-tight text tracking
-    textAlign: 'left' // Reverted to strict left alignment inside the centered block container
+    lineHeight: 0.45, 
+    textAlign: 'left' 
   },
   officeTextContainer: {
-    lineHeight: 0.45, // Halved line-height factor for ultra-tight text tracking
-    textAlign: 'left' // Reverted to strict left alignment inside the centered block container
+    lineHeight: 0.45, 
+    textAlign: 'left' 
   },
   hqLabel: {
-    color: '#CC0000', // Both labels set to professional corporate red
+    color: '#CC0000', 
     fontWeight: 'bold',
     fontSize: 8
   },
   officeLabel: {
-    color: '#CC0000', // Both labels set to professional corporate red
+    color: '#CC0000', 
     fontWeight: 'bold',
     fontSize: 8
   },
@@ -252,7 +164,7 @@ export const ClearanceLetter = ({ data }: ClearanceLetterProps) => (
         <Text>Date: {data.date || 'Unspecified Date'}</Text>
       </View>
 
-      {/* Addressee Block */}
+      {/* Addressee Block (With Updated Tight Tracking Line Height) */}
       <View style={styles.addressBlock}>
         <Text>The Managing Director,</Text>
         <Text style={styles.companyName}>{data.localApplicantName || 'Unspecified Applicant'}</Text>
