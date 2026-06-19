@@ -28,7 +28,7 @@ const styles = StyleSheet.create({
   logo: { width: 84, height: 84, marginRight: 15 },
   
   // ✅ ALTERED: Enlarged signature dimensions by 3x (from 70x70 to 210x210)
-  signatureImage: { width: 150, height: 150, marginBottom: 5 },
+  signatureImage: { width: 70, height: 70, marginBottom: 2 },
   
   header: { 
     marginBottom: 15, 
