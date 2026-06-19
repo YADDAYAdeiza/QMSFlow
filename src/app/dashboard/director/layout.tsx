@@ -10,7 +10,8 @@ import {
   ShieldCheck, 
   UserCircle,
   Timer,
-  Globe 
+  Globe,
+  History
 } from "lucide-react";
 
 export default async function DirectorLayout({
@@ -78,35 +79,44 @@ export default async function DirectorLayout({
             <div className="h-10 w-[1px] bg-slate-100 mx-2 hidden md:block" />
 
             {/* NAVIGATION TABS */}
-            <div className="flex items-center gap-1">
-              <Link 
-                href="/dashboard/director" 
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-              >
-                <LayoutDashboard className="w-4 h-4" /> Workspace
-              </Link>
+            {/* NAVIGATION TABS WITH CORRECTED HISTORY ROUTE */}
+    <div className="flex items-center gap-1">
+      <Link 
+        href="/dashboard/director" 
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+      >
+        <LayoutDashboard className="w-4 h-4" /> Workspace
+      </Link>
 
-              <Link 
-                href="/dashboard/director/applications" 
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-              >
-                <Globe className="w-4 h-4" /> Master Tracker
-              </Link>
+      {/* ✅ FIXED: Pointed directly to /history path instead of duplicate workspace link */}
+      <Link 
+        href="/dashboard/director/history" 
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+      >
+        <History className="w-4 h-4" /> My History
+      </Link>
 
-              <Link 
-                href="/dashboard/director/performance" 
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-              >
-                <Timer className="w-4 h-4" /> Performance
-              </Link>
+      <Link 
+        href="/dashboard/director/applications" 
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+      >
+        <Globe className="w-4 h-4" /> Master Tracker
+      </Link>
 
-              <Link 
-                href="/dashboard/director/analytics" 
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-              >
-                <BarChart3 className="w-4 h-4" /> Analytics
-              </Link>
-            </div>
+      <Link 
+        href="/dashboard/director/performance" 
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+      >
+        <Timer className="w-4 h-4" /> Performance
+      </Link>
+
+      <Link 
+        href="/dashboard/director/analytics" 
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+      >
+        <BarChart3 className="w-4 h-4" /> Analytics
+      </Link>
+    </div>
           </div>
 
           {/* USER PROFILE SECTION */}
