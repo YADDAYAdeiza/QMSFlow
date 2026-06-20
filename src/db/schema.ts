@@ -173,3 +173,25 @@ export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => 
   application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),
 }));
 
+export const localInspectionReports = pgTable("local_inspection_reports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  applicationId: uuid("application_id")
+    .references(() => applications.id, { onDelete: "cascade" }),
+  companyId: uuid("company_id")
+    .references(() => companies.id, { onDelete: "cascade" }),
+  inspectorId: uuid("inspector_id")
+    .references(() => users.id),
+  
+  // Searchable Meta parameters
+  reportDocNumber: varchar("report_doc_number", { length: 100 }).unique().notNull(),
+  typeOfInspection: varchar("type_of_inspection", { length: 10 }).notNull(), // PPI, PRI, RI, FUI
+  currentStatus: varchar("current_status", { length: 50 }).default("DRAFT").notNull(), // DRAFT, UNDER_REVIEW, DDD_APPROVED, FINALIZED
+  
+  // The Data Cores
+  checklistRaw: jsonb("checklist_raw").notNull(), // Deep telemetry inputs mapped by quality system
+  reportHtml: text("report_html"), // The dynamic rich-text narrative body
+  versionHistory: jsonb("version_history").default([]), // Audit trail tracking modifications
+  
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
