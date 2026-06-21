@@ -1,266 +1,267 @@
+// @/components/LocalInspectionReports/GMPReportWorkspace.tsx
 "use client";
 
-import React, { useState } from "react";
-import { Loader2, Save, FileText, Send, CheckCircle, Database } from "lucide-react";
+import InspectionChecklistForm from "./InspectionChecklistForm";  
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
+import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
 
 interface WorkspaceProps {
   applicationId: string;
   companyId: string;
   companyName: string;
+  // Added: Pass down the actual status saved in the database to drive the production UI
+  initialStepKey?: keyof typeof inspectionReportWorkflow.steps; 
 }
 
-export default function GMPReportWorkspace({ applicationId, companyId, companyName }: WorkspaceProps) {
-  const [activeStep, setActiveStep] = useState<"checklist" | "editor">("checklist");
-  const [generationLoading, setGenerationLoading] = useState(false);
-  const [dbSaving, setDbSaving] = useState(false);
+export default function GMPReportWorkspace({
+  applicationId,
+  companyId,
+  companyName,
+  initialStepKey = "DDD_TECHNICAL_ASSIGNMENT"
+}: WorkspaceProps) {
+  const router = useRouter();
   
-  // Telemetry Inputs
-  const [docNumber, setDocNumber] = useState(`OKL-LA-PRI-${new Date().getFullYear()}-001`);
-  const [inspectionType, setInspectionType] = useState("PRI");
-  const [pqsPositives, setPqsPositives] = useState("");
-  const [pqsDeficiencies, setPqsDeficiencies] = useState("");
-  const [premisesPositives, setPremisesPositives] = useState("");
-  const [premisesDeficiencies, setPremisesDeficiencies] = useState("");
-  
-  // Active Rich Text Payload Container
-  const [editorContent, setEditorContent] = useState("");
+  // Core workflow node is driven by database values but handles local testing overrides smoothly
+  const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
+  const [remarks, setRemarks] = useState("");
+  const [selectedStaff, setSelectedStaff] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const getStructuredChecklist = () => ({
-    pqs_positives: pqsPositives.split("\n").filter(Boolean),
-    pqs_deficiencies: pqsDeficiencies.split("\n").filter(Boolean),
-    premises_positives: premisesPositives.split("\n").filter(Boolean),
-    premises_deficiencies: premisesDeficiencies.split("\n").filter(Boolean),
-  });
+  const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
-  const handleGenerateDraft = async () => {
-    setGenerationLoading(true);
-    try {
-      const response = await fetch("/api/gmp-report/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          report_doc_number: docNumber,
-          type_of_inspection: inspectionType,
-          company_name: companyName,
-          checklist_raw: getStructuredChecklist(),
-        }),
-      });
+  // System Desk Officer Directory for NAFDAC assignments
+  const staffDirectory = [
+    { id: "usr_201", name: "Aliyu Ahmed", division: "VMD", role: "Technical Staff Reviewer" },
+    { id: "usr_202", name: "Chidi Okafor", division: "VMD", role: "Technical Staff Reviewer" },
+    { id: "usr_203", name: "Fatima Umar", division: "IRSD", role: "IRSD Staff Reviewer" }
+  ];
 
-      const data = await response.json();
-      if (data.success) {
-        setEditorContent(data.report_html);
-        setActiveStep("editor");
-      } else {
-        alert("Generation Failure: " + data.error);
-      }
-    } catch (err) {
-      alert("Failed to connect to generation engine.");
-    } finally {
-      setGenerationLoading(false);
+  const handleTransition = async (direction: "FORWARD" | "REWORK") => {
+    if (!remarks.trim()) {
+      alert("Please provide official directives/minutes before moving this file.");
+      return;
     }
-  };
 
-  const handlePersistToDatabase = async (dispatchForReview: boolean) => {
-    setDbSaving(true);
+    setIsSubmitting(true);
     try {
-      const response = await fetch("/api/gmp-report/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          applicationId,
-          companyId,
-          reportDocNumber: docNumber,
-          typeOfInspection: inspectionType,
-          checklistRaw: getStructuredChecklist(),
-          reportHtml: editorContent,
-          dispatchForReview
-        }),
+      const res = await executeInspectionReportTransition({
+        applicationId: Number(applicationId),
+        currentStepKey: currentStep,
+        direction,
+        actingUserId: "current-logged-in-user-id", // Will map to auth session id
+        actingUserName: `Officer (${activeStepConfig.division})`,
+        targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
+        remarks: remarks
       });
 
-      const data = await response.json();
-      if (data.success) {
-        alert(dispatchForReview 
-          ? "Report successfully routed to the review queue!" 
-          : "Draft successfully saved in Local Inspection Reports vault."
-        );
+      if (res.success && res.arrivedAt) {
+        alert(`Dossier successfully routed to: ${inspectionReportWorkflow.steps[res.arrivedAt].title}`);
+        setCurrentStep(res.arrivedAt);
+        setRemarks("");
+        setSelectedStaff("");
+        router.refresh(); // Tells Next.js to pull fresh timeline records from server
       } else {
-        alert("Database Sync Failed: " + data.error);
+        alert(`Routing Matrix Error: ${res.error}`);
       }
-    } catch (err) {
-      alert("Network exception writing to database schema.");
+    } catch (err: any) {
+      alert(`Execution Error: ${err.message}`);
     } finally {
-      setDbSaving(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-6 bg-slate-50 min-h-screen text-slate-900">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
-      <header className="mb-8 border-b border-slate-200 pb-4 flex items-center justify-between">
+      {/* DEVELOPMENT TASK TOGGLE RIG (Remove or comment out before final production push) */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
         <div>
-          <div className="flex items-center gap-1.5 text-blue-600 font-black text-[10px] uppercase tracking-widest mb-1">
-            <Database className="w-3 h-3" /> Isolated Table Mode: local_inspection_reports
-          </div>
-          <h1 className="text-2xl font-black uppercase tracking-tight text-slate-900 italic">
-            Local GMP Report Compiler
-          </h1>
-          <p className="text-xs text-slate-500 font-bold uppercase mt-0.5">
-            Target Site: <span className="text-slate-900 font-black">{companyName}</span>
-          </p>
+          <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
+          <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
         </div>
-        <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border shadow-sm">
-          <button
-            onClick={() => setActiveStep("checklist")}
-            className={`px-4 py-2 text-[11px] font-black uppercase rounded-xl transition-all ${
-              activeStep === "checklist" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
-            }`}
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
+          <select 
+            value={currentStep} 
+            onChange={(e) => setCurrentStep(e.target.value as any)}
+            className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500"
           >
-            1. Fields Inventory
-          </button>
-          <button
-            disabled={!editorContent}
-            onClick={() => setActiveStep("editor")}
-            className={`px-4 py-2 text-[11px] font-black uppercase rounded-xl transition-all ${
-              activeStep === "editor" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-            }`}
-          >
-            2. Narrative Engine Editor
-          </button>
+            {Object.keys(inspectionReportWorkflow.steps).map((key) => (
+              <option key={key} value={key}>{key} - {inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps].title}</option>
+            ))}
+          </select>
         </div>
-      </header>
+      </div>
 
-      {activeStep === "checklist" && (
-        <div className="space-y-6 bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* WORKSPACE HEADER MATRIX */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+        <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800 text-white">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
-                Report Document Number (SOP Reference)
-              </label>
-              <input
-                type="text"
-                value={docNumber}
-                onChange={(e) => setDocNumber(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-mono font-bold text-slate-700 focus:outline-none focus:border-blue-500"
-              />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white mb-2 shadow-sm uppercase tracking-wider">
+                ⚙️ Status: {activeStepConfig.statusLabel}
+              </span>
+              <h1 className="text-2xl font-bold tracking-tight">{companyName}</h1>
+              <p className="text-slate-300 text-xs mt-1">
+                Dossier Tracking Number: <span className="font-mono bg-slate-700 px-1.5 py-0.5 rounded text-amber-300"># {applicationId}</span> 
+                {" "}• Company Code: {companyId}
+              </p>
             </div>
-            <div>
-              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
-                Type of Inspection
-              </label>
-              <select
-                value={inspectionType}
-                onChange={(e) => setInspectionType(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-700 focus:outline-none focus:border-blue-500"
-              >
-                <option value="PPI">Pre-Production Inspection (PPI)</option>
-                <option value="PRI">Pre-Registration Inspection (PRI)</option>
-                <option value="RI">Routine Inspection (RI)</option>
-                <option value="FUI">Follow-Up (CAPA Verification)</option>
-              </select>
+            
+            <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/60 max-w-sm">
+              <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Current Custody Desk</p>
+              <p className="text-sm font-bold text-emerald-400 mt-0.5">{activeStepConfig.title}</p>
+              <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
+                <p>Division: <span className="font-bold text-white">{activeStepConfig.division}</span></p>
+                <p>Authorized Actor: <span className="italic text-white">{activeStepConfig.role}</span></p>
+              </div>
             </div>
           </div>
+        </div>
 
-          <hr className="border-slate-100" />
+        {/* OPERATIONS CONTEXT GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
+          
+          {/* CONTENT COLUMNS */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* DOCUMENT CARD PANEL */}
+            <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
+                📄 Primary Inspection Review Documentation
+              </h3>
+              <div className="bg-slate-50 border border-slate-200 border-dashed rounded-lg p-6 text-center">
+                <div className="mx-auto w-12 h-12 rounded bg-rose-100 text-rose-700 flex items-center justify-center font-bold text-sm mb-2 shadow-inner">PDF</div>
+                <p className="font-bold text-xs text-slate-800 mb-0.5">OKL-LA-PRI-01-2026_Final.pdf</p>
+                <p className="text-slate-500 text-[11px] mb-3">Pre-Registration Inspection Report — Oral Liquid Dosage (OLD) Line</p>
+                <button type="button" className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 text-xs font-bold rounded-lg bg-white text-slate-700 hover:bg-slate-50 transition-all shadow-sm">
+                  👁️ Launch Regulatory Document Viewer
+                </button>
+              </div>
+            </div>
 
-          {/* SYSTEM FIELDS PANEL */}
+            {/* NEW: INTEGRATED DATA ENTRY CHECKLIST COMPONENT */}
+          <InspectionChecklistForm
+            initialData={{
+              premises_score: 85,
+              equipment_score: 90,
+              sanitation_score: 92,
+              observations: [
+                { id: "1", severity: "major", text: "Validation of automated clean-in-place cycles pending documentation confirmation." }
+              ]
+            }}
+            onSave={(telemetryData) => {
+              console.log("Telemetry compiled for state handshake:", telemetryData);
+              alert("Checklist state cached! Ready for structural JSONB transmission.");
+            }}
+            // Read-only setting can cleanly match workflow role custody:
+            isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
+          />
+
+            {/* AUTOMATED COMPLIANCE AUDIT TIMELINE TRACKER */}
+            <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
+                ⏱️ QMS Tracking Ledger & Time-on-Task
+              </h3>
+              <p className="text-xs text-slate-500 italic bg-slate-50 p-3 rounded-lg border border-slate-200">
+                Turnaround logs are automatically calculated down to the second when file handshakes execute. This keeps operations compliant with QMS audit benchmarks.
+              </p>
+            </div>
+          </div>
+
+          {/* DESK ACTION CONTROL SIDEBAR */}
           <div className="space-y-6">
-            <div>
-              <h3 className="text-xs font-black uppercase text-blue-600 tracking-widest mb-3 flex items-center gap-2">
-                <CheckCircle className="w-3.5 h-3.5" /> System I: Pharmaceutical Quality System (PQS)
+            <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
+              <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wider text-slate-700">
+                ⚡ Desk Operations Control
               </h3>
-              <div className="grid grid-cols-1 gap-3">
-                <textarea
-                  rows={3}
-                  placeholder="Compliance Marks Sighted (One entry per row)..."
-                  value={pqsPositives}
-                  onChange={(e) => setPqsPositives(e.target.value)}
-                  className="w-full bg-slate-50/50 border border-slate-200 rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500"
-                />
-                <textarea
-                  rows={3}
-                  placeholder="Deficiencies / Non-Conformances Found..."
-                  value={pqsDeficiencies}
-                  onChange={(e) => setPqsDeficiencies(e.target.value)}
-                  className="w-full bg-slate-50/50 border border-red-100 rounded-xl p-3 text-xs text-red-700 placeholder-red-300 focus:outline-none focus:border-red-400"
+              
+              {/* INTERFACE ELEMENT 1: DIVISIONAL DEPUTY DIRECTOR ASSIGNMENT BOX */}
+              {currentStep === "DDD_TECHNICAL_ASSIGNMENT" && (
+                <div className="mb-4 animate-fadeIn">
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                    Assign Technical Desk Officer
+                  </label>
+                  <select 
+                    value={selectedStaff}
+                    onChange={(e) => setSelectedStaff(e.target.value)}
+                    className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800"
+                  >
+                    <option value="">-- Choose VMD Officer --</option>
+                    {staffDirectory.filter(s => s.division === "VMD").map(staff => (
+                      <option key={staff.id} value={staff.id}>{staff.name} ({staff.role})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* INTERFACE ELEMENT 2: IRSD DESK DISPATCH BOX */}
+              {currentStep === "DDD_IRSD_INTAKE" && (
+                <div className="mb-4 animate-fadeIn">
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                    Assign Compliance Vetter
+                  </label>
+                  <select 
+                    value={selectedStaff}
+                    onChange={(e) => setSelectedStaff(e.target.value)}
+                    className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800"
+                  >
+                    <option value="">-- Choose IRSD Officer --</option>
+                    {staffDirectory.filter(s => s.division === "IRSD").map(staff => (
+                      <option key={staff.id} value={staff.id}>{staff.name} ({staff.role})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* FEEDBACK ENTRY COMPONENT */}
+              <div className="mb-4">
+                <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                  Official Minutes / Directives
+                </label>
+                <textarea 
+                  rows={4}
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  placeholder={`Provide dynamic feedback or instructions as ${activeStepConfig.role}...`}
+                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
                 />
               </div>
-            </div>
 
-            <div>
-              <h3 className="text-xs font-black uppercase text-blue-600 tracking-widest mb-3 flex items-center gap-2">
-                <CheckCircle className="w-3.5 h-3.5" /> System II: Premises and Equipment
-              </h3>
-              <div className="grid grid-cols-1 gap-3">
-                <textarea
-                  rows={3}
-                  placeholder="Compliance Marks Sighted (One entry per row)..."
-                  value={premisesPositives}
-                  onChange={(e) => setPremisesPositives(e.target.value)}
-                  className="w-full bg-slate-50/50 border border-slate-200 rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500"
-                />
-                <textarea
-                  rows={3}
-                  placeholder="Deficiencies / Non-Conformances Found..."
-                  value={premisesDeficiencies}
-                  onChange={(e) => setPremisesDeficiencies(e.target.value)}
-                  className="w-full bg-slate-50/50 border border-red-100 rounded-xl p-3 text-xs text-red-700 placeholder-red-300 focus:outline-none focus:border-red-400"
-                />
+              {/* ACTION PACK VECTOR */}
+              <div className="space-y-2">
+                {activeStepConfig.nextStepKey && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting || (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)}
+                    onClick={() => handleTransition("FORWARD")}
+                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                  >
+                    {isSubmitting ? "Routing..." : currentStep.includes("DDD") ? "✍️ Sign Minutes & Forward Desk" : "🚀 Dispatch Dossier Forward"}
+                  </button>
+                )}
+
+                {activeStepConfig.prevStepKey && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => handleTransition("REWORK")}
+                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-xs font-bold rounded-lg transition-all text-center"
+                  >
+                    ↩️ Return to Previous Desk for Rework
+                  </button>
+                )}
               </div>
+
             </div>
           </div>
 
-          <button
-            onClick={handleGenerateDraft}
-            disabled={generationLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-wider text-xs py-4 rounded-2xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-md"
-          >
-            {generationLoading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Transpiling narrative sequences via Gemini AI...
-              </>
-            ) : (
-              <>
-                <FileText className="w-4 h-4" /> Parse Audit Matrix to Live Editor
-              </>
-            )}
-          </button>
         </div>
-      )}
-
-      {activeStep === "editor" && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 px-6 py-3.5 rounded-2xl text-[10px] text-slate-300 font-black uppercase tracking-widest flex items-center gap-2 shadow-sm">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> Contenteditable engine mounted. Make inline edits below.
-          </div>
-
-          <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
-            <div
-              contentEditable
-              suppressContentEditableWarning
-              onBlur={(e) => setEditorContent(e.currentTarget.innerHTML)}
-              dangerouslySetInnerHTML={{ __html: editorContent }}
-              className="p-16 min-h-[550px] text-sm leading-relaxed text-slate-800 focus:outline-none prose max-w-none font-medium"
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={() => handlePersistToDatabase(false)}
-              disabled={dbSaving}
-              className="bg-white border border-slate-200 text-slate-700 px-6 py-3.5 rounded-xl text-[11px] font-black uppercase tracking-wide flex items-center gap-2 hover:bg-slate-50 disabled:opacity-50 transition-all"
-            >
-              <Save className="w-4 h-4 text-slate-400" /> Save Local Draft
-            </button>
-            <button
-              onClick={() => handlePersistToDatabase(true)}
-              disabled={dbSaving}
-              className="bg-blue-600 text-white px-6 py-3.5 rounded-xl text-[11px] font-black uppercase tracking-wide flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md"
-            >
-              <Send className="w-4 h-4" /> Dispatch to Review Pipeline
-            </button>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

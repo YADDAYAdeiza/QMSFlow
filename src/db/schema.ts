@@ -173,25 +173,42 @@ export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => 
   application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),
 }));
 
+// Add this directly to your schema file alongside your other tables
+
 export const localInspectionReports = pgTable("local_inspection_reports", {
   id: uuid("id").defaultRandom().primaryKey(),
-  applicationId: uuid("application_id")
-    .references(() => applications.id, { onDelete: "cascade" }),
-  companyId: uuid("company_id")
-    .references(() => companies.id, { onDelete: "cascade" }),
+  
+  // FIX: Type altered from uuid to integer to correctly reference your serial primary keys
+  applicationId: integer("application_id")
+    .references(() => applications.id, { onDelete: "cascade" })
+    .notNull(),
+  companyId: integer("company_id")
+    .references(() => companies.id, { onDelete: "cascade" })
+    .notNull(),
   inspectorId: uuid("inspector_id")
     .references(() => users.id),
   
   // Searchable Meta parameters
-  reportDocNumber: varchar("report_doc_number", { length: 100 }).unique().notNull(),
-  typeOfInspection: varchar("type_of_inspection", { length: 10 }).notNull(), // PPI, PRI, RI, FUI
-  currentStatus: varchar("current_status", { length: 50 }).default("DRAFT").notNull(), // DRAFT, UNDER_REVIEW, DDD_APPROVED, FINALIZED
+  reportDocNumber: varchar("report_doc_number", { length: 100 }).unique().notNull(), // e.g., OKL-LA-PRI-01-2026
+  typeOfInspection: varchar("type_of_inspection", { length: 10 }).notNull(),       // PPI, PRI, RI, FUI
+  currentStatus: varchar("current_status", { length: 50 }).default("LOD_INTAKE").notNull(), // Matches workflow statusLabels
   
   // The Data Cores
-  checklistRaw: jsonb("checklist_raw").notNull(), // Deep telemetry inputs mapped by quality system
-  reportHtml: text("report_html"), // The dynamic rich-text narrative body
-  versionHistory: jsonb("version_history").default([]), // Audit trail tracking modifications
+  checklistRaw: jsonb("checklist_raw").notNull(), // Structured telemetry questions mapped by quality system
+  reportHtml: text("report_html"),                // The narrative text generated from the inspection findings
+  versionHistory: jsonb("version_history").$type<Array<{
+    modifiedBy: string;
+    updatedAt: string;
+    changes: string;
+  }>>().default([]),
   
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// Relational Definitions for Clean Joined Queries
+export const localInspectionReportsRelations = relations(localInspectionReports, ({ one }) => ({
+  application: one(applications, { fields: [localInspectionReports.applicationId], references: [applications.id] }),
+  company: one(companies, { fields: [localInspectionReports.companyId], references: [companies.id] }),
+  inspector: one(users, { fields: [localInspectionReports.inspectorId], references: [users.id] }),
+}));
