@@ -198,7 +198,7 @@ export const ClearanceLetter = ({ data }: ClearanceLetterProps) => (
         <View style={styles.signatureBlock}>
           <Image src="/MudSig-removebg-preview.png" style={styles.signatureImage} />
           <Text style={styles.signatureName}>Mudashir, I. A</Text>
-          <Text>Divisional Deputy Director i/c, Veterinary Medicine & Allied Products</Text>
+          <Text>Deputy Director i/c, Veterinary Medicine & Allied Products</Text>
           <Text>For: Director-General (NAFDAC)</Text>
         </View>
       </View>
