@@ -13,6 +13,7 @@ import RejectionModal from '@/components/RejectionModal';
 
 // --- IMPORT REGULATORY PDF TEMPLATES ---
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
+import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS"; // New dynamic addition for AMS site scope matching
 import { GmpCertificate } from "@/components/documents/GmpCertificate";
 
 // Helper to prevent hydration mismatch for dates
@@ -124,8 +125,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     const factory = appDetails.facilityName || appDetails.factory_name || "N/A";
     const address = appDetails.facilityAddress || appDetails.factory_address || "N/A";
     const rawLines = appDetails.productLines || [];
+    const siteScope = appDetails.siteScope || "New Manufacturing Site";
 
     if (isInspection) {
+      // Pass 2 remains completely unmodified
       const certData = {
         appNumber,
         date,
@@ -138,6 +141,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
       };
       return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
     } else {
+      // Pass 1: Conditional Document Selection based on siteScope mapping within JSON context block
       const flatProducts = rawLines.flatMap((line: any) => 
         (line.products || []).map((p: any) => p.name)
       );
@@ -151,6 +155,12 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         localApplicantAddress: appDetails.companyAddress || "N/A",
         products: flatProducts.length > 0 ? flatProducts : (appDetails.products || [])
       };
+
+      if (siteScope === "Additional Manufacturing Site") {
+        return { component: <ClearanceLetterAMS data={clearanceData} />, prefix: "GMP_CLEARANCE_AMS" };
+      }
+      
+      // Default Baseline Flow: New Manufacturing Site
       return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
     }
   }, [app, appDetails, isInspection, complianceRisk]);
@@ -310,7 +320,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                     <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isRework ? 'bg-rose-500 border-rose-100' : 'bg-white border-slate-100'}`} />
                     
                     <div className="flex justify-between items-center mb-1 font-mono text-[8px] text-slate-400 uppercase font-black">
-                      {/* Enforces full title string display logic over abbreviations */}
                       <span>{(note?.from === 'DDD' || note?.from === 'Divisional Deputy Director') ? 'Divisional Deputy Director' : note?.from}</span>
                       <SafeTimestamp timestamp={note?.timestamp} />
                     </div>

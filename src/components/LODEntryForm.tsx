@@ -11,7 +11,7 @@ import { CompanySearch } from './CompanySearch';
 import { 
   Plus, Trash2, Globe, Building2, Save, Loader2, 
   MessageSquare, Share2, X, ChevronDown, Mail, RefreshCcw,
-  CheckCircle2, ArrowRight, Activity, ShieldAlert
+  CheckCircle2, ArrowRight, Activity, ShieldAlert, Layers
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
@@ -187,6 +187,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     notificationEmail: initialData?.notificationEmail || "",
     facilityName: initialData?.facilityName || "", 
     facilityAddress: initialData?.facilityAddress || "", 
+    siteScope: initialData?.siteScope || "New Manufacturing Site",
     lodRemarks: "",
     productLines: initialData?.productLines || [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
     divisions: initialData?.divisions || ["VMD"], 
@@ -378,6 +379,21 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
                 }}
               />
             )}
+            
+            {/* Added Site Scope Option Selector */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
+                <Layers className="w-3 h-3" /> Site Scope Configuration
+              </label>
+              <select 
+                {...register("siteScope")} 
+                className="w-full bg-white p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm cursor-pointer border border-transparent focus:border-blue-200"
+              >
+                <option value="New Manufacturing Site">New Manufacturing Site</option>
+                <option value="Additional Manufacturing Site">Additional Manufacturing Site</option>
+              </select>
+            </div>
+
             <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
             <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
             <FileUpload 

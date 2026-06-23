@@ -10,11 +10,35 @@ interface Observation {
 }
 
 interface ChecklistData {
-  premises_score: number;
-  equipment_score: number;
-  sanitation_score: number;
-  quality_systems_score: number;
+  // Step 1: Meta
+  report_doc_number: string;
+  inspection_dates: string;
+  type_of_inspection: string;
+  inspected_site_name: string;
+  site_contact_details: { phone: string; email: string; website: string };
+  activities_carried_out: string[];
+  vicinity_assessment: string;
+  lead_inspector: string;
+  co_inspectors: string;
+  historical_baseline: {
+    prev_date_type: string;
+    prev_team: string;
+    past_capa_status: string;
+    major_changes: string;
+  };
+  // Step 2: The 6 Quality Systems (Scores + Raw Bullet Points)
+  pqs_score: number; pqs_notes: string;
+  personnel_score: number; personnel_notes: string;
+  premises_equipment_score: number; premises_equipment_notes: string;
+  qualification_validation_score: number; qualification_validation_notes: string;
+  material_management_score: number; material_management_notes: string;
+  laboratory_control_score: number; laboratory_control_notes: string;
+  // Step 3: Synthesis
+  critical_count: number;
+  major_count: number;
+  other_count: number;
   observations: Observation[];
+  final_recommendation: string;
 }
 
 interface ChecklistFormProps {
@@ -23,182 +47,242 @@ interface ChecklistFormProps {
   isReadOnly?: boolean;
 }
 
-export default function InspectionChecklistForm({ 
-  initialData, 
-  onSave, 
-  isReadOnly = false 
-}: ChecklistFormProps) {
-  // Core Telemetry State
-  const [premisesScore, setPremisesScore] = useState(initialData?.premises_score ?? 100);
-  const [equipmentScore, setEquipmentScore] = useState(initialData?.equipment_score ?? 100);
-  const [sanitationScore, setSanitationScore] = useState(initialData?.sanitation_score ?? 100);
-  const [qualityScore, setQualityScore] = useState(initialData?.quality_systems_score ?? 100);
+export default function InspectionChecklistForm({ initialData, onSave, isReadOnly = false }: ChecklistFormProps) {
+  const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
 
-  // Dynamic Observations State
-  const [observations, setObservations] = useState<Observation[]>(initialData?.observations ?? []);
+  // --- STATE BOUND TO SKELETON DATA STRUCTURE ---
+  const [formData, setFormData] = useState<ChecklistData>({
+    report_doc_number: initialData?.report_doc_number ?? "OKL-LA-PRI-01-2026",
+    inspection_dates: initialData?.inspection_dates ?? "",
+    type_of_inspection: initialData?.type_of_inspection ?? "PRI",
+    inspected_site_name: initialData?.inspected_site_name ?? "Orange Kalbe Limited",
+    site_contact_details: initialData?.site_contact_details ?? { phone: "", email: "", website: "" },
+    activities_carried_out: initialData?.activities_carried_out ?? [],
+    vicinity_assessment: initialData?.vicinity_assessment ?? "",
+    lead_inspector: initialData?.lead_inspector ?? "",
+    co_inspectors: initialData?.co_inspectors ?? "",
+    historical_baseline: initialData?.historical_baseline ?? { prev_date_type: "", prev_team: "", past_capa_status: "", major_changes: "" },
+    
+    pqs_score: initialData?.pqs_score ?? 100, pqs_notes: initialData?.pqs_notes ?? "",
+    personnel_score: initialData?.personnel_score ?? 100, personnel_notes: initialData?.personnel_notes ?? "",
+    premises_equipment_score: initialData?.premises_equipment_score ?? 100, premises_equipment_notes: initialData?.premises_equipment_notes ?? "",
+    qualification_validation_score: initialData?.qualification_validation_score ?? 100, qualification_validation_notes: initialData?.qualification_validation_notes ?? "",
+    material_management_score: initialData?.material_management_score ?? 100, material_management_notes: initialData?.material_management_notes ?? "",
+    laboratory_control_score: initialData?.laboratory_control_score ?? 100, laboratory_control_notes: initialData?.laboratory_control_notes ?? "",
+
+    critical_count: initialData?.critical_count ?? 0,
+    major_count: initialData?.major_count ?? 0,
+    other_count: initialData?.other_count ?? 0,
+    observations: initialData?.observations ?? [],
+    final_recommendation: initialData?.final_recommendation ?? "PENDING"
+  });
+
   const [newObsText, setNewObsText] = useState("");
   const [newObsSeverity, setNewObsSeverity] = useState<"critical" | "major" | "other">("major");
 
-  const addObservation = () => {
-    if (!newObsText.trim()) return;
-    const newObs: Observation = {
-      id: crypto.randomUUID(),
-      severity: newObsSeverity,
-      text: newObsText.trim()
-    };
-    setObservations([...observations, newObs]);
-    setNewObsText("");
-  };
-
-  const removeObservation = (id: string) => {
-    setObservations(observations.filter(obs => obs.id !== id));
-  };
-
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave({
-      premises_score: Number(premisesScore),
-      equipment_score: Number(equipmentScore),
-      sanitation_score: Number(sanitationScore),
-      quality_systems_score: Number(qualityScore),
-      observations
+  const toggleActivity = (activity: string) => {
+    if (isReadOnly) return;
+    const current = formData.activities_carried_out;
+    setFormData({
+      ...formData,
+      activities_carried_out: current.includes(activity) ? current.filter(a => a !== activity) : [...current, activity]
     });
   };
 
+  const addObservation = () => {
+    if (!newObsText.trim()) return;
+    const newObs: Observation = { id: crypto.randomUUID(), severity: newObsSeverity, text: newObsText.trim() };
+    const updatedObs = [...formData.observations, newObs];
+    
+    // Auto increment counter based on type
+    setFormData({
+      ...formData,
+      observations: updatedObs,
+      critical_count: newObsSeverity === "critical" ? formData.critical_count + 1 : formData.critical_count,
+      major_count: newObsSeverity === "major" ? formData.major_count + 1 : formData.major_count,
+      other_count: newObsSeverity === "other" ? formData.other_count + 1 : formData.other_count,
+    });
+    setNewObsText("");
+  };
+
   return (
-    <form onSubmit={handleFormSubmit} className="space-y-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-      <div className="border-b border-slate-100 pb-3">
-        <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">📋 Technical Checklist & Telemetry Entry</h3>
-        <p className="text-xs text-slate-500 mt-0.5">Record quantitative audit grades and qualitative findings observed on-site.</p>
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* WIZARD TABS HEADER */}
+      <div className="flex border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
+        <button type="button" onClick={() => setActiveTab(1)} className={`flex-1 py-3 text-center border-r border-slate-200 transition-all ${activeTab === 1 ? "bg-white text-emerald-700 border-b-2 border-b-emerald-600" : "hover:bg-slate-100"}`}>
+          Step 1: Admin & Baseline
+        </button>
+        <button type="button" onClick={() => setActiveTab(2)} className={`flex-1 py-3 text-center border-r border-slate-200 transition-all ${activeTab === 2 ? "bg-white text-emerald-700 border-b-2 border-b-emerald-600" : "hover:bg-slate-100"}`}>
+          Step 2: The 6 Quality Systems
+        </button>
+        <button type="button" onClick={() => setActiveTab(3)} className={`flex-1 py-3 text-center transition-all ${activeTab === 3 ? "bg-white text-emerald-700 border-b-2 border-b-emerald-600" : "hover:bg-slate-100"}`}>
+          Step 3: Synthesis & Adjudication
+        </button>
       </div>
 
-      {/* CORE QUALITY SYSTEM SCORES */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Premises & Facility Layout (%)</label>
-          <input 
-            type="number" min="0" max="100" 
-            disabled={isReadOnly}
-            value={premisesScore} 
-            onChange={(e) => setPremisesScore(Math.min(100, Number(e.target.value)))}
-            className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-slate-50 disabled:bg-slate-100 font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500" 
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Equipment & Calibration (%)</label>
-          <input 
-            type="number" min="0" max="100" 
-            disabled={isReadOnly}
-            value={equipmentScore} 
-            onChange={(e) => setEquipmentScore(Math.min(100, Number(e.target.value)))}
-            className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-slate-50 disabled:bg-slate-100 font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500" 
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Sanitation & Hygiene (%)</label>
-          <input 
-            type="number" min="0" max="100" 
-            disabled={isReadOnly}
-            value={sanitationScore} 
-            onChange={(e) => setSanitationScore(Math.min(100, Number(e.target.value)))}
-            className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-slate-50 disabled:bg-slate-100 font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500" 
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Quality Management Systems (%)</label>
-          <input 
-            type="number" min="0" max="100" 
-            disabled={isReadOnly}
-            value={qualityScore} 
-            onChange={(e) => setQualityScore(Math.min(100, Number(e.target.value)))}
-            className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-slate-50 disabled:bg-slate-100 font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500" 
-          />
-        </div>
-      </div>
-
-      <hr className="border-slate-100" />
-
-      {/* DYNAMIC DEFICIENCY REGISTER */}
-      <div>
-        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">🔎 Deficiency & Non-Conformance Register</h4>
-        
-        {/* ADD DEFICIENCY INPUT FIELDS */}
-        {!isReadOnly && (
-          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4 space-y-3">
-            <div className="flex gap-2">
-              <div className="w-1/3">
-                <select
-                  value={newObsSeverity}
-                  onChange={(e) => setNewObsSeverity(e.target.value as any)}
-                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 font-bold text-slate-800 focus:outline-none"
-                >
-                  <option value="other">Other/Minor</option>
-                  <option value="major">Major Deficiency</option>
-                  <option value="critical">Critical Deficiency</option>
+      <div className="p-6">
+        {/* --- STEP 1: ADMINISTRATIVE METADATA --- */}
+        {activeTab === 1 && (
+          <div className="space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1">Inspection Core Details & Facility Information</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Doc Number</label>
+                <input type="text" disabled className="w-full border p-2 bg-slate-100 rounded text-slate-600 font-mono" value={formData.report_doc_number} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Inspection Date(s)</label>
+                <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded" value={formData.inspection_dates} onChange={e => setFormData({...formData, inspection_dates: e.target.value})} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Inspection Type</label>
+                <select disabled={isReadOnly} className="w-full border p-2 rounded bg-white" value={formData.type_of_inspection} onChange={e => setFormData({...formData, type_of_inspection: e.target.value})}>
+                  <option value="PPI">Pre-Production Inspection (PPI)</option>
+                  <option value="PRI">Pre-Registration Inspection (PRI)</option>
+                  <option value="RI">Routine Inspection (RI)</option>
+                  <option value="FUI">Follow-Up / CAPA Verification (FUI)</option>
                 </select>
               </div>
-              <div className="w-2/3">
-                <input 
-                  type="text"
-                  placeholder="Describe the specific non-conformance observation..."
-                  value={newObsText}
-                  onChange={(e) => setNewObsText(e.target.value)}
-                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 font-medium text-slate-800 focus:outline-none"
-                />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Activities Carried Out</label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                {["Active Ingredient", "Finished Product", "Packaging", "Importing", "Lab Testing", "Batch Release"].map((act) => (
+                  <label key={act} className="flex items-center gap-2 p-2 border rounded bg-slate-50 cursor-pointer">
+                    <input type="checkbox" disabled={isReadOnly} checked={formData.activities_carried_out.includes(act)} onChange={() => toggleActivity(act)} className="rounded text-emerald-600 focus:ring-0" />
+                    <span>{act}</span>
+                  </label>
+                ))}
               </div>
             </div>
-            <button 
-              type="button"
-              onClick={addObservation}
-              className="w-full px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-md shadow-sm transition-all"
-            >
-              ＋ Log Deficiency Line Item
-            </button>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Lead Inspector (Name, Designation, Directorate)</label>
+                <input type="text" placeholder="e.g. Mr. Biyama Kalang, Senior Regulatory Officer, DER" disabled={isReadOnly} className="w-full border p-2 rounded" value={formData.lead_inspector} onChange={e => setFormData({...formData, lead_inspector: e.target.value})} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Co-Inspectors / Trainees</label>
+                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded" value={formData.co_inspectors} onChange={e => setFormData({...formData, co_inspectors: e.target.value})} />
+              </div>
+            </div>
+
+            <div className="text-xs">
+              <label className="block font-bold text-slate-700 mb-1">Vicinity Assessment (Contaminants, Environmental Risks)</label>
+              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded" placeholder="Observe external physical features or surrounding factory setups..." value={formData.vicinity_assessment} onChange={e => setFormData({...formData, vicinity_assessment: e.target.value})} />
+            </div>
           </div>
         )}
 
-        {/* DEFICIENCY ITEMS LISTING */}
-        <div className="space-y-2">
-          {observations.length === 0 ? (
-            <p className="text-xs text-slate-400 italic text-center py-2 bg-slate-50 rounded-lg border border-dashed border-slate-200">No deficiencies logged. Facility currently compliant with baseline parameters.</p>
-          ) : (
-            observations.map((obs) => (
-              <div key={obs.id} className="flex justify-between items-start gap-4 p-2.5 rounded-lg border border-slate-200 bg-white shadow-sm text-xs">
-                <div className="flex gap-2 items-start">
-                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-white mt-0.5 ${
-                    obs.severity === "critical" ? "bg-rose-600 animate-pulse" : 
-                    obs.severity === "major" ? "bg-amber-500" : "bg-blue-500"
-                  }`}>
-                    {obs.severity}
-                  </span>
-                  <p className="text-slate-700 font-medium">{obs.text}</p>
+        {/* --- STEP 2: THE 6 QUALITY SYSTEMS --- */}
+        {activeTab === 2 && (
+          <div className="space-y-6">
+            <p className="text-xs text-slate-500 italic">Enter bullet points of raw observations. The NAFDAC AI compilation engine will synthesize these into professional regulatory narrative prose.</p>
+            
+            {[
+              { key: "pqs", label: "System 1: Pharmaceutical Quality System (PQS)", scoreKey: "pqs_score", notesKey: "pqs_notes", placeholder: "Sighted Site Master File Ref... Change control SOP ref... Deviation logs..." },
+              { key: "personnel", label: "System 2: Personnel & Training Protocols", scoreKey: "personnel_score", notesKey: "personnel_notes", placeholder: "Key staff qualifications independent? Sighted training matrix and minimum threshold..." },
+              { key: "premises", label: "System 3: Premises and Process Equipment", scoreKey: "premises_equipment_score", notesKey: "premises_equipment_notes", placeholder: "Zoning & man-material layout flow check. HVAC magnehelic metrics, Water Treatment loop logs..." },
+              { key: "validation", label: "System 4: Qualification and Validation", scoreKey: "qualification_validation_score", notesKey: "qualification_validation_notes", placeholder: "Validation Master Plan status. Sighted IQ/OQ/PQ logs for production lines..." },
+              { key: "material", label: "System 5: Material Management & Storage", scoreKey: "material_management_score", notesKey: "material_management_notes", placeholder: "Vendor audits checklist, environmental thermal mapping hot spots monitored..." },
+              { key: "lab", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence, Ethylene Glycol / Diethylene Glycol chromatographic impurity screen screening..." },
+            ].map((sys) => (
+              <div key={sys.key} className="border border-slate-100 rounded-lg p-4 bg-slate-50/50 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-slate-800 uppercase tracking-wide">{sys.label}</h4>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-slate-500 text-[11px]">Grade:</span>
+                    <input type="number" min="0" max="100" disabled={isReadOnly} className="w-16 p-1 border rounded text-center font-bold bg-white" value={(formData as any)[sys.scoreKey]} onChange={e => setFormData({...formData, [sys.scoreKey]: Math.min(100, Number(e.target.value))})} />
+                    <span className="font-bold text-slate-600">%</span>
+                  </div>
                 </div>
-                {!isReadOnly && (
-                  <button 
-                    type="button" 
-                    onClick={() => removeObservation(obs.id)}
-                    className="text-slate-400 hover:text-rose-600 font-bold px-1"
-                  >
-                    ✕
-                  </button>
-                )}
+                <textarea rows={3} disabled={isReadOnly} placeholder={sys.placeholder} className="w-full border p-2 rounded bg-white" value={(formData as any)[sys.notesKey]} onChange={e => setFormData({...formData, [sys.notesKey]: e.target.value})} />
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {/* --- STEP 3: SYNTHESIS & FINAL CONCLUSION --- */}
+        {activeTab === 3 && (
+          <div className="space-y-4 text-xs">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1">Deficiency Aggregates & Sign-off Adjudication</h3>
+            
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="bg-rose-50 p-2 rounded border border-rose-200">
+                <p className="text-[10px] uppercase font-bold text-rose-700">Critical</p>
+                <p className="text-lg font-black text-rose-900">{formData.critical_count}</p>
+              </div>
+              <div className="bg-amber-50 p-2 rounded border border-amber-200">
+                <p className="text-[10px] uppercase font-bold text-amber-700">Major</p>
+                <p className="text-lg font-black text-amber-900">{formData.major_count}</p>
+              </div>
+              <div className="bg-blue-50 p-2 rounded border border-blue-200">
+                <p className="text-[10px] uppercase font-bold text-blue-700">Other / Minor</p>
+                <p className="text-lg font-black text-blue-900">{formData.other_count}</p>
+              </div>
+            </div>
+
+            {/* DEFICIENCY INPUT REGISTER */}
+            {!isReadOnly && (
+              <div className="bg-slate-50 p-3 rounded border border-slate-200 space-y-2">
+                <div className="flex gap-2">
+                  <select value={newObsSeverity} onChange={e => setNewObsSeverity(e.target.value as any)} className="w-1/3 bg-white border p-2 rounded font-bold">
+                    <option value="other">Other/Minor</option>
+                    <option value="major">Major Deficiency</option>
+                    <option value="critical">Critical Deficiency</option>
+                  </select>
+                  <input type="text" placeholder="Describe the non-conformance observation precisely..." value={newObsText} onChange={e => setFormData({...formData, observations: formData.observations, [newObsText]: e.target.value})} className="w-2/3 bg-white border p-2 rounded" />
+                </div>
+                <button type="button" onClick={addObservation} className="w-full bg-slate-900 hover:bg-black text-white font-bold p-2 rounded transition-all">
+                  ＋ Add to Deficiency Log
+                </button>
+              </div>
+            )}
+
+            {/* CURRENT LOG DISPLAY */}
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {formData.observations.map((obs) => (
+                <div key={obs.id} className="p-2 border rounded bg-slate-50/50 flex justify-between items-center">
+                  <div className="flex gap-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] text-white font-bold uppercase tracking-wide ${obs.severity === "critical" ? "bg-rose-600" : obs.severity === "major" ? "bg-amber-500" : "bg-blue-500"}`}>{obs.severity}</span>
+                    <span className="text-slate-700 font-medium">{obs.text}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* FINAL ADJUDICATION DROPDOWN */}
+            <div className="pt-2 border-t">
+              <label className="block font-bold text-slate-800 mb-1 uppercase tracking-wide">Final Recommendation / Adjudication</label>
+              <select disabled={isReadOnly} className="w-full border p-2.5 rounded bg-white font-semibold text-slate-800" value={formData.final_recommendation} onChange={e => setFormData({...formData, final_recommendation: e.target.value})}>
+                <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
+                <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
+                <option value="REJECTED">Recommended for Rejection / Hold</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* SAVE TRIGGERS */}
-      {!isReadOnly && (
-        <div className="pt-2 border-t border-slate-100 flex justify-end">
-          <button 
-            type="submit"
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all"
-          >
-            💾 Cache Checklist Progress
+      {/* FOOTER ACTIONS PANEL */}
+      <div className="bg-slate-50 px-6 py-4 border-t flex justify-between items-center">
+        <button type="button" disabled={activeTab === 1} onClick={() => setActiveTab((activeTab - 1) as any)} className="px-3 py-1.5 border font-semibold text-xs rounded bg-white hover:bg-slate-50 disabled:opacity-50">
+          ← Back
+        </button>
+        
+        {activeTab < 3 ? (
+          <button type="button" onClick={() => setActiveTab((activeTab + 1) as any)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded">
+            Next Section →
           </button>
-        </div>
-      )}
-    </form>
+        ) : (
+          !isReadOnly && (
+            <button type="button" onClick={() => onSave(formData)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center gap-1.5">
+              ✨ Compile Draft via NAFDAC AI Engine
+            </button>
+          )
+        )}
+      </div>
+    </div>
   );
 }

@@ -29,6 +29,9 @@ export default function GMPReportWorkspace({
   const [remarks, setRemarks] = useState("");
   const [selectedStaff, setSelectedStaff] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Local state to store the AI compiled text blocks across workflow hands
+  const [reportHtml, setReportHtml] = useState<string | null>(null);
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
@@ -38,6 +41,35 @@ export default function GMPReportWorkspace({
     { id: "usr_202", name: "Chidi Okafor", division: "VMD", role: "Technical Staff Reviewer" },
     { id: "usr_203", name: "Fatima Umar", division: "IRSD", role: "IRSD Staff Reviewer" }
   ];
+
+  // Pipeline hook that marshals telemetry payload into narrative compliance prose
+  const handleAICorrelationCompile = async (completedFormPayload: any) => {
+    try {
+      console.log("Transmitting payload to synthesis engine...");
+      
+      const res = await fetch("/api/gmp-report/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...completedFormPayload,
+          report_doc_number: `NAFDAC/VMD/GMP/${applicationId}/2026`,
+          inspected_site_name: companyName,
+        }),
+      });
+      
+      const outcome = await res.json();
+      
+      if (outcome.success) {
+        setReportHtml(outcome.report_html);
+        alert("AI Technical Report Narrative compiled successfully under SOP Ref. No. DER-800-06!");
+      } else {
+        alert("Synthesis aborted: " + outcome.error);
+      }
+    } catch (err: any) {
+      console.error("Network sync failure:", err);
+      alert(`Execution Error: ${err.message}`);
+    }
+  };
 
   const handleTransition = async (direction: "FORWARD" | "REWORK") => {
     if (!remarks.trim()) {
@@ -143,23 +175,33 @@ export default function GMPReportWorkspace({
               </div>
             </div>
 
-            {/* NEW: INTEGRATED DATA ENTRY CHECKLIST COMPONENT */}
-          <InspectionChecklistForm
-            initialData={{
-              premises_score: 85,
-              equipment_score: 90,
-              sanitation_score: 92,
-              observations: [
-                { id: "1", severity: "major", text: "Validation of automated clean-in-place cycles pending documentation confirmation." }
-              ]
-            }}
-            onSave={(telemetryData) => {
-              console.log("Telemetry compiled for state handshake:", telemetryData);
-              alert("Checklist state cached! Ready for structural JSONB transmission.");
-            }}
-            // Read-only setting can cleanly match workflow role custody:
-            isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
-          />
+            {/* LIVE NARRATIVE PREVIEW PANEL */}
+            {reportHtml && (
+              <div className="bg-white rounded-xl p-6 border border-emerald-200 shadow-sm animate-fadeIn">
+                <h3 className="text-sm font-bold text-emerald-900 border-b border-emerald-100 pb-3 mb-4 uppercase tracking-wider">
+                  📝 SOP Ref. No. DER-800-06 Compiled Narrative Draft
+                </h3>
+                <div 
+                  className="prose prose-sm max-w-none text-slate-800"
+                  dangerouslySetInnerHTML={{ __html: reportHtml }}
+                />
+              </div>
+            )}
+
+            {/* INTEGRATED DATA ENTRY CHECKLIST COMPONENT */}
+            <InspectionChecklistForm
+              initialData={{
+                premises_score: 85,
+                equipment_score: 90,
+                sanitation_score: 92,
+                observations: [
+                  { id: "1", severity: "major", text: "Validation of automated clean-in-place cycles pending documentation confirmation." }
+                ]
+              }}
+              onSave={handleAICorrelationCompile}
+              // Read-only setting can cleanly match workflow role custody:
+              isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
+            />
 
             {/* AUTOMATED COMPLIANCE AUDIT TIMELINE TRACKER */}
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
