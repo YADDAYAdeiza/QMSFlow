@@ -5,7 +5,10 @@ import { GoogleGenAI } from "@google/genai";
 // Initialize the Google Gen AI SDK
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+console.log('We have entered...');
+
 export async function POST(request: Request) {
+  console.log("Testing refresh")
   try {
     const payload = await request.json();
 
@@ -41,6 +44,7 @@ CRITICAL RULES:
 4. Highlight technical vocabulary inline appropriately.
 `;
 
+    // Updated template to consume the destructured variables directly
     const userInstructions = `
 Generate the narrative report based on this raw checklist snapshot:
 
@@ -55,12 +59,23 @@ Generate the narrative report based on this raw checklist snapshot:
 - Co-Inspectors: ${co_inspectors}
 
 [6 QUALITY SYSTEMS OBSERVATIONS]
-1. Pharmaceutical Quality System (Score: ${pqs_score}%): ${pqs_notes || "Compliant baseline parameters."}
-2. Personnel & Training (Score: ${personnel_score}%): ${personnel_notes || "Staff layout compliant."}
-3. Premises & Equipment (Score: ${premises_equipment_score}%): ${premises_equipment_notes || "Flow structures acceptable."}
-4. Qualification & Validation (Score: ${qualification_validation_score}%): ${qualification_validation_notes || "Protocols verified."}
-5. Material Management (Score: ${material_management_score}%): ${material_management_notes || "Warehouse criteria satisfied."}
-6. Laboratory Control / QC (Score: ${laboratory_control_score}%): ${laboratory_control_notes || "Screening thresholds checked."}
+1. Pharmaceutical Quality System (Score: ${pqs_score}%):
+   - Notes/Observations: ${pqs_notes || "Compliant baseline parameters."}
+
+2. Personnel & Training (Score: ${personnel_score}%):
+   - Notes/Observations: ${personnel_notes || "Staff layout compliant."}
+
+3. Premises & Equipment (Score: ${premises_equipment_score}%):
+   - Notes/Observations: ${premises_equipment_notes || "Flow structures acceptable."}
+
+4. Qualification & Validation (Score: ${qualification_validation_score}%):
+   - Notes/Observations: ${qualification_validation_notes || "Protocols verified."}
+
+5. Material Management (Score: ${material_management_score}%):
+   - Notes/Observations: ${material_management_notes || "Warehouse criteria satisfied."}
+
+6. Laboratory Control / QC (Score: ${laboratory_control_score}%):
+   - Notes/Observations: ${laboratory_control_notes || "Screening thresholds checked."}
 
 [SYNTHESIS AGGREGATES]
 - Critical Deficiencies: ${critical_count}
@@ -96,3 +111,5 @@ Structure the output cleanly with appropriate headings (<h3>), body text (<p cla
     );
   }
 }
+
+//Force Change Sync

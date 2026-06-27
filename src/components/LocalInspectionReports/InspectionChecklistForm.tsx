@@ -1,4 +1,3 @@
-// @/components/LocalInspectionReports/InspectionChecklistForm.tsx
 "use client";
 
 import { useState } from "react";
@@ -91,10 +90,15 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
 
   const addObservation = () => {
     if (!newObsText.trim()) return;
-    const newObs: Observation = { id: crypto.randomUUID(), severity: newObsSeverity, text: newObsText.trim() };
+
+    // Secure context fallback for non-HTTPS or offline deployment tracking environments
+    const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : `obs_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+
+    const newObs: Observation = { id: uniqueId, severity: newObsSeverity, text: newObsText.trim() };
     const updatedObs = [...formData.observations, newObs];
     
-    // Auto increment counter based on type
     setFormData({
       ...formData,
       observations: updatedObs,
@@ -232,7 +236,13 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
                     <option value="major">Major Deficiency</option>
                     <option value="critical">Critical Deficiency</option>
                   </select>
-                  <input type="text" placeholder="Describe the non-conformance observation precisely..." value={newObsText} onChange={e => setFormData({...formData, observations: formData.observations, [newObsText]: e.target.value})} className="w-2/3 bg-white border p-2 rounded" />
+                  <input 
+                    type="text" 
+                    placeholder="Describe the non-conformance observation precisely..." 
+                    value={newObsText} 
+                    onChange={e => setNewObsText(e.target.value)} 
+                    className="w-2/3 bg-white border p-2 rounded" 
+                  />
                 </div>
                 <button type="button" onClick={addObservation} className="w-full bg-slate-900 hover:bg-black text-white font-bold p-2 rounded transition-all">
                   ＋ Add to Deficiency Log

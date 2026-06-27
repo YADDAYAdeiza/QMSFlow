@@ -12,7 +12,6 @@ interface WorkspaceProps {
   applicationId: string;
   companyId: string;
   companyName: string;
-  // Added: Pass down the actual status saved in the database to drive the production UI
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps; 
 }
 
@@ -47,7 +46,7 @@ export default function GMPReportWorkspace({
     try {
       console.log("Transmitting payload to synthesis engine...");
       
-      const res = await fetch("/api/gmp-report/generate", {
+      const res = await fetch("/api/LocalInspectionReports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -61,7 +60,6 @@ export default function GMPReportWorkspace({
       
       if (outcome.success) {
         setReportHtml(outcome.report_html);
-        alert("AI Technical Report Narrative compiled successfully under SOP Ref. No. DER-800-06!");
       } else {
         alert("Synthesis aborted: " + outcome.error);
       }
@@ -83,20 +81,25 @@ export default function GMPReportWorkspace({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
         direction,
-        actingUserId: "current-logged-in-user-id", // Will map to auth session id
+        actingUserId: "usr_active_session", 
         actingUserName: `Officer (${activeStepConfig.division})`,
         targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
         remarks: remarks
       });
 
-      if (res.success && res.arrivedAt) {
-        alert(`Dossier successfully routed to: ${inspectionReportWorkflow.steps[res.arrivedAt].title}`);
-        setCurrentStep(res.arrivedAt);
+      // 🟩 FIX: Type narrowing via an explicit truthy check on res.success
+      if (res.success && "arrivedAt" in res && res.arrivedAt) {
+        const nextStepKey = res.arrivedAt as keyof typeof inspectionReportWorkflow.steps;
+        
+        alert(`Dossier successfully routed to: ${inspectionReportWorkflow.steps[nextStepKey].title}`);
+        setCurrentStep(nextStepKey);
         setRemarks("");
         setSelectedStaff("");
-        router.refresh(); // Tells Next.js to pull fresh timeline records from server
+        router.refresh(); 
       } else {
-        alert(`Routing Matrix Error: ${res.error}`);
+        // 🟩 FIX: Safely extract error since TypeScript now knows success is false
+        const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing error";
+        alert(`Routing Matrix Error: ${errorMsg}`);
       }
     } catch (err: any) {
       alert(`Execution Error: ${err.message}`);
@@ -106,7 +109,7 @@ export default function GMPReportWorkspace({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
       {/* DEVELOPMENT TASK TOGGLE RIG (Remove or comment out before final production push) */}
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
@@ -143,7 +146,7 @@ export default function GMPReportWorkspace({
               </p>
             </div>
             
-            <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/60 max-w-sm">
+            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 max-w-sm">
               <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Current Custody Desk</p>
               <p className="text-sm font-bold text-emerald-400 mt-0.5">{activeStepConfig.title}</p>
               <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
@@ -162,7 +165,7 @@ export default function GMPReportWorkspace({
             
             {/* DOCUMENT CARD PANEL */}
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
+              <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
                 📄 Primary Inspection Review Documentation
               </h3>
               <div className="bg-slate-50 border border-slate-200 border-dashed rounded-lg p-6 text-center">
@@ -178,11 +181,11 @@ export default function GMPReportWorkspace({
             {/* LIVE NARRATIVE PREVIEW PANEL */}
             {reportHtml && (
               <div className="bg-white rounded-xl p-6 border border-emerald-200 shadow-sm animate-fadeIn">
-                <h3 className="text-sm font-bold text-emerald-900 border-b border-emerald-100 pb-3 mb-4 uppercase tracking-wider">
-                  📝 SOP Ref. No. DER-800-06 Compiled Narrative Draft
+                <h3 className="text-sm font-bold text-emerald-900 border-b border-emerald-100 pb-3 mb-4 uppercase tracking-wider flex items-center gap-2">
+                  <span>📝</span> SOP Ref. No. DER-800-06 Compiled Narrative Draft
                 </h3>
                 <div 
-                  className="prose prose-sm max-w-none text-slate-800"
+                  className="prose prose-sm max-w-none text-slate-800 prose-headings:text-slate-900 prose-strong:text-slate-900 prose-ul:list-disc prose-p:leading-relaxed bg-slate-50/50 p-4 border border-slate-100 rounded-lg"
                   dangerouslySetInnerHTML={{ __html: reportHtml }}
                 />
               </div>
@@ -191,21 +194,21 @@ export default function GMPReportWorkspace({
             {/* INTEGRATED DATA ENTRY CHECKLIST COMPONENT */}
             <InspectionChecklistForm
               initialData={{
-                premises_score: 85,
-                equipment_score: 90,
-                sanitation_score: 92,
-                observations: [
-                  { id: "1", severity: "major", text: "Validation of automated clean-in-place cycles pending documentation confirmation." }
-                ]
+                pqs_score: 100,
+                premises_equipment_score: 85,
+                personnel_score: 100,
+                qualification_validation_score: 90,
+                material_management_score: 100,
+                laboratory_control_score: 100,
+                observations: []
               }}
               onSave={handleAICorrelationCompile}
-              // Read-only setting can cleanly match workflow role custody:
               isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
             />
 
             {/* AUTOMATED COMPLIANCE AUDIT TIMELINE TRACKER */}
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
+              <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
                 ⏱️ QMS Tracking Ledger & Time-on-Task
               </h3>
               <p className="text-xs text-slate-500 italic bg-slate-50 p-3 rounded-lg border border-slate-200">
@@ -218,7 +221,7 @@ export default function GMPReportWorkspace({
           <div className="space-y-6">
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
-              <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wider text-slate-700">
+              <h3 className="text-sm font-bold mb-4 uppercase tracking-wider text-slate-700">
                 ⚡ Desk Operations Control
               </h3>
               
