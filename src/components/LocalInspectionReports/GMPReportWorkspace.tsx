@@ -8,58 +8,88 @@ import { useRouter } from "next/navigation";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
 
+interface CommentTrailItem {
+  text: string;
+  action: "FORWARD" | "REWORK";
+  fromStep: string;
+  toStep: string;
+  actorName: string;
+  timestamp: string;
+  actorId?: string;
+  assignedToId?: string;
+}
+
 interface WorkspaceProps {
   applicationId: string;
   companyId: string;
   companyName: string;
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps; 
+  initialReportHtml?: string | null;
+  initialChecklistSnapshot?: any;
+  initialComments?: CommentTrailItem[]; 
 }
 
 export default function GMPReportWorkspace({
   applicationId,
   companyId,
   companyName,
-  initialStepKey = "DDD_TECHNICAL_ASSIGNMENT"
+  initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
+  initialReportHtml = null,
+  initialChecklistSnapshot = null,
+  initialComments = []
 }: WorkspaceProps) {
   const router = useRouter();
   
-  // Core workflow node is driven by database values but handles local testing overrides smoothly
+  // Core workflow states
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [remarks, setRemarks] = useState("");
   const [selectedStaff, setSelectedStaff] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Local state to store the AI compiled text blocks across workflow hands
-  const [reportHtml, setReportHtml] = useState<string | null>(null);
+  // Real-time audit history log tracking
+  const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
+  const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
-  // System Desk Officer Directory for NAFDAC assignments
   const staffDirectory = [
     { id: "usr_201", name: "Aliyu Ahmed", division: "VMD", role: "Technical Staff Reviewer" },
     { id: "usr_202", name: "Chidi Okafor", division: "VMD", role: "Technical Staff Reviewer" },
     { id: "usr_203", name: "Fatima Umar", division: "IRSD", role: "IRSD Staff Reviewer" }
   ];
 
-  // Pipeline hook that marshals telemetry payload into narrative compliance prose
+  const defaultChecklistData = {
+    pqs_score: 100,
+    premises_equipment_score: 85,
+    personnel_score: 100,
+    qualification_validation_score: 90,
+    material_management_score: 100,
+    laboratory_control_score: 100,
+    observations: []
+  };
+
+  const checklistFormInitialData = initialChecklistSnapshot || defaultChecklistData;
+
   const handleAICorrelationCompile = async (completedFormPayload: any) => {
     try {
       console.log("Transmitting payload to synthesis engine...");
-      
+      // Kept path matched exactly to your local LocalInspectionReports route setup
       const res = await fetch("/api/LocalInspectionReports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...completedFormPayload,
+          application_id: applicationId, 
           report_doc_number: `NAFDAC/VMD/GMP/${applicationId}/2026`,
           inspected_site_name: companyName,
         }),
       });
       
       const outcome = await res.json();
-      
       if (outcome.success) {
         setReportHtml(outcome.report_html);
+        alert("AI Technical Report Narrative compiled successfully under SOP Ref. No. DER-800-06! Form snapshot auto-saved.");
+        router.refresh(); 
       } else {
         alert("Synthesis aborted: " + outcome.error);
       }
@@ -87,17 +117,33 @@ export default function GMPReportWorkspace({
         remarks: remarks
       });
 
-      // 🟩 FIX: Type narrowing via an explicit truthy check on res.success
       if (res.success && "arrivedAt" in res && res.arrivedAt) {
         const nextStepKey = res.arrivedAt as keyof typeof inspectionReportWorkflow.steps;
+        const targetStepTitle = inspectionReportWorkflow.steps[nextStepKey].title;
         
-        alert(`Dossier successfully routed to: ${inspectionReportWorkflow.steps[nextStepKey].title}`);
-        setCurrentStep(nextStepKey);
+        // 1. Construct the explicit minute block matching your exact JSONB architecture
+        const newMinute: CommentTrailItem = {
+          text: remarks,
+          action: direction,
+          fromStep: activeStepConfig.title,
+          toStep: targetStepTitle,
+          actorName: `Officer (${activeStepConfig.division})`,
+          timestamp: new Date().toISOString()
+        };
+
+        // 2. Prepend local state instantly (Optimistic update)
+        setCommentsList(prev => [newMinute, ...prev]);
+        
+        alert(`Dossier successfully routed to: ${targetStepTitle}`);
+        
+        // 3. Purge inputs and set destination step coordinates
         setRemarks("");
         setSelectedStaff("");
+        setCurrentStep(nextStepKey);
+        
+        // 4. Force Next.js data cache invalidation to pull fresh rows down
         router.refresh(); 
       } else {
-        // 🟩 FIX: Safely extract error since TypeScript now knows success is false
         const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing error";
         alert(`Routing Matrix Error: ${errorMsg}`);
       }
@@ -111,7 +157,7 @@ export default function GMPReportWorkspace({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      {/* DEVELOPMENT TASK TOGGLE RIG (Remove or comment out before final production push) */}
+      {/* Simulation Rig */}
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
         <div>
           <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
@@ -125,13 +171,15 @@ export default function GMPReportWorkspace({
             className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500"
           >
             {Object.keys(inspectionReportWorkflow.steps).map((key) => (
-              <option key={key} value={key}>{key} - {inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps].title}</option>
+              <option key={key} value={key}>
+                {key.replace("DDD", "Divisional Deputy Director")} - {inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps].title}
+              </option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* WORKSPACE HEADER MATRIX */}
+      {/* Header Panel */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
         <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800 text-white">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -157,13 +205,13 @@ export default function GMPReportWorkspace({
           </div>
         </div>
 
-        {/* OPERATIONS CONTEXT GRID */}
+        {/* Content Layout Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
           
-          {/* CONTENT COLUMNS */}
+          {/* Main Form Fields Column */}
           <div className="lg:col-span-2 space-y-6">
             
-            {/* DOCUMENT CARD PANEL */}
+            {/* Primary Report PDF Handle */}
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
               <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
                 📄 Primary Inspection Review Documentation
@@ -178,7 +226,7 @@ export default function GMPReportWorkspace({
               </div>
             </div>
 
-            {/* LIVE NARRATIVE PREVIEW PANEL */}
+            {/* Generated Compliance Text Narrative Preview */}
             {reportHtml && (
               <div className="bg-white rounded-xl p-6 border border-emerald-200 shadow-sm animate-fadeIn">
                 <h3 className="text-sm font-bold text-emerald-900 border-b border-emerald-100 pb-3 mb-4 uppercase tracking-wider flex items-center gap-2">
@@ -191,33 +239,59 @@ export default function GMPReportWorkspace({
               </div>
             )}
 
-            {/* INTEGRATED DATA ENTRY CHECKLIST COMPONENT */}
+            {/* Structured Form Entry Blocks */}
             <InspectionChecklistForm
-              initialData={{
-                pqs_score: 100,
-                premises_equipment_score: 85,
-                personnel_score: 100,
-                qualification_validation_score: 90,
-                material_management_score: 100,
-                laboratory_control_score: 100,
-                observations: []
-              }}
+              initialData={checklistFormInitialData}
               onSave={handleAICorrelationCompile}
               isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
             />
 
-            {/* AUTOMATED COMPLIANCE AUDIT TIMELINE TRACKER */}
+            {/* Historical Minute Ledger Block */}
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
               <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
-                ⏱️ QMS Tracking Ledger & Time-on-Task
+                📋 Official QMS Minute Sheet Log
               </h3>
-              <p className="text-xs text-slate-500 italic bg-slate-50 p-3 rounded-lg border border-slate-200">
-                Turnaround logs are automatically calculated down to the second when file handshakes execute. This keeps operations compliant with QMS audit benchmarks.
-              </p>
+              
+              {commentsList.length === 0 ? (
+                <p className="text-xs text-slate-400 italic py-2">No tracking entries found on this ledger yet.</p>
+              ) : (
+                <div className="relative border-l border-slate-200 pl-4 space-y-4 ml-2 mt-2">
+                  {commentsList.map((item, index) => {
+                    const isRework = item.action === "REWORK";
+                    return (
+                      <div key={index} className="relative text-xs">
+                        {/* Timeline Icon Node */}
+                        <span className={`absolute -left-[21px] top-1 flex h-[13px] w-[13px] rounded-full border-2 bg-white ${isRework ? "border-rose-500" : "border-emerald-500"}`} />
+                        
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 shadow-2xs">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-200/60 pb-1.5 mb-2">
+                            <div>
+                              <span className="font-bold text-slate-800">{item.actorName}</span>
+                              <span className={`ml-2 inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset ${isRework ? "bg-rose-50 text-rose-700 ring-rose-600/20" : "bg-emerald-50 text-emerald-700 ring-emerald-600/20"}`}>
+                                {item.action}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {new Date(item.timestamp).toLocaleString("en-GB")}
+                            </span>
+                          </div>
+                          
+                          <p className="text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{item.text}</p>
+                          
+                          <div className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[10px] text-slate-500 flex flex-wrap gap-x-3">
+                            <p>From: <span className="font-semibold text-slate-600">{item.fromStep}</span></p>
+                            <p>➔ Destination: <span className="font-semibold text-slate-600">{item.toStep}</span></p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* DESK ACTION CONTROL SIDEBAR */}
+          {/* Action Dashboard Sidebar */}
           <div className="space-y-6">
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
@@ -225,7 +299,6 @@ export default function GMPReportWorkspace({
                 ⚡ Desk Operations Control
               </h3>
               
-              {/* INTERFACE ELEMENT 1: DIVISIONAL DEPUTY DIRECTOR ASSIGNMENT BOX */}
               {currentStep === "DDD_TECHNICAL_ASSIGNMENT" && (
                 <div className="mb-4 animate-fadeIn">
                   <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
@@ -244,7 +317,6 @@ export default function GMPReportWorkspace({
                 </div>
               )}
 
-              {/* INTERFACE ELEMENT 2: IRSD DESK DISPATCH BOX */}
               {currentStep === "DDD_IRSD_INTAKE" && (
                 <div className="mb-4 animate-fadeIn">
                   <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
@@ -263,7 +335,6 @@ export default function GMPReportWorkspace({
                 </div>
               )}
 
-              {/* FEEDBACK ENTRY COMPONENT */}
               <div className="mb-4">
                 <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                   Official Minutes / Directives
@@ -277,7 +348,6 @@ export default function GMPReportWorkspace({
                 />
               </div>
 
-              {/* ACTION PACK VECTOR */}
               <div className="space-y-2">
                 {activeStepConfig.nextStepKey && (
                   <button

@@ -1,19 +1,20 @@
 // @/app/api/gmp-report/generate/route.ts
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { db } from "@/db";
+import { applications } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 // Initialize the Google Gen AI SDK
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-console.log('We have entered...');
-
 export async function POST(request: Request) {
-  console.log("Testing refresh")
   try {
     const payload = await request.json();
 
-    // 1. Destructure the structured form telemetry
+    // 1. Destructure the core telemetry needed for validation and prompts
     const {
+      application_id, 
       report_doc_number,
       inspection_dates,
       type_of_inspection,
@@ -33,6 +34,10 @@ export async function POST(request: Request) {
       final_recommendation,
     } = payload;
 
+    if (!application_id) {
+      throw new Error("Missing mandatory application_id parameter.");
+    }
+
     // 2. Engineer the regulatory prompt forcing compliance syntax
     const systemPrompt = `
 You are an expert NAFDAC Drug Evaluation and Research (DER) Directorate AI Assistant. Your task is to process raw field inspection logs and synthesize them into a formal, narrative-style NAFDAC Pharmaceutical GMP Inspection Report adhering to SOP Ref. No. DER-800-06.
@@ -44,7 +49,6 @@ CRITICAL RULES:
 4. Highlight technical vocabulary inline appropriately.
 `;
 
-    // Updated template to consume the destructured variables directly
     const userInstructions = `
 Generate the narrative report based on this raw checklist snapshot:
 
@@ -97,6 +101,37 @@ Structure the output cleanly with appropriate headings (<h3>), body text (<p cla
 
     const generatedText = response.text || "<p>Error generating narrative template.</p>";
 
+    // 4. Fetch current application record to safely merge JSONB parameters
+    const numericId = Number(application_id);
+    const appRecord = await db.query.applications.findFirst({
+      where: eq(applications.id, numericId)
+    });
+
+    if (!appRecord) {
+      throw new Error(`Application record with ID ${application_id} could not be resolved.`);
+    }
+
+    const currentDetails = (appRecord.details as any) || {};
+
+    // 5. Atomic database merge committing form data and text summary back into JSONB
+    await db.update(applications)
+      .set({
+        updatedAt: new Date(),
+        details: {
+          ...currentDetails,
+          // Spreading payload ensures that site_contact_details, historical_baseline, 
+          // and all future custom fields are cleanly preserved without pipeline structural leaks.
+          savedChecklistSnapshot: {
+            ...payload,
+            report_doc_number,
+            inspected_site_name
+          },
+          // Houses the pure text layout read by the Workspace Viewer
+          compiledReportHtml: generatedText
+        }
+      })
+      .where(eq(applications.id, numericId));
+
     // Return the clean HTML string to feed your workspace layout
     return NextResponse.json({ 
       success: true, 
@@ -111,5 +146,3 @@ Structure the output cleanly with appropriate headings (<h3>), body text (<p cla
     );
   }
 }
-
-//Force Change Sync
