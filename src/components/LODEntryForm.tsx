@@ -21,7 +21,7 @@ const CURRENT_USER = {
   role: "Divisional Deputy Director" // Standardized for QMS profile accountability
 };
 
-const DIVISION_OPTIONS = ["VMD", "PAD", "AFPD", "IRSD"];
+const DIVISION_OPTIONS = ["VMD", "PAD", "AFPD", "IRSD"]; // Standardized for QMS mapping
 const PREFIX = "NAFDAC/VMAP/";
 
 const RISK_CATEGORIES = [
@@ -118,7 +118,11 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && search.trim() !== "") {
+                if (e.key === 'Enter' && search.trim() !== "" && !showCreateOption) {
+                  // Block enter key submission if it matches a restricted historical reference option
+                  e.preventDefault();
+                  e.stopPropagation();
+                } else if (e.key === 'Enter' && search.trim() !== "") {
                   e.preventDefault();
                   e.stopPropagation();
                   handleSelect(search);
@@ -127,18 +131,22 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
-            {filteredOptions.map((opt: any, idx: number) => (
+            {/* Historical options: Styled as a warning and completely unclickable */}
+            {!showCreateOption && filteredOptions.map((opt: any, idx: number) => (
               <div 
                 key={`${opt.id || idx}`}
                 onClick={(e) => {
+                  // Explicitly freeze click interactions
+                  e.preventDefault();
                   e.stopPropagation(); 
-                  handleSelect(opt.name, opt);
                 }}
-                className="p-3 text-[10px] font-bold uppercase text-slate-600 hover:bg-blue-600 hover:text-white cursor-pointer"
+                className="p-3 text-[10px] font-black uppercase text-rose-700 bg-rose-50/50 cursor-not-allowed border-b border-rose-100/40 flex items-center justify-between select-none"
               >
-                {opt.name}
+                <span>{opt.name}</span>
+                <span className="text-[8px] tracking-widest bg-rose-200/60 px-2 py-0.5 rounded text-rose-800 font-extrabold">HISTORICAL REFERENCE ONLY</span>
               </div>
             ))}
+            
             {showCreateOption && (
               <div 
                 onClick={(e) => {
@@ -164,6 +172,13 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
   const [availableLines, setAvailableLines] = useState<any[]>(initialData?.productLines || []);
   const [existingApps, setExistingApps] = useState<{name: string}[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  // DB Tracking IDs for structural data mapping integrity
+  const [localCompanyId, setLocalCompanyId] = useState<number | null>(initialData?.localCompanyId || null);
+  const [foreignFactoryId, setForeignFactoryId] = useState<number | null>(initialData?.foreignFactoryId || null);
+
+  const isLocalAutofilled = !!localCompanyId;
+  const isForeignAutofilled = !!foreignFactoryId;
 
   useEffect(() => {
     async function loadHistory() {
@@ -213,6 +228,8 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     if (initialData && !initialized.current) {
       reset(defaultValues);
       setAvailableLines(initialData.productLines || []);
+      setLocalCompanyId(initialData.localCompanyId || null);
+      setForeignFactoryId(initialData.foreignFactoryId || null);
       initialized.current = true;
     }
   }, [initialData, reset, defaultValues]);
@@ -228,6 +245,8 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
 
   const handleGracefulExit = (path: string) => {
     reset(defaultValues);
+    setLocalCompanyId(null);
+    setForeignFactoryId(null);
     setShowSuccess(false);
     initialized.current = false;
     router.push(path);
@@ -243,7 +262,12 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
 
   const onSubmit = async (data: any) => {
     console.log("🚀 FORM SUBMITTED: Processing database commit step...");
-    const result = await submitLODApplication(data, CURRENT_USER.id, CURRENT_USER.name, CURRENT_USER.role);
+    const payload = {
+      ...data,
+      localCompanyId,
+      foreignFactoryId
+    };
+    const result = await submitLODApplication(payload, CURRENT_USER.id, CURRENT_USER.name, CURRENT_USER.role);
     
     if (result.success) {
       console.log("💾 Database write verified successfully!");
@@ -351,28 +375,95 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
-            <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><Building2 className="w-4 h-4" /> Local Applicant</h3>
-            {!isUpdate && (
+          {/* --- LOCAL APPLICANT CARD --- */}
+          <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 relative">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                <Building2 className="w-4 h-4" /> Local Applicant
+              </h3>
+              {isLocalAutofilled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalCompanyId(null);
+                    setValue("companyName", "");
+                    setValue("companyAddress", "");
+                    setValue("notificationEmail", "");
+                  }}
+                  className="text-[9px] font-black text-rose-600 bg-rose-50 px-3 py-1 rounded-full hover:bg-rose-100 transition-all flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear & Edit
+                </button>
+              )}
+            </div>
+
+            {!isUpdate && !isLocalAutofilled && (
               <CompanySearch category="LOCAL" onSelect={(company) => {
+                  setLocalCompanyId(company.id);
                   setValue("companyName", company.name, { shouldDirty: true });
                   setValue("companyAddress", company.address, { shouldDirty: true });
                   if (company.email) setValue("notificationEmail", company.email, { shouldDirty: true });
                 }}
               />
             )}
-            <input {...register("companyName")} placeholder="Company Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
-            <input {...register("companyAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
+            
+            <input 
+              {...register("companyName")} 
+              placeholder="Company Name" 
+              readOnly={isLocalAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none transition-all",
+                isLocalAutofilled ? "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+            <input 
+              {...register("companyAddress")} 
+              placeholder="Address" 
+              readOnly={isLocalAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm shadow-sm border-none transition-all",
+                isLocalAutofilled ? "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
             <div className="relative">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
-              <input {...register("notificationEmail")} placeholder="Email" className="w-full p-4 pl-10 rounded-xl text-sm font-bold text-blue-600 shadow-sm border-none" />
+              <input 
+                {...register("notificationEmail")} 
+                placeholder="Email" 
+                readOnly={isLocalAutofilled}
+                className={cn(
+                  "w-full p-4 pl-10 rounded-xl text-sm font-bold shadow-sm border-none transition-all",
+                  isLocalAutofilled ? "bg-slate-200/60 text-slate-400 cursor-not-allowed select-none" : "bg-white text-blue-600"
+                )} 
+              />
             </div>
           </div>
 
-          <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4">
-            <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2"><Globe className="w-4 h-4" /> Manufacturing Site</h3>
-            {!isUpdate && (
+          {/* --- MANUFACTURING SITE CARD --- */}
+          <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4 relative">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2">
+                <Globe className="w-4 h-4" /> Manufacturing Site
+              </h3>
+              {isForeignAutofilled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForeignFactoryId(null);
+                    setValue("facilityName", "");
+                    setValue("facilityAddress", "");
+                    setAvailableLines([]);
+                  }}
+                  className="text-[9px] font-black text-rose-600 bg-rose-50 px-3 py-1 rounded-full hover:bg-rose-100 transition-all flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear & Edit
+                </button>
+              )}
+            </div>
+
+            {!isUpdate && !isForeignAutofilled && (
               <CompanySearch category="FOREIGN" onSelect={(factory) => {
+                  setForeignFactoryId(factory.id);
                   setValue("facilityName", factory.name, { shouldDirty: true });
                   setValue("facilityAddress", factory.address, { shouldDirty: true });
                   setAvailableLines(factory.product_lines || []);
@@ -380,7 +471,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
               />
             )}
             
-            {/* Added Site Scope Option Selector */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
                 <Layers className="w-3 h-3" /> Site Scope Configuration
@@ -394,8 +484,24 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
               </select>
             </div>
 
-            <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
-            <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
+            <input 
+              {...register("facilityName")} 
+              placeholder="Factory Name" 
+              readOnly={isForeignAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none transition-all",
+                isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+            <input 
+              {...register("facilityAddress")} 
+              placeholder="Address" 
+              readOnly={isForeignAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm shadow-sm border-none transition-all",
+                isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
             <FileUpload 
               label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} 
               onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true, shouldValidate: true })} 

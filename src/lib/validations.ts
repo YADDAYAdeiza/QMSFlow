@@ -9,11 +9,13 @@ export const lodFormSchema = z.object({
   // Local Company
   companyName: z.string().min(1, "Local company name is required"),
   companyAddress: z.string().min(1, "Local address is required"),
+  
+  // Updated: Made optional but strictly validated if provided
   notificationEmail: z.string()
-    .min(1, "Notification email is required")
-    .email("Please enter a valid email address")
     .trim()
-    .toLowerCase(),
+    .toLowerCase()
+    .optional()
+    .or(z.string().email("Please enter a valid email address").or(z.literal(""))),
 
   // Foreign Factory
   facilityName: z.string().min(1, "Foreign factory name is required"),
