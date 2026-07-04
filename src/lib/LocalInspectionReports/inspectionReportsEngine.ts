@@ -38,7 +38,6 @@ export async function executeInspectionReportTransition({
     } else if (direction === "REWORK") {
       targetStepKey = activeStep.prevStepKey;
     } else {
-      // RECALL: Pulls it back to the current step from the next step
       targetStepKey = currentStepKey; 
     }
 
@@ -55,10 +54,31 @@ export async function executeInspectionReportTransition({
       const oldDetails = (app.details as any) || {};
       const timestamp = new Date();
 
+      // --- 🌟 STRATEGIC INTERCEPTOR FOR TERMINAL STATUS FORK 🌟 ---
+      let finalStatusLabel = nextStep.statusLabel;
+      let finalTitle = nextStep.title;
+
+      // If we are moving FORWARD from the Director's Final Sign-Off step:
+      if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
+        const recommendation = oldDetails.savedChecklistSnapshot?.final_recommendation || "PENDING";
+        
+        if (recommendation === "PENDING") {
+          finalStatusLabel = "AWAITING_CAPA";
+          finalTitle = "Applicant Notification Hub - CAPA Request Issued";
+          
+          // Execute your notification dispatcher safely inside the runtime
+          console.log(`[QMS MAIL]: Dispatching CAPA directive to ${oldDetails.notificationEmail || 'applicant'}`);
+        } else {
+          finalStatusLabel = "APPROVED";
+          finalTitle = "Applicant Notification Hub - Final Approval Certified";
+        }
+      }
+      // -------------------------------------------------------------
+
       // 3. Build standardized, title-compliant audit notation
       const systemLogEntry = {
         fromStep: activeStep.title,
-        toStep: nextStep.title,
+        toStep: finalTitle,
         actorName: actingUserName,
         actorId: actingUserId,
         assignedToId: targetUserId,
@@ -70,13 +90,12 @@ export async function executeInspectionReportTransition({
       // 4. Update application state matching JSON config parameters
       await tx.update(applications)
         .set({
-          currentPoint: nextStep.title, // 'Divisional Deputy Director' compliant title matches
-          status: nextStep.statusLabel,
+          currentPoint: finalTitle, 
+          status: finalStatusLabel, // Dynamically intercepted for PENDING vs PASSED
           updatedAt: timestamp,
           details: {
             ...oldDetails,
             comments: [...(oldDetails.comments || []), systemLogEntry],
-            // Kept separate to prevent facility verification overlaps
             inspectionWorkflowMeta: {
               currentStepKey: targetStepKey,
               currentOwnerId: targetUserId,
@@ -97,9 +116,9 @@ export async function executeInspectionReportTransition({
       // 6. Start new QMS timing interval customized to current step definitions
       await tx.insert(qmsTimelines).values({
         applicationId,
-        point: nextStep.title,
+        point: finalTitle,
         division: nextStep.division,
-        staffId: targetUserId || actingUserId, // If finalized or recalled, maps cleanly
+        staffId: targetUserId || actingUserId,
         startTime: timestamp,
       });
 
@@ -108,7 +127,7 @@ export async function executeInspectionReportTransition({
       revalidatePath("/dashboard/staff");
       revalidatePath("/dashboard/director");
 
-      return { success: true, arrivedAt: targetStepKey };
+      return { success: true, arrivedAt: targetStepKey, currentStatus: finalStatusLabel };
     });
   } catch (error: any) {
     console.error("INSPECTION_ROUTING_ENGINE_ERROR:", error);

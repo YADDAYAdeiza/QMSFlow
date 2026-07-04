@@ -1,16 +1,15 @@
-// @/components/LocalInspectionReports/GMPReportWorkspace.tsx
 "use client";
+// @/components/LocalInspectionReports/GMPReportWorkspace.tsx
 
-import InspectionChecklistForm from "./InspectionChecklistForm";  
-
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
+import InspectionChecklistForm from "./InspectionChecklistForm";  
 
 interface CommentTrailItem {
   text: string;
-  action: "FORWARD" | "REWORK";
+  action: "FORWARD" | "REWORK" | "RECALL";
   fromStep: string;
   toStep: string;
   actorName: string;
@@ -49,6 +48,7 @@ export default function GMPReportWorkspace({
   // Real-time audit history log tracking
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
   const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
+  const [checklistSnapshot, setChecklistSnapshot] = useState<any>(initialChecklistSnapshot);
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
@@ -65,15 +65,18 @@ export default function GMPReportWorkspace({
     qualification_validation_score: 90,
     material_management_score: 100,
     laboratory_control_score: 100,
+    final_recommendation: "PENDING",
     observations: []
   };
 
-  const checklistFormInitialData = initialChecklistSnapshot || defaultChecklistData;
+  const checklistFormInitialData = checklistSnapshot || defaultChecklistData;
 
   const handleAICorrelationCompile = async (completedFormPayload: any) => {
     try {
       console.log("Transmitting payload to synthesis engine...");
-      // Kept path matched exactly to your local LocalInspectionReports route setup
+      // Cache the local checklist snapshot state so it feeds live into the router transition trigger payload
+      setChecklistSnapshot(completedFormPayload);
+
       const res = await fetch("/api/LocalInspectionReports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -107,6 +110,28 @@ export default function GMPReportWorkspace({
 
     setIsSubmitting(true);
     try {
+      // 1. Intercept Terminal Steps to sync state and fire notifications via API route
+      if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
+        console.log("Routing via structural endpoint handler matrix...");
+        const transitionRes = await fetch("/api/LocalInspectionReports", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            applicationId,
+            currentStepKey: currentStep,
+            direction,
+            companyName,
+            checklistSnapshot: checklistFormInitialData
+          })
+        });
+
+        const transitionData = await transitionRes.json();
+        if (!transitionRes.ok || !transitionData.success) {
+          throw new Error(transitionData.error || "Integrated endpoint transition rejected.");
+        }
+      }
+
+      // 2. Commit standard state change metadata engine transaction updates
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
@@ -119,9 +144,15 @@ export default function GMPReportWorkspace({
 
       if (res.success && "arrivedAt" in res && res.arrivedAt) {
         const nextStepKey = res.arrivedAt as keyof typeof inspectionReportWorkflow.steps;
-        const targetStepTitle = inspectionReportWorkflow.steps[nextStepKey].title;
         
-        // 1. Construct the explicit minute block matching your exact JSONB architecture
+        // Account for final fork interceptor titles
+        let targetStepTitle = inspectionReportWorkflow.steps[nextStepKey]?.title || "Archived Desk";
+        if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
+          targetStepTitle = checklistFormInitialData?.final_recommendation === "PENDING"
+            ? "Applicant Notification Hub - CAPA Request Issued"
+            : "Applicant Notification Hub - Final Approval Certified";
+        }
+
         const newMinute: CommentTrailItem = {
           text: remarks,
           action: direction,
@@ -131,17 +162,12 @@ export default function GMPReportWorkspace({
           timestamp: new Date().toISOString()
         };
 
-        // 2. Prepend local state instantly (Optimistic update)
         setCommentsList(prev => [newMinute, ...prev]);
-        
         alert(`Dossier successfully routed to: ${targetStepTitle}`);
         
-        // 3. Purge inputs and set destination step coordinates
         setRemarks("");
         setSelectedStaff("");
         setCurrentStep(nextStepKey);
-        
-        // 4. Force Next.js data cache invalidation to pull fresh rows down
         router.refresh(); 
       } else {
         const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing error";
@@ -185,7 +211,7 @@ export default function GMPReportWorkspace({
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white mb-2 shadow-sm uppercase tracking-wider">
-                ⚙️ Status: {activeStepConfig.statusLabel}
+                ⚙️ Status: {activeStepConfig?.statusLabel || "Processing"}
               </span>
               <h1 className="text-2xl font-bold tracking-tight">{companyName}</h1>
               <p className="text-slate-300 text-xs mt-1">
@@ -196,10 +222,10 @@ export default function GMPReportWorkspace({
             
             <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 max-w-sm">
               <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Current Custody Desk</p>
-              <p className="text-sm font-bold text-emerald-400 mt-0.5">{activeStepConfig.title}</p>
+              <p className="text-sm font-bold text-emerald-400 mt-0.5">{activeStepConfig?.title}</p>
               <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
-                <p>Division: <span className="font-bold text-white">{activeStepConfig.division}</span></p>
-                <p>Authorized Actor: <span className="italic text-white">{activeStepConfig.role}</span></p>
+                <p>Division: <span className="font-bold text-white">{activeStepConfig?.division}</span></p>
+                <p>Authorized Actor: <span className="italic text-white">{activeStepConfig?.role}</span></p>
               </div>
             </div>
           </div>
@@ -260,7 +286,6 @@ export default function GMPReportWorkspace({
                     const isRework = item.action === "REWORK";
                     return (
                       <div key={index} className="relative text-xs">
-                        {/* Timeline Icon Node */}
                         <span className={`absolute -left-[21px] top-1 flex h-[13px] w-[13px] rounded-full border-2 bg-white ${isRework ? "border-rose-500" : "border-emerald-500"}`} />
                         
                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 shadow-2xs">
@@ -335,6 +360,17 @@ export default function GMPReportWorkspace({
                 </div>
               )}
 
+              {/* Contextual Banner for the Director's Final Adjudication */}
+              {currentStep === "DIRECTOR_FINAL_SIGN_OFF" && (
+                <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed animate-fadeIn">
+                  <strong>📋 Adjudication Check:</strong> The checklist snapshot current recommendation reads:{" "}
+                  <span className="font-bold underline text-amber-800">
+                    {checklistFormInitialData?.final_recommendation || "PENDING"}
+                  </span>. 
+                  Signing off will mutate the application status profile and dispatch notification files.
+                </div>
+              )}
+
               <div className="mb-4">
                 <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                   Official Minutes / Directives
@@ -343,32 +379,80 @@ export default function GMPReportWorkspace({
                   rows={4}
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}
-                  placeholder={`Provide dynamic feedback or instructions as ${activeStepConfig.role}...`}
+                  placeholder={
+                    currentStep === "DIRECTOR_FINAL_SIGN_OFF"
+                      ? (checklistFormInitialData?.final_recommendation === "PENDING"
+                          ? "Provide official directive text to issue with the CAPA requirement..."
+                          : "Enter validation clearance minutes for final certified sign-off...")
+                      : `Provide dynamic feedback or instructions as ${activeStepConfig?.role || "Reviewer"}...`
+                  }
                   className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
                 />
               </div>
 
               <div className="space-y-2">
-                {activeStepConfig.nextStepKey && (
-                  <button
-                    type="button"
-                    disabled={isSubmitting || (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)}
-                    onClick={() => handleTransition("FORWARD")}
-                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
-                  >
-                    {isSubmitting ? "Routing..." : currentStep.includes("DDD") ? "✍️ Sign Minutes & Forward Desk" : "🚀 Dispatch Dossier Forward"}
-                  </button>
-                )}
+                {currentStep === "DIRECTOR_FINAL_SIGN_OFF" ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => {
+                        const recommendation = checklistFormInitialData?.final_recommendation || "PENDING";
+                        const msg = recommendation === "PENDING"
+                          ? "Confirm sign-off on inspection report and dispatch CAPA Directive to applicant profile?"
+                          : "Confirm absolute final certification and release of official GMP Certificate?";
+                        if (window.confirm(msg)) handleTransition("FORWARD");
+                      }}
+                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border ${
+                        checklistFormInitialData?.final_recommendation === "PENDING"
+                          ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
+                          : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
+                      }`}
+                    >
+                      {isSubmitting 
+                        ? "Processing Action..." 
+                        : checklistFormInitialData?.final_recommendation === "PENDING"
+                        ? "✍️ Approve & Issue CAPA Directive"
+                        : "✍️ Concur & Grant Final Approval"}
+                    </button>
 
-                {activeStepConfig.prevStepKey && (
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() => handleTransition("REWORK")}
-                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-xs font-bold rounded-lg transition-all text-center"
-                  >
-                    ↩️ Return to Previous Desk for Rework
-                  </button>
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => {
+                        if (window.confirm("Are you sure you want to revert this report to the technical pool desk for revision?")) {
+                          handleTransition("REWORK");
+                        }
+                      }}
+                      className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-lg transition-all text-center"
+                    >
+                      ↩️ Rework / Send Back to Technical Desk
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {activeStepConfig?.nextStepKey && (
+                      <button
+                        type="button"
+                        disabled={isSubmitting || (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)}
+                        onClick={() => handleTransition("FORWARD")}
+                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                      >
+                        {isSubmitting ? "Routing..." : currentStep.includes("DDD") ? "✍️ Sign Minutes & Forward Desk" : "🚀 Dispatch Dossier Forward"}
+                      </button>
+                    )}
+
+                    {activeStepConfig?.prevStepKey && (
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => handleTransition("REWORK")}
+                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-xs font-bold rounded-lg transition-all text-center"
+                      >
+                        ↩️ Return to Previous Desk for Rework
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
 
