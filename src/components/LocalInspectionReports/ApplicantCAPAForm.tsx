@@ -15,6 +15,9 @@ export interface CAPALineItem {
   responsibility: string;
   status: "Open" | "Pending Verification" | "Resolved";
   uploadedEvidenceUrl?: string; 
+  // Add properties to interface definition
+  inspectorStatus?: "Acceptable" | "Rework Required";
+  inspectorRemarks?: string;
 }
 
 interface ApplicantCAPAFormProps {
@@ -39,7 +42,6 @@ export default function ApplicantCAPAForm({
   onSave
 }: ApplicantCAPAFormProps) {
   
-  // Clean translation utility to avoid sample defaults overriding explicit inputs
   const parseInitialState = (): CAPALineItem[] => {
     if (initialItems && initialItems.length > 0) return initialItems;
     if (initialObservations && initialObservations.length > 0) {
@@ -61,11 +63,9 @@ export default function ApplicantCAPAForm({
 
   const [capaItems, setCapaItems] = useState<CAPALineItem[]>(parseInitialState);
   const [responsiblePerson, setResponsiblePerson] = useState({ name: "", date: "" });
-  // ✅ FIXED: Removed the accidental space here so the variable parses correctly
   const [managingDirector, setManagingDirector] = useState({ name: "", date: "" });
   const [isUploading, setIsUploading] = useState<string | null>(null);
 
-  // Tracking length primitives prevents reference re-renders from bubbling into depth errors
   useEffect(() => {
     setCapaItems(parseInitialState());
   }, [initialObservations.length, initialItems.length]);
@@ -193,22 +193,22 @@ export default function ApplicantCAPAForm({
           </p>
           <p>
             During the audit, some observations bordering on different aspects of GMP were made. These observations had 
-            earlier been discussed with your team during the course of the inspection and exit meeting. Please find 
-            forwarded the full inspection report for your attention.
+            Earlier been discussed with your team during the course of the inspection and exit meeting. Please find 
+            Forwarded the full inspection report for your attention.
           </p>
           <p>
             In view of the above, you are expected to address all observations by developing a Corrective and Preventive 
             Action (CAPA) plan, for each include a description of the corrective actions implemented or planned to be 
-            implemented, and the date of completion or target date for completion. In addition, for observations classified 
-            as <span className="font-bold">"major"</span> or <span className="font-bold">"critical"</span>, supporting documentation should be submitted with the response as objective evidence of completion of corrective actions.
+            Implemented, and the date of completion or target date for completion. In addition, for observations classified 
+            As <span className="font-bold">"major"</span> or <span className="font-bold">"critical"</span>, supporting documentation should be submitted with the response as objective evidence of completion of corrective actions.
           </p>
           <p>
             Please note that, the acceptability of corrective actions will be assessed through evaluation of the response to 
-            each observation through a desk assessment of your CAPA plan which would be verified during future GMP inspections.
+            Each observation through a desk assessment of your CAPA plan which would be verified during future GMP inspections.
           </p>
-          <p className="font-semibold text-slate-700 print:text-black">
-            Find highlighted below the template for submission of your CAPA plan which must be submitted to the 
-            undersigned within thirty (30) days of receipt of this letter.
+          <p>
+            Please find highlighted below the template for submission of your CAPA plan which must be submitted to the 
+            Undersigned within thirty (30) days of receipt of this letter.
           </p>
         </div>
 
@@ -248,6 +248,16 @@ export default function ApplicantCAPAForm({
                       {/* Read-Only Inspection Observations */}
                       <td className="p-2.5 bg-slate-50/40 print:bg-transparent print:border-r print:border-slate-300">
                         <p className="text-slate-800 font-medium leading-relaxed whitespace-pre-wrap print:text-black">{item.observation}</p>
+                        
+                        {/* Display evaluation comments directly below the observation if they exist */}
+                        {item.inspectorRemarks && (
+                          <div className="mt-2 p-2 bg-rose-50 border border-rose-100 rounded text-[11px] text-rose-900 print:border-slate-400">
+                            <p className="font-bold text-[9px] uppercase tracking-wide text-rose-700 print:text-black">
+                              📋 VMAP Evaluation Desk Remarks ({item.inspectorStatus || "Rework Needed"}):
+                            </p>
+                            <p className="italic mt-0.5 whitespace-pre-wrap">{item.inspectorRemarks}</p>
+                          </div>
+                        )}
                       </td>
 
                       {/* Root Cause Analysis Text Area */}

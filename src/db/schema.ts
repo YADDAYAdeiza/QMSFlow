@@ -212,3 +212,15 @@ export const localInspectionReportsRelations = relations(localInspectionReports,
   company: one(companies, { fields: [localInspectionReports.companyId], references: [companies.id] }),
   inspector: one(users, { fields: [localInspectionReports.inspectorId], references: [users.id] }),
 }));
+
+// Add this directly inside src/db/schema.ts
+export const capaSubmissions = pgTable("capa_submissions", {
+  id: serial("id").primaryKey(),
+  application_id: integer("application_id").references(() => applications.id),
+  ref_number: varchar("ref_number", { length: 255 }),
+  status: varchar("status", { length: 50 }).default("PENDING_VERIFICATION"),
+  capa_items: jsonb("capa_items"),
+  signatures: jsonb("signatures"),
+  created_at: text("created_at"), 
+  submitted_at: text("submitted_at"),
+});

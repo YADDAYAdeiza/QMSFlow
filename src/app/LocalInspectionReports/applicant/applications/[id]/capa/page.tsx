@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import ApplicantCAPAForm from "@/components/LocalInspectionReports/ApplicantCAPAForm";
+import ApplicantCAPAForm, { CAPALineItem } from "@/components/LocalInspectionReports/ApplicantCAPAForm";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -13,6 +13,9 @@ export default function DynamicCapaPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reportSnapshot, setReportSnapshot] = useState<any>(null);
+  
+  // State tracking for existing submission statuses and loaded items
+  const [capaSubmissionData, setCapaSubmissionData] = useState<any>(null);
 
   // 1. Resolve the asynchronous route parameters
   useEffect(() => {
@@ -29,7 +32,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
     resolveParams();
   }, [params]);
 
-  // 2. Fetch the live inspection payload once the ID is resolved
+  // 2. Fetch both the application data AND existing CAPA submissions if present
   useEffect(() => {
     async function fetchInspectionData() {
       if (!applicationId) return;
@@ -38,20 +41,33 @@ export default function DynamicCapaPage({ params }: PageProps) {
         setLoading(true);
         setErrorMsg(null);
 
-        const { data, error } = await supabase
+        const appIdNum = parseInt(applicationId, 10);
+
+        // Fetch Master Application Lifecycle data
+        const { data: appData, error: appError } = await supabase
           .from("applications")
           .select("*")
-          .eq("id", parseInt(applicationId, 10))
+          .eq("id", appIdNum)
           .maybeSingle();
 
-        if (error) throw error;
-        if (!data) {
+        if (appError) throw appError;
+        if (!appData) {
           throw new Error(`No local inspection record found matching Application ID: ${applicationId}`);
         }
+        setReportSnapshot(appData);
 
-        setReportSnapshot(data);
+        // Fetch existing CAPA submission if it exists
+        const { data: capaData, error: capaError } = await supabase
+          .from("capa_submissions")
+          .select("*")
+          .eq("application_id", appIdNum)
+          .maybeSingle();
+
+        if (capaError) throw capaError;
+        setCapaSubmissionData(capaData);
+
       } catch (err: any) {
-        console.error("Error retrieving inspection snapshot:", err);
+        console.error("Error retrieving inspection snapshot data:", err);
         setErrorMsg(err.message || "Failed to resolve inspection data stream from backend.");
       } finally {
         setLoading(false);
@@ -88,14 +104,13 @@ export default function DynamicCapaPage({ params }: PageProps) {
 
       let resultError;
 
-      // Clean, native structural mapping directly matching your streamlined Postgres table
       const rowData = {
         application_id: appIdNum,
         ref_number: payload.refNumber,
-        capa_items: payload.capaItems, // Natively maps to your cleaned table schema
+        capa_items: payload.capaItems,
         signatures: payload.signatures,
         submitted_at: payload.submittedAt,
-        status: "PENDING_VERIFICATION"
+        status: "PENDING_VERIFICATION" 
       };
 
       if (existingSubmission) {
@@ -113,7 +128,24 @@ export default function DynamicCapaPage({ params }: PageProps) {
 
       if (resultError) throw resultError;
 
+      // ==========================================
+      // SYNCHRONIZE MASTER APPLICATIONS TABLE
+      // ==========================================
+      const { error: masterUpdateError } = await supabase
+        .from("applications")
+        .update({
+          status: "CAPA_SUBMITTED_PENDING", 
+          current_point: "Divisional Deputy Director CAPA Verification", 
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", appIdNum);
+
+      if (masterUpdateError) {
+        console.error("Warning: CAPA logged but Master Application Tracker failed to sync:", masterUpdateError);
+      }
+
       alert("🚀 CAPA Ledger successfully locked and transmitted to VMAP infrastructure!");
+      window.location.reload();
     } catch (error: any) {
       console.error("Database transmission failure detail:", error);
       alert(`Database Transmission Failure: ${error.message || "Review log matrix."}`);
@@ -153,29 +185,91 @@ export default function DynamicCapaPage({ params }: PageProps) {
     ? `${checklistSnapshot.vicinity_assessment}, Nigeria` 
     : "Registered Manufacturing Facility Site, Nigeria";
 
-  const rawObservations = checklistSnapshot.observations || [];
-  const initialObservations = rawObservations.map((obs: any) => ({
-    severity: (obs.severity === "critical" ? "Critical" : obs.severity === "major" ? "Major" : "Other") as "Critical" | "Major" | "Other",
-    text: obs.text || "No descriptive text provided in field inspection."
-  }));
+  // Determine workflow states using synchronized master lookup states
+  const isReworkMode = reportSnapshot.status === "CAPA_REWORK_REQUIRED" || capaSubmissionData?.status === "REJECTED_REWORK";
+  const isPendingVerification = capaSubmissionData?.status === "PENDING_VERIFICATION";
+  const isPassed = capaSubmissionData?.status === "VERIFIED_PASSED";
+  
+  // Form should unlock if it's sitting in verification or already passed entirely
+  const shouldLockForm = isPendingVerification || isPassed;
+
+  // Setup variable containers to cleanly handle target properties conditional splitting
+  let finalObservations: { severity: "Critical" | "Major" | "Other"; text: string }[] | undefined = undefined;
+  let finalItems: CAPALineItem[] | undefined = undefined;
+
+  if (capaSubmissionData?.capa_items) {
+    // SCENARIO A: A saved record exists. Map fully populated items directly into finalItems
+    const rawCapaItems = capaSubmissionData.capa_items;
+    const parsedItems = typeof rawCapaItems === "string" ? JSON.parse(rawCapaItems) : rawCapaItems;
+    
+    finalItems = parsedItems.map((item: any, index: number) => ({
+      id: item.id || `obs_${index}`,
+      severity: item.severity || "Other",
+      observation: item.observation || item.text || "No descriptive text provided.",
+      rootCause: item.rootCause || "",
+      correction: item.correction || "",
+      correctiveAction: item.correctiveAction || item.correction || "",
+      indicators: item.indicators || item.preventiveAction || "", 
+      timeline: item.timeline || "",
+      responsibility: item.responsibility || "",
+      status: item.status || "Open",
+      uploadedEvidenceUrl: item.uploadedEvidenceUrl || item.evidenceUrl || "",
+      // Fix 1: Explicitly pass down the evaluation keys parsed from the database
+      inspectorStatus: item.inspectorStatus || "Acceptable",
+      inspectorRemarks: item.inspectorRemarks || ""
+    }));
+  } else {
+    // SCENARIO B: Brand new submission workspace. Build clean snapshot arrays for finalObservations
+    const rawObservations = checklistSnapshot.observations || [];
+    finalObservations = rawObservations.map((obs: any) => ({
+      severity: (obs.severity === "critical" ? "Critical" : obs.severity === "major" ? "Major" : "Other") as "Critical" | "Major" | "Other",
+      text: obs.text || "No descriptive text provided in field inspection."
+    }));
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 print:bg-white print:p-0">
       <div className="max-w-6xl mx-auto mb-6 print:hidden">
         <h1 className="text-xl font-bold text-slate-900">CAPA Submission Desk</h1>
-        <p className="text-xs text-slate-500 mt-1">
+        
+        {/* Banner notification alert system */}
+        {isReworkMode && (
+          <div className="mt-4 p-4 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl text-xs font-semibold shadow-sm animate-pulse">
+            ⚠️ Attention Required: This CAPA checklist has been returned by the Divisional Deputy Director for rework. 
+            Please review the targeted comments appended to each item below, update your remedies, and resubmit.
+          </div>
+        )}
+
+        {isPendingVerification && (
+          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-xs font-semibold shadow-sm">
+            ⏳ Verification Pending: This dossier is currently locked and awaiting review inside the Divisional Deputy Director verification queue.
+          </div>
+        )}
+
+        {isPassed && (
+          <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl text-xs font-semibold shadow-sm">
+            ✅ Verification Complete: This CAPA framework has been fully verified and passed by the Directorate. Form entries are closed.
+          </div>
+        )}
+
+        <p className="text-xs text-slate-500 mt-3">
           Processing Application Entry: <span className="font-mono bg-slate-200 px-1 py-0.5 rounded text-slate-800">ID {applicationId}</span> — Current Tracking State: <span className="font-mono text-emerald-700 font-bold">{reportSnapshot.status}</span>
         </p>
       </div>
 
-      <ApplicantCAPAForm
-        applicationId={applicationId}
-        refNumber={refNumber}
-        companyName={companyName}
-        companyAddress={companyAddress}
-        initialObservations={initialObservations}
-        onSave={handleCapaSubmit}
-      />
+      {/* Wrap the form in a native fieldset element to handle UI lockouts cleanly */}
+      <fieldset disabled={shouldLockForm} className="disabled:opacity-85 disabled:pointer-events-none">
+        <ApplicantCAPAForm
+          applicationId={applicationId}
+          refNumber={refNumber}
+          companyName={companyName}
+          companyAddress={companyAddress}
+          initialObservations={finalObservations}
+          initialItems={finalItems}
+          isReadOnly={shouldLockForm}
+          onSave={handleCapaSubmit}
+        />
+      </fieldset>
     </div>
   );
 }
