@@ -13,8 +13,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reportSnapshot, setReportSnapshot] = useState<any>(null);
-  
-  // State tracking for existing submission statuses and loaded items
   const [capaSubmissionData, setCapaSubmissionData] = useState<any>(null);
 
   // 1. Resolve the asynchronous route parameters
@@ -144,6 +142,39 @@ export default function DynamicCapaPage({ params }: PageProps) {
         console.error("Warning: CAPA logged but Master Application Tracker failed to sync:", masterUpdateError);
       }
 
+      // ==========================================
+      // DISPATCH MAIL NOTIFICATION TO VALIDATION DESK
+      // ==========================================
+      try {
+        await fetch("/api/LocalInspectionReports/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: "adeiza.yusuf@nafdac.gov.ng", // Adjust to target administrative email
+            cc:"adeiza.nafdac.gov.ng",
+            subject: `🚨 Action Required: CAPA Submission for Application ID ${payload.applicationId}`,
+            html: `
+              <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
+                <h2 style="color: #047857; margin-top: 0;">New CAPA Ledger Submitted</h2>
+                <p>A Corrective and Preventive Action (CAPA) framework has been locked and securely uploaded to the VMAP infrastructure for audit validation.</p>
+                <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+                <p><strong>Application ID:</strong> ${payload.applicationId}</p>
+                <p><strong>Reference Number:</strong> ${payload.refNumber}</p>
+                <p><strong>Company Name:</strong> ${companyName}</p>
+                <p><strong>Submission Time:</strong> ${new Date(payload.submittedAt).toLocaleString()}</p>
+                <br />
+                <a href="${window.location.origin}/inspector/capa-verify/${payload.applicationId}" 
+                   style="background-color: #047857; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                   Open Adjudication Module
+                </a>
+              </div>
+            `,
+          }),
+        });
+      } catch (emailErr) {
+        console.error("Non-blocking notification system routing anomaly:", emailErr);
+      }
+
       alert("🚀 CAPA Ledger successfully locked and transmitted to VMAP infrastructure!");
       window.location.reload();
     } catch (error: any) {
@@ -174,7 +205,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
     );
   }
 
-  // Drilling into the payload's saved snapshot details
   const snapshotDetails = reportSnapshot.details || {};
   const checklistSnapshot = snapshotDetails.savedChecklistSnapshot || {};
   
@@ -185,20 +215,15 @@ export default function DynamicCapaPage({ params }: PageProps) {
     ? `${checklistSnapshot.vicinity_assessment}, Nigeria` 
     : "Registered Manufacturing Facility Site, Nigeria";
 
-  // Determine workflow states using synchronized master lookup states
   const isReworkMode = reportSnapshot.status === "CAPA_REWORK_REQUIRED" || capaSubmissionData?.status === "REJECTED_REWORK";
   const isPendingVerification = capaSubmissionData?.status === "PENDING_VERIFICATION";
   const isPassed = capaSubmissionData?.status === "VERIFIED_PASSED";
-  
-  // Form should unlock if it's sitting in verification or already passed entirely
   const shouldLockForm = isPendingVerification || isPassed;
 
-  // Setup variable containers to cleanly handle target properties conditional splitting
   let finalObservations: { severity: "Critical" | "Major" | "Other"; text: string }[] | undefined = undefined;
   let finalItems: CAPALineItem[] | undefined = undefined;
 
   if (capaSubmissionData?.capa_items) {
-    // SCENARIO A: A saved record exists. Map fully populated items directly into finalItems
     const rawCapaItems = capaSubmissionData.capa_items;
     const parsedItems = typeof rawCapaItems === "string" ? JSON.parse(rawCapaItems) : rawCapaItems;
     
@@ -214,12 +239,10 @@ export default function DynamicCapaPage({ params }: PageProps) {
       responsibility: item.responsibility || "",
       status: item.status || "Open",
       uploadedEvidenceUrl: item.uploadedEvidenceUrl || item.evidenceUrl || "",
-      // Fix 1: Explicitly pass down the evaluation keys parsed from the database
       inspectorStatus: item.inspectorStatus || "Acceptable",
       inspectorRemarks: item.inspectorRemarks || ""
     }));
   } else {
-    // SCENARIO B: Brand new submission workspace. Build clean snapshot arrays for finalObservations
     const rawObservations = checklistSnapshot.observations || [];
     finalObservations = rawObservations.map((obs: any) => ({
       severity: (obs.severity === "critical" ? "Critical" : obs.severity === "major" ? "Major" : "Other") as "Critical" | "Major" | "Other",
@@ -232,7 +255,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
       <div className="max-w-6xl mx-auto mb-6 print:hidden">
         <h1 className="text-xl font-bold text-slate-900">CAPA Submission Desk</h1>
         
-        {/* Banner notification alert system */}
         {isReworkMode && (
           <div className="mt-4 p-4 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl text-xs font-semibold shadow-sm animate-pulse">
             ⚠️ Attention Required: This CAPA checklist has been returned by the Divisional Deputy Director for rework. 
@@ -257,7 +279,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
         </p>
       </div>
 
-      {/* Wrap the form in a native fieldset element to handle UI lockouts cleanly */}
       <fieldset disabled={shouldLockForm} className="disabled:opacity-85 disabled:pointer-events-none">
         <ApplicantCAPAForm
           applicationId={applicationId}

@@ -68,16 +68,14 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
 
         setSubmissionData(data);
         
-        // Parse the native JSONB capa_items array
         const rawItems = Array.isArray(data.capa_items) 
           ? data.capa_items 
           : JSON.parse(data.capa_items || "[]");
         
-        // Initialize inspector keys cleanly using Nullish Coalescing (??)
         const initializedItems = rawItems.map((item: any) => ({
-        ...item,
-        inspectorStatus: item.inspectorStatus ?? "Acceptable",
-        inspectorRemarks: item.inspectorRemarks ?? "" 
+          ...item,
+          inspectorStatus: item.inspectorStatus ?? "Acceptable",
+          inspectorRemarks: item.inspectorRemarks ?? "" 
         }));
         
         setCapaItems(initializedItems);
@@ -85,24 +83,20 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
         console.error("Fetch error:", err);
         setErrorMsg(err.message || "Failed to sync submission ledger stream.");
       } finally {
-        nodeLint: setLoading(false);
+        setLoading(false);
       }
     }
 
     fetchCapaSubmission();
   }, [applicationId]);
 
-  // Handle updates to individual line-item verification states
   const handleItemEvaluation = (idx: number, field: "inspectorStatus" | "inspectorRemarks", value: string) => {
     setCapaItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
   };
 
-  // Transmit the final adjudication batch to the database
-  // Transmit the final adjudication batch to the database
   const handleFinalAdjudication = async (finalLifecycleStatus: "VERIFIED_PASSED" | "REJECTED_REWORK") => {
     if (!applicationId) return;
     
-    // Map CAPA status to the master Application Table workflow status names
     const appStatusMap = {
       VERIFIED_PASSED: "CAPA_APPROVED",
       REJECTED_REWORK: "CAPA_REWORK_REQUIRED"
@@ -111,8 +105,7 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
     try {
       setSubmitting(true);
 
-      // 1. Update the ledger entry with the evaluation schema details
-      // Strictly matching your schema properties: only 'capa_items' and 'status'
+      // 1. Update the ledger entry with evaluation schema details
       const { error: capaError } = await supabase
         .from("capa_submissions")
         .update({
@@ -123,7 +116,7 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
 
       if (capaError) throw capaError;
 
-      // 2. Synchronize the core Application status to keep the workflow moving
+      // 2. Synchronize the core Application status
       const { error: appError } = await supabase
         .from("applications")
         .update({
@@ -133,6 +126,57 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
         .eq("id", parseInt(applicationId, 10));
 
       if (appError) throw appError;
+
+      // ==========================================
+      // DISPATCH MAIL NOTIFICATION BACK TO APPLICANT
+      // ==========================================
+      try {
+        const isPassed = finalLifecycleStatus === "VERIFIED_PASSED";
+        // Fallback fields matching database schema naming or static definitions
+        const applicantEmail = submissionData.applicant_email || "applicant@company.com"; 
+
+        const emailSubject = isPassed 
+          ? `✅ CAPA Approved & Closed — Application ID: ${applicationId}`
+          : `⚠️ CAPA Rework Required — Application ID: ${applicationId}`;
+
+        const emailBody = isPassed 
+          ? `
+              <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
+                <h2 style="color: #047857; margin-top: 0;">CAPA Verification Complete</h2>
+                <p>Dear Stakeholder,</p>
+                <p>We are pleased to inform you that your Corrective and Preventive Action (CAPA) framework has been fully verified and passed by the Directorate.</p>
+                <p><strong>Reference File:</strong> ${submissionData.ref_number}</p>
+                <p>The ledger is now officially closed, and your application workflow has progressed into the next operational phase.</p>
+              </div>
+            `
+          : `
+              <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
+                <h2 style="color: #be123c; margin-top: 0;">CAPA Rework Required</h2>
+                <p>Dear Stakeholder,</p>
+                <p>Your CAPA checklist has been reviewed by the Divisional Deputy Director and returned for mandatory corrections.</p>
+                <p><strong>Reference File:</strong> ${submissionData.ref_number}</p>
+                <p>Please log back into your dashboard workspace to review specific line-item inspector remarks, update your structural remedies, and re-transmit your ledger for review.</p>
+                <br />
+                <a href="${window.location.origin}/applicant/capa/${applicationId}" 
+                   style="background-color: #be123c; color: white; padding: 12px 20px; text-decoration: none; font-weight: bold; display: inline-block; border-radius: 6px;">
+                   Open CAPA Workspace
+                </a>
+              </div>
+            `;
+
+        await fetch("/api/LocalInspectionReports/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: "hiscript@gmail.com", //applicantEmail,
+            cc:"hiscript@gmail.com",
+            subject: emailSubject,
+            html: emailBody,
+          }),
+        });
+      } catch (emailErr) {
+        console.error("Non-blocking outbound communication routing failure:", emailErr);
+      }
 
       alert(`⚖️ Adjudication finalized! Systems synchronized to: ${finalLifecycleStatus}`);
     } catch (err: any) {
@@ -170,7 +214,6 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Header Block */}
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full tracking-wider uppercase">
@@ -189,12 +232,10 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Observations Evaluation Loop */}
         <div className="space-y-4">
           {capaItems.map((item, idx) => (
             <div key={item.id || idx} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden grid grid-cols-1 lg:grid-cols-12">
               
-              {/* Left Column: Read-Only Applicant CAPA Form Values */}
               <div className="p-6 lg:col-span-7 bg-white space-y-4 border-b lg:border-b-0 lg:border-r border-slate-100">
                 <div className="flex items-start justify-between">
                   <span className="text-xs font-semibold text-slate-400">Finding Item #{idx + 1}</span>
@@ -251,14 +292,12 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
                 )}
               </div>
 
-              {/* Right Column: Inspector Adjudication Fields */}
               <div className="p-6 lg:col-span-5 bg-slate-50/50 flex flex-col justify-between space-y-4">
                 <div>
                   <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">
                     Regulatory Adjudication Verification
                   </h3>
                   
-                  {/* Verification Radio Options */}
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-slate-500">Adjudication Ruling</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -287,14 +326,13 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
                     </div>
                   </div>
 
-                  {/* Remarks Input */}
                   <div className="mt-4 space-y-1">
                     <label className="block text-xs font-semibold text-slate-500">Inspector Verification Remarks</label>
                     <textarea
                       rows={4}
                       value={item.inspectorRemarks}
                       onChange={(e) => handleItemEvaluation(idx, "inspectorRemarks", e.target.value)}
-                      placeholder="Input regulatory comments, review criteria evaluations, or follow-up dynamic parameters..."
+                      placeholder="Input regulatory comments, review criteria evaluations..."
                       className="w-full text-xs p-2.5 border border-slate-200 rounded-lg shadow-inner bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 transition text-slate-800"
                     />
                   </div>
@@ -309,7 +347,6 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
           ))}
         </div>
 
-        {/* Applicant Attestation Display */}
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Corporate Sign-off</h4>
@@ -325,7 +362,6 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Action Tray */}
         <div className="flex justify-end items-center gap-3 print:hidden">
           <button
             type="button"
