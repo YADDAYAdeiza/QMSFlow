@@ -9,7 +9,7 @@ import { recallApplication } from "@/lib/actions/ddd";
  
 import { 
   ArrowRightCircle, Clock, Inbox, Users, 
-  Landmark, Factory, ShieldCheck, RotateCcw 
+  Landmark, Factory, ShieldCheck, RotateCcw, AlertOctagon 
 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -32,10 +32,39 @@ export default async function DDDInboxPage({
   }
   
   const loggedInUserId = session.user.id; 
-  const actingDivision = as?.toUpperCase() || "VMD";
+
+  // 3. Resolve Profile-Driven Fallback Division
+  const userProfile = await db
+    .select({ division: users.division })
+    .from(users)
+    .where(eq(users.id, loggedInUserId))
+    .then(res => res[0]);
+
+  // STOPS FALLBACK LEAKAGE: Removed the hardcoded || "VMD" string trap completely
+  const userDefaultDivision = userProfile?.division?.toUpperCase();
+  const actingDivision = as?.toUpperCase() || userDefaultDivision;
+
+  // 3b. Defensive Structural Guard
+  if (!actingDivision) {
+    return (
+      <div className="p-8 bg-slate-50 min-h-screen font-sans flex items-center justify-center">
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 text-center max-w-md">
+          <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertOctagon className="w-6 h-6" />
+          </div>
+          <p className="text-rose-600 font-black uppercase tracking-[0.2em] text-[10px] mb-1">Configuration Error</p>
+          <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-3">No Division Assigned</h2>
+          <p className="text-slate-500 text-xs leading-relaxed">
+            Your profile does not specify a primary structural division. Sign out and Sign in again, or please request an administrator to update your account settings.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const isAssignedView = view === "assigned";
   
-  // 3. Database Query (Updated to safely catch staff processing returns alongside incoming pools)
+  // 4. Database Query
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -67,7 +96,7 @@ export default async function DDDInboxPage({
           )
     ));
 
-  // 4. Secondary Staff Name Resolution Step (Strict Normalization)
+  // 5. Secondary Staff Name Resolution Step (Strict Normalization)
   let staffMap: Record<string, string> = {};
   
   if (isAssignedView && rawInbox.length > 0) {
@@ -87,7 +116,7 @@ export default async function DDDInboxPage({
     }
   }
 
-  // 5. Formatting & Runtime Evaluation Logic
+  // 6. Formatting & Runtime Evaluation Logic
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -107,7 +136,6 @@ export default async function DDDInboxPage({
     const lookupKey = String(app.staffId || "").toLowerCase();
     const staffName = lookupKey ? staffMap[lookupKey] || null : null;
 
-    // Evaluate on-the-fly whether this application is an incoming delegation task or a staff return review
     const isReturningFromStaff = 
       app.currentPoint === "Technical DD Review Return" || 
       app.currentPoint === "IRSD Staff Vetting Return" ||
