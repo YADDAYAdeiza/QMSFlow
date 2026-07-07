@@ -130,7 +130,9 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
       // ==========================================
       // DISPATCH MAIL NOTIFICATION BACK TO APPLICANT
       // ==========================================
+      
       try {
+        console.log('Sending email...');        
         const isPassed = finalLifecycleStatus === "VERIFIED_PASSED";
         // Fallback fields matching database schema naming or static definitions
         const applicantEmail = submissionData.applicant_email || "applicant@company.com"; 

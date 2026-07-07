@@ -163,7 +163,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
                 <p><strong>Company Name:</strong> ${companyName}</p>
                 <p><strong>Submission Time:</strong> ${new Date(payload.submittedAt).toLocaleString()}</p>
                 <br />
-                <a href="${window.location.origin}/inspector/capa-verify/${payload.applicationId}" 
+                <a href="${window.location.origin}/LocalInspectionReports/admin/applications/${payload.applicationId}/capa-verify" 
                    style="background-color: #047857; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
                    Open Adjudication Module
                 </a>
