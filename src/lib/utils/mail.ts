@@ -1,6 +1,5 @@
 import nodemailer from "nodemailer";
 
-
 // Configure your SMTP Transporter using environment variables
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
@@ -35,9 +34,13 @@ export async function sendOversightEmail(appDetails: {
     // Explicit oversight copy target
     const ccOversight = "adeiza.yusuf@nafdac.gov.ng";
 
+    // hardcoded Vercel URL landing address as requested
+    const portalLandingPageUrl = "https://qms-flow.vercel.app/dashboard";
+
     console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
     console.log(`👉 Target Destination: ${recipientEmail}`);
     console.log(`👁️  Oversight CC Monitored at: ${ccOversight}`);
+    console.log(`🔗 Redirect Target Configured: ${portalLandingPageUrl}`);
     console.log(`⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${process.env.SMTP_PORT || "465"}`);
 
     if (!senderEmail || !process.env.SMTP_PASS) {
@@ -58,7 +61,7 @@ export async function sendOversightEmail(appDetails: {
           <p style="font-size: 14px; color: #475569;">
             A high-priority application workflow milestone has been recorded within the VMAP portal.
           </p>
-          <table style="width: 100%; font-size: 13px; border-collapse: collapse; margin-top: 20px;">
+          <table style="width: 100%; font-size: 13px; border-collapse: collapse; margin-top: 20px; margin-bottom: 25px;">
             <tr>
               <td style="padding: 8px 0; font-weight: bold; color: #64748b; width: 140px;">App Number:</td>
               <td style="padding: 8px 0; font-weight: bold; color: #1e3a8a;">${appDetails.appNumber}</td>
@@ -84,6 +87,15 @@ export async function sendOversightEmail(appDetails: {
             </tr>
             ` : ""}
           </table>
+
+          <!-- Interactive Action Redirection Button -->
+          <div style="text-align: center; margin: 25px 0 15px 0;">
+            <a href="${portalLandingPageUrl}" 
+               style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 8px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
+              Open VMAP Portal Dashboard
+            </a>
+          </div>
+
           <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 25px 0;" />
           <p style="font-size: 11px; color: #94a3b8; text-align: center; text-transform: uppercase; letter-spacing: 0.1em;">
             Veterinary Medicines Directorate (VMD) • QMS Automated Dispatch

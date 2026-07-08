@@ -4,103 +4,19 @@ import { db } from "@/db";
 import { applications, companies, qmsTimelines, users, riskAssessments } from "@/db/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import {calculateORR} from '@/lib/actions/riskEngine'
-
-/**
- * Director -> DD: Initial Assignment
- * Moves point to Technical DD Review
-*/
-// @/lib/actions/director.ts
-
-// export async function assignToDDD(
-//   appId: number, 
-//   divisions: string[], 
-//   comment: string, 
-//   headId?: string
-// ) {
-//   try {
-//     // 1. Prepare the Director's Minute object
-//     const directorMinute = {
-//       from: "Director",
-//       role: "Director",
-//       text: comment,
-//       round: 1,
-//       action: "TECHNICAL_DIRECTION",
-//       timestamp: new Date().toISOString()
-//     };
-
-//     /**
-//      * 2. Update Application State
-//      * We perform two JSONB operations:
-//      * - Update 'assignedDivisions' with the Director's choice (overwrite).
-//      * - Append the new minute to the 'comments' array.
-//      */
-//     await db.update(applications)
-//       .set({ 
-//         currentPoint: 'Technical DD Review',
-//         details: sql`
-//           jsonb_set(
-//             jsonb_set(
-//               COALESCE(details, '{}'::jsonb), 
-//               '{assignedDivisions}', 
-//               ${JSON.stringify(divisions)}::jsonb
-//             ),
-//             '{comments}',
-//             (COALESCE(details->'comments', '[]'::jsonb)) || ${JSON.stringify([directorMinute])}::jsonb
-//           )
-//         `
-//       })
-//       .where(eq(applications.id, appId));
-
-//     // 3. Close Director's Timeline (Stop the clock on Sequence 2)
-//     await db.update(qmsTimelines)
-//       .set({ endTime: sql`now()` })
-//       .where(and(
-//         eq(qmsTimelines.applicationId, appId),
-//         eq(qmsTimelines.point, 'Director Review'),
-//         isNull(qmsTimelines.endTime)
-//       ));
-
-//     // 4. Start Divisional Deputy Director's Timeline (Sequence 3)
-//     // We use the headId passed from the client dropdown to avoid NULL staff_id
-//     await db.insert(qmsTimelines).values({
-//       applicationId: appId,
-//       staffId: headId || null, 
-//       division: divisions[0],
-//       point: 'Technical DD Review',
-//       startTime: sql`now()`,
-//     });
-
-//     // 5. Refresh the UI
-//     revalidatePath("/dashboard/director");
-    
-//     return { success: true };
-//   } catch (error) {
-//     console.error("QMS Assignment Error:", error);
-//     return { success: false };
-//   }
-// }
-
-// @/lib/actions/director.ts
-
-/**
- * Moves application from Director to the Technical DD
- * Handles the QMS Handover Clock and updates JSONB details.
- */
+import { calculateORR } from '@/lib/actions/riskEngine';
+import { sendOversightEmail } from "@/lib/utils/mail"; // Wired email pipeline
 
 /**
  * Moves application from Director to the Technical DD (Divisional Deputy Director)
  * Handles the QMS Handover Clock and updates JSONB details for both Round 1 & 2.
  */
-/**
- * Moves application from Director to the Technical DD
- * Handles the QMS Handover Clock and updates JSONB details for Round 1 & Round 2.
- */
 export async function assignToDDD(
   appId: number, 
   divisions: string[], 
   comment: string, 
-  headId?: string
+  headId?: string,
+  sendEmail: boolean = false // Captured state flag from toggle slider
 ) {
   try {
     return await db.transaction(async (tx) => {
@@ -169,6 +85,29 @@ export async function assignToDDD(
         }
       });
 
+      // 5. Fire Optional Email Dispatch if toggle slider was enabled
+      if (sendEmail) {
+        let recipientEmail: string | undefined = undefined;
+        
+        if (headId) {
+          const headUser = await tx.query.users.findFirst({
+            where: eq(users.id, headId)
+          });
+          if (headUser?.email) recipientEmail = headUser.email;
+        }
+
+        const appDetails = (currentApp.details as any) || {};
+
+        await sendOversightEmail({
+          appNumber: currentApp.appNumber || `APP-${currentApp.id}`,
+          type: isRound2 ? "Compliance Review Order" : "Technical Dossier Review",
+          companyName: appDetails.companyName || "Regulatory Applicant",
+          facilityName: appDetails.facilityName || "Inspected Facility Site",
+          lodRemarks: comment,
+          customRecipient: recipientEmail // Dispatches explicitly to the targeted Divisional Deputy Director
+        });
+      }
+
       revalidatePath("/dashboard/director");
       revalidatePath("/dashboard/ddd"); 
       
@@ -180,54 +119,11 @@ export async function assignToDDD(
   }
 }
 
-
-/**
- * Final Clearance
- * Moves Point to COMPLETED
- */
-
-// Helper for Risk Matrix (Ensure this matches your logic)
-// function calculateORR(intrinsic: string, compliance: string) {
-//   const matrix: Record<string, Record<string, { rating: string; interval: number }>> = {
-//     High: {
-//       High: { rating: "A", interval: 18 },
-//       Medium: { rating: "B", interval: 12 },
-//       Low: { rating: "C", interval: 6 },
-//     },
-//     Medium: {
-//       High: { rating: "A", interval: 24 },
-//       Medium: { rating: "B", interval: 18 },
-//       Low: { rating: "C", interval: 12 },
-//     },
-//     Low: {
-//       High: { rating: "A", interval: 36 },
-//       Medium: { rating: "B", interval: 24 },
-//       Low: { rating: "C", interval: 18 },
-//     },
-//   };
-
-//   const i = intrinsic || "Medium";
-//   const c = compliance || "Medium";
-//   return matrix[i]?.[c] || { rating: "B", interval: 12 };
-// }
-
 /**
  * Final Clearance Action
  * Triggered by the Director to conclude a round.
  * Pass 1: Moves to Registry/Hub for Pass 2 prep.
  * Pass 2: Finalizes Risk and completes the application.
- */
-
-/**
- * issueFinalClearance
- * Finalizes the Director's sign-off, handles disparate archival keys,
- * and dynamically assigns the "from" name based on the actual user.
- */
-
-/**
- * issueFinalClearance
- * Finalizes the Director's sign-off, handles disparate archival keys,
- * and dynamically assigns the "from" name based on the actual user record.
  */
 export async function issueFinalClearance(
   appId: number, 
@@ -300,11 +196,10 @@ export async function issueFinalClearance(
     return { success: false, error: error.message };
   }
 }
+
 /**
- * Director -> DD or Staff: Return for Rework
+ * Rejects application and moves back to LOD with CAPA requirements.
  */
-
-
 export async function rejectAndIssueCAPA(
   appId: number, 
   directorRemarks: string, 
@@ -377,7 +272,9 @@ export async function rejectAndIssueCAPA(
   }
 }
 
-
+/**
+ * Return to Staff or DD for rework tracking mechanisms.
+ */
 export async function returnToStaffFromDirector(
   appId: number, 
   note: string, 
@@ -392,9 +289,7 @@ export async function returnToStaffFromDirector(
 
       if (!targetUser) throw new Error("Target recipient not found");
 
-      // ✅ Map Item 8 Logic:
-      // If sending to a DD (Divisional Deputy Director), use 'Technical DD Review'
-      // If sending to Staff, use 'Staff Technical Review'
+      // Use 'Divisional Deputy Director' matching profile requirements explicitly
       const isSendingToDD = targetUser.role === 'Divisional Deputy Director';
       const nextPoint = isSendingToDD ? "Technical DD Review" : "Staff Technical Review";
 
@@ -428,7 +323,7 @@ export async function returnToStaffFromDirector(
 
       const timestamp = sql`now()`;
 
-      // Stop Director's current clock (could be Review or Final Review)
+      // Stop Director's current clock
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
