@@ -47,7 +47,7 @@ export default async function DDDInboxPage({
   // 3b. Defensive Structural Guard
   if (!actingDivision) {
     return (
-      <div className="p-8 bg-slate-50 min-h-screen font-sans flex items-center justify-center">
+      <div className="pt-8 bg-slate-50 min-h-screen font-sans flex items-center justify-center">
         <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 text-center max-w-md">
           <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <AlertOctagon className="w-6 h-6" />

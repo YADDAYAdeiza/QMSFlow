@@ -4,7 +4,7 @@ import React, { useState, useRef } from "react";
 import { 
   ShieldAlert, CheckCircle2, FileText, 
   Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
-  Info, Activity, History
+  Info, Activity, History, Mail // Added Mail icon
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
@@ -46,13 +46,13 @@ export default function ReviewSubmissionForm({
   const [loading, setLoading] = useState(false);
   const [isLedgerVisible, setIsLedgerVisible] = useState(true);
   const [isSra, setIsSra] = useState(previousIsSra);
+  const [sendEmail, setSendEmail] = useState(false); // <-- New State Hook for the email slider flag
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [findings, setFindings] = useState<Array<{ id: string; system: string; severity: string; text: string }>>(
     previousFindings.length > 0 ? previousFindings.map(f => ({ ...f, id: Math.random().toString(36).substr(2, 9) })) : []
   );
 
-  // Logic to determine if the staff belongs to IRSD
   const isIrsdStaff = currentDivision?.toUpperCase() === "IRSD";
 
   const counts = {
@@ -81,19 +81,18 @@ export default function ReviewSubmissionForm({
     try {
       let publicUrl = "";
       
-      // Only attempt upload if it's IRSD staff and not a compliance review
       if (evidenceFile && isIrsdStaff && !isComplianceReview) {
         const fileExt = evidenceFile.name.split('.').pop();
         const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
-          .from('documents')
+          .from('Documents') // Preserving your exact bucket context 
           .upload(filePath, evidenceFile);
         
         if (uploadError) throw uploadError;
 
         const { data: { publicUrl: url } } = supabase.storage
-          .from('documents')
+          .from('Documents')
           .getPublicUrl(filePath);
           
         publicUrl = url;
@@ -111,13 +110,15 @@ export default function ReviewSubmissionForm({
         findings: findings.filter(f => f.text.trim() !== ""),
       };
 
+      // Appended sendEmail flag into the action payload invocation matching backend position
       const res = await submitToDDD(
         appId, 
         staffId, 
         justification, 
         isHubVetting, 
         publicUrl, 
-        complianceData
+        complianceData,
+        sendEmail 
       );
       
       if (res.success) {
@@ -179,7 +180,7 @@ export default function ReviewSubmissionForm({
         </div>
       </div>
 
-      {/* COMPLIANCE LEDGER SECTION - Revealed only in Pass 2 (Compliance Review) */}
+      {/* COMPLIANCE LEDGER SECTION */}
       {isComplianceReview && (
         <div className="space-y-6">
           <div 
@@ -296,7 +297,7 @@ export default function ReviewSubmissionForm({
         </div>
       )}
 
-      {/* VERIFICATION REPORT SECTION - Restricted to Pass 1 AND IRSD Staff Only */}
+      {/* VERIFICATION REPORT SECTION */}
       {!isComplianceReview && isIrsdStaff && (
         <div className="space-y-6">
           <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
@@ -355,6 +356,34 @@ export default function ReviewSubmissionForm({
           placeholder="Final assessment summary for the Divisional Deputy Director..."
           className="w-full p-10 rounded-[3.5rem] border-2 border-slate-200 bg-white text-base text-slate-800 min-h-[220px] shadow-xl shadow-slate-200/30 focus:ring-8 focus:ring-blue-500/5 focus:border-blue-500 outline-none transition-all leading-relaxed placeholder:text-slate-400"
         />
+
+        {/* EMAIL ALERT SLIDER/TOGGLE SWITCH */}
+        <div className="flex items-center justify-between p-6 bg-slate-50 border border-slate-200 rounded-3xl shadow-inner my-4">
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-xl transition-colors duration-300 ${sendEmail ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}>
+              <Mail className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-xs font-black uppercase tracking-wider text-slate-800 block">Dispatch Email Notification</span>
+              <span className="text-[11px] font-medium text-slate-500 block">Alert destination desk on immediate submission handoff</span>
+            </div>
+          </div>
+          
+          {/* Slider Layout */}
+          <button
+            type="button"
+            onClick={() => setSendEmail(!sendEmail)}
+            className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none ring-4 ring-blue-500/5 ${
+              sendEmail ? 'bg-blue-600' : 'bg-slate-300'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
+                sendEmail ? 'translate-x-7' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
 
         <button 
           disabled={loading}

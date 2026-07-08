@@ -6,17 +6,16 @@ import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
   History, UserPlus, Gavel, FileText, Zap, AlertCircle, ClipboardList,
-  Building2, FileCheck, Globe, Diff, Eye
+  Building2, FileCheck, Globe, Diff, Eye, Mail
 } from 'lucide-react';
 import { approveToDirector, assignToStaff, forwardToHub } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
 
 // --- IMPORT REGULATORY PDF TEMPLATES ---
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
-import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS"; // New dynamic addition for AMS site scope matching
+import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS"; 
 import { GmpCertificate } from "@/components/documents/GmpCertificate";
 
-// Helper to prevent hydration mismatch for dates
 function SafeTimestamp({ timestamp }: { timestamp?: string }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -36,31 +35,29 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const [assignmentRemarks, setAssignmentRemarks] = useState(""); 
   const [endorsementRemarks, setEndorsementRemarks] = useState("");
   const [selectedStaffId, setSelectedStaffId] = useState("");
+  
+  // NEW: Notification Toggle State
+  const [shouldNotifyStaff, setShouldNotifyStaff] = useState(false);
 
   const appDetails = app?.details || {};
   const history = app?.narrativeHistory || [];
   const isInspection = app?.isInspection ?? false;
 
-  // Define the actions that signify a staff member has completed their task
   const submissionActions = [
     'TECHNICAL_VETTING_SUBMITTED', 
     'COMPLIANCE_AUDIT_COMPLETED'
   ];
 
-  // 1. Find the history entry of the person who last worked on the application
   const lastWorkEntry = [...history]
     .reverse()
     .find(h => submissionActions.includes(h.action));
 
-  // 2. Extract the name and map to ID
   const lastSubmitterName = lastWorkEntry?.from;
   const lastAssignedStaffId = staffList.find(s => s.name === lastSubmitterName)?.id || "";
 
-  // --- DELTA DATA EXTRACTION ---
   const lastRework = [...history].reverse().find(h => h.action === "REWORK_REQUIRED");
   const rejectedFindings = lastRework?.frozenFindings || [];
 
-  // --- PASS LOGIC START ---
   const isPass2 = app?.isComplianceReview === true;
   const poaUrl = appDetails?.poaUrl || "";
   const verificationReportUrl = appDetails?.verificationReportUrl || "";
@@ -68,13 +65,11 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const staffReportUrl = isPass2 ? inspectionReportUrl : verificationReportUrl;
   const hasStaffSubmission = !!staffReportUrl;
   
-  // Adjusted viewMode state typing to accommodate the dynamic 'preview' layout
   const [viewMode, setViewMode] = useState<'dossier' | 'report' | 'preview'>(
     hasStaffSubmission ? 'report' : 'dossier'
   );
 
   const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
-  // --- PASS LOGIC END ---
 
   const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
   const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
@@ -94,10 +89,8 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
 
-  // --- STRICT IRSD DIVISION GATING ---
   const isIRSD = currentActingAs.toLowerCase() === 'irsd' || activeAssignmentDivision.toUpperCase() === 'IRSD';
 
-  // --- COMPLIANCE RISK DATA NORMALIZATION ---
   const complianceRisk = useMemo(() => {
     const baseRisk = app?.complianceRisk || {};
     const ledger = appDetails.findings_ledger || findings || [];
@@ -117,7 +110,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     };
   }, [app, appDetails, findings, intrinsicLevel, complianceLevel, isSRA]);
 
-  // --- DYNAMIC PDF DOCUMENT CONFIGURATION ---
   const docConfig = useMemo(() => {
     const appNumber = app.applicationNumber;
     const date = new Date().toLocaleDateString('en-GB');
@@ -128,7 +120,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     const siteScope = appDetails.siteScope || "New Manufacturing Site";
 
     if (isInspection) {
-      // Pass 2 remains completely unmodified
       const certData = {
         appNumber,
         date,
@@ -141,7 +132,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
       };
       return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
     } else {
-      // Pass 1: Conditional Document Selection based on siteScope mapping within JSON context block
       const flatProducts = rawLines.flatMap((line: any) => 
         (line.products || []).map((p: any) => p.name)
       );
@@ -160,15 +150,26 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         return { component: <ClearanceLetterAMS data={clearanceData} />, prefix: "GMP_CLEARANCE_AMS" };
       }
       
-      // Default Baseline Flow: New Manufacturing Site
       return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
     }
   }, [app, appDetails, isInspection, complianceRisk]);
 
   const handleAssign = async () => {
     if (!selectedStaffId) return alert(`Please select an officer.`);
+    
+    // Resolve targeted staff metadata for optional email transmission
+    const assignedStaffObject = staffList.find(s => s.id === selectedStaffId);
+    const staffEmail = assignedStaffObject?.email || null;
+
     startTransition(async () => {
-      const res = await assignToStaff(app.id, selectedStaffId, assignmentRemarks);
+      // Passing email parameters dynamically downstream to your server actions file
+      const res = await assignToStaff(
+        app.id, 
+        selectedStaffId, 
+        assignmentRemarks, 
+        shouldNotifyStaff, 
+        staffEmail
+      );
       if (res.success) { 
         router.push(`/dashboard/ddd?as=${currentActingAs.toLowerCase()}`); 
         router.refresh(); 
@@ -218,7 +219,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                   </button>
                 )}
                 
-                {/* GATED FOR DD(IRSD) ONLY: This button renders exclusively if the desk is IRSD */}
                 {isIRSD && (
                   <button 
                     onClick={() => setViewMode('preview')} 
@@ -253,7 +253,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         </div>
 
         <div className="bg-white p-3 rounded-[3rem] shadow-2xl border border-slate-200 h-[82vh] relative overflow-hidden">
-          {/* Renders compilation engine preview panel only if viewMode is preview and user is DD(IRSD) */}
           {viewMode === 'preview' && isIRSD ? (
             <BlobProvider document={docConfig.component}>
               {({ url, loading }) => loading ? (
@@ -359,6 +358,50 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                 ))}
               </select>
               <textarea value={assignmentRemarks} onChange={(e) => setAssignmentRemarks(e.target.value)} placeholder="Specific instructions for vetting..." className="w-full h-24 bg-black/10 border border-white/10 rounded-2xl p-4 text-xs text-white outline-none placeholder:text-white/40" />
+              
+              {/* SLIDER / CHECKBOX TOGGLE FOR NOTIFYING OFFICERS */}
+              <div className="flex items-center justify-between bg-black/10 border border-white/10 rounded-2xl p-4">
+                <div className="flex items-center gap-2.5">
+                  <Mail className={`w-4 h-4 transition-colors duration-300 ${shouldNotifyStaff ? 'text-white' : 'text-white/50'}`} />
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-black uppercase tracking-wider">Email Notification</span>
+                    <span className="text-[9px] text-white/60">Dispatch assignment briefing to officer's inbox</span>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={shouldNotifyStaff} 
+                    onChange={(e) => setShouldNotifyStaff(e.target.checked)} 
+                    className="sr-only peer" 
+                  />
+                  <div className={`
+                    w-11 h-6 
+                    rounded-full 
+                    transition-all 
+                    duration-300 
+                    relative
+                    border
+                    ${shouldNotifyStaff 
+                      ? 'bg-emerald-500 border-emerald-400 shadow-inner' 
+                      : 'bg-black/40 border-white/10'
+                    }
+                    after:content-[''] 
+                    after:absolute 
+                    after:top-[2px] 
+                    after:left-[2px] 
+                    after:bg-white 
+                    after:rounded-full 
+                    after:h-4 
+                    after:w-4 
+                    after:transition-all 
+                    after:duration-300
+                    after:shadow-md
+                    peer-checked:after:translate-x-5
+                  `}></div>
+                </label>
+              </div>
+
               <button onClick={handleAssign} disabled={isPending || !selectedStaffId} className="w-full py-5 bg-white text-slate-900 rounded-3xl font-black uppercase text-[10px] disabled:opacity-50 transition-all hover:bg-slate-100 active:scale-95">
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `Dispatch for Vetting`}
               </button>
