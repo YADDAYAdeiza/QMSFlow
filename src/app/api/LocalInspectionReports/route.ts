@@ -55,7 +55,7 @@ export async function POST(request: Request) {
         // });
 
         // Build unique secure tracking address
-        const applicantPortalUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/applicant/applications/${applicationId}/capa`;
+        const applicantPortalUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/LocalInspetionReports/applicant/applications/${applicationId}/capa`;
 
         // Format a dynamic bullet list of structural observations for the email payload
         const observationListHtml = structuralObservations.length > 0
@@ -68,6 +68,7 @@ export async function POST(request: Request) {
         const mailOptions = {
           from: `"NAFDAC VMAP Directorate" <${process.env.SMTP_USER}>`,
           to: "managing_director@globalorganics.com", // In production, query this from your company directory profile
+          cc: 'adeiza.yusuf@nafdac.gov.ng',
           subject: `NOTIFICATION OF OUTCOME OF GOOD MANUFACTURING PRACTICE (GMP) INSPECTION - ID: # ${applicationId}`,
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">

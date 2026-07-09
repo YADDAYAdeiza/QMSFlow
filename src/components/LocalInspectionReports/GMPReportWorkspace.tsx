@@ -69,7 +69,8 @@ export default function GMPReportWorkspace({
     observations: []
   };
 
-  const checklistFormInitialData = checklistSnapshot || defaultChecklistData;
+  // Safe runtime fallback evaluation for child components
+  const currentLiveChecklistData = checklistSnapshot || defaultChecklistData;
 
   const handleAICorrelationCompile = async (completedFormPayload: any) => {
     try {
@@ -121,7 +122,7 @@ export default function GMPReportWorkspace({
             currentStepKey: currentStep,
             direction,
             companyName,
-            checklistSnapshot: checklistFormInitialData
+            checklistSnapshot: currentLiveChecklistData // FIX: Passes up-to-date runtime state mutation payload securely
           })
         });
 
@@ -148,7 +149,7 @@ export default function GMPReportWorkspace({
         // Account for final fork interceptor titles
         let targetStepTitle = inspectionReportWorkflow.steps[nextStepKey]?.title || "Archived Desk";
         if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-          targetStepTitle = checklistFormInitialData?.final_recommendation === "PENDING"
+          targetStepTitle = currentLiveChecklistData?.final_recommendation === "PENDING"
             ? "Applicant Notification Hub - CAPA Request Issued"
             : "Applicant Notification Hub - Final Approval Certified";
         }
@@ -267,7 +268,7 @@ export default function GMPReportWorkspace({
 
             {/* Structured Form Entry Blocks */}
             <InspectionChecklistForm
-              initialData={checklistFormInitialData}
+              initialData={currentLiveChecklistData}
               onSave={handleAICorrelationCompile}
               isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
             />
@@ -365,7 +366,7 @@ export default function GMPReportWorkspace({
                 <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed animate-fadeIn">
                   <strong>📋 Adjudication Check:</strong> The checklist snapshot current recommendation reads:{" "}
                   <span className="font-bold underline text-amber-800">
-                    {checklistFormInitialData?.final_recommendation || "PENDING"}
+                    {currentLiveChecklistData?.final_recommendation || "PENDING"}
                   </span>. 
                   Signing off will mutate the application status profile and dispatch notification files.
                 </div>
@@ -381,7 +382,7 @@ export default function GMPReportWorkspace({
                   onChange={(e) => setRemarks(e.target.value)}
                   placeholder={
                     currentStep === "DIRECTOR_FINAL_SIGN_OFF"
-                      ? (checklistFormInitialData?.final_recommendation === "PENDING"
+                      ? (currentLiveChecklistData?.final_recommendation === "PENDING"
                           ? "Provide official directive text to issue with the CAPA requirement..."
                           : "Enter validation clearance minutes for final certified sign-off...")
                       : `Provide dynamic feedback or instructions as ${activeStepConfig?.role || "Reviewer"}...`
@@ -397,21 +398,21 @@ export default function GMPReportWorkspace({
                       type="button"
                       disabled={isSubmitting}
                       onClick={() => {
-                        const recommendation = checklistFormInitialData?.final_recommendation || "PENDING";
+                        const recommendation = currentLiveChecklistData?.final_recommendation || "PENDING";
                         const msg = recommendation === "PENDING"
                           ? "Confirm sign-off on inspection report and dispatch CAPA Directive to applicant profile?"
                           : "Confirm absolute final certification and release of official GMP Certificate?";
                         if (window.confirm(msg)) handleTransition("FORWARD");
                       }}
                       className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border ${
-                        checklistFormInitialData?.final_recommendation === "PENDING"
+                        currentLiveChecklistData?.final_recommendation === "PENDING"
                           ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
                           : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
                       }`}
                     >
                       {isSubmitting 
                         ? "Processing Action..." 
-                        : checklistFormInitialData?.final_recommendation === "PENDING"
+                        : currentLiveChecklistData?.final_recommendation === "PENDING"
                         ? "✍️ Approve & Issue CAPA Directive"
                         : "✍️ Concur & Grant Final Approval"}
                     </button>

@@ -9,7 +9,7 @@ interface Observation {
 }
 
 interface ChecklistData {
-  // Step 1: Meta
+  // Step 1: Meta & History
   report_doc_number: string;
   inspection_dates: string;
   type_of_inspection: string;
@@ -76,15 +76,22 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
     final_recommendation: initialData?.final_recommendation || "PENDING"
   });
 
-  // Watch for dynamic stream or workspace simulation view changes
+  // Dynamic updates synchronization
   useEffect(() => {
     if (initialData) {
       setFormData(prev => ({
         ...prev,
         ...initialData,
+        site_contact_details: {
+          ...prev.site_contact_details,
+          ...(initialData.site_contact_details || {})
+        },
+        historical_baseline: {
+          ...prev.historical_baseline,
+          ...(initialData.historical_baseline || {})
+        },
         activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
-        observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations,
-        inspection_dates: initialData.inspection_dates || prev.inspection_dates
+        observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
       }));
     }
   }, [initialData]);
@@ -123,6 +130,17 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
     setNewObsText("");
   };
 
+  const removeObservation = (id: string, severity: "critical" | "major" | "other") => {
+    if (isReadOnly) return;
+    setFormData(prev => ({
+      ...prev,
+      observations: prev.observations.filter(o => o.id !== id),
+      critical_count: severity === "critical" ? Math.max(0, prev.critical_count - 1) : prev.critical_count,
+      major_count: severity === "major" ? Math.max(0, prev.major_count - 1) : prev.major_count,
+      other_count: severity === "other" ? Math.max(0, prev.other_count - 1) : prev.other_count,
+    }));
+  };
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       {/* WIZARD TABS HEADER */}
@@ -139,32 +157,55 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
       </div>
 
       <div className="p-6">
-        {/* --- STEP 1: ADMINISTRATIVE METADATA --- */}
+        {/* --- STEP 1: ADMINISTRATIVE METADATA & HISTORICAL BASELINE --- */}
         {activeTab === 1 && (
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1">Inspection Core Details & Facility Information</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Doc Number</label>
-                <input type="text" disabled className="w-full border p-2 bg-slate-100 rounded text-slate-600 font-mono text-xs font-medium" value={formData.report_doc_number} />
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1 mb-3">Inspection Core Details & Facility Information</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Doc Number</label>
+                  <input type="text" disabled className="w-full border p-2 bg-slate-100 rounded text-slate-600 font-mono text-xs font-medium" value={formData.report_doc_number} />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Inspection Date(s)</label>
+                  <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.inspection_dates} onChange={e => setFormData({...formData, inspection_dates: e.target.value})} />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Inspection Type</label>
+                  <select disabled={isReadOnly} className="w-full border p-2 rounded bg-white text-xs font-medium text-slate-800" value={formData.type_of_inspection} onChange={e => setFormData({...formData, type_of_inspection: e.target.value})}>
+                    <option value="PPI">Pre-Production Inspection (PPI)</option>
+                    <option value="PRI">Pre-Registration Inspection (PRI)</option>
+                    <option value="RI">Routine Inspection (RI)</option>
+                    <option value="FUI">Follow-Up / CAPA Verification (FUI)</option>
+                  </select>
+                </div>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Inspection Date(s)</label>
-                <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.inspection_dates} onChange={e => setFormData({...formData, inspection_dates: e.target.value})} />
+                <label className="block font-bold text-slate-700 mb-1">Inspected Site Name</label>
+                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.inspected_site_name} onChange={e => setFormData({...formData, inspected_site_name: e.target.value})} />
               </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Inspection Type</label>
-                <select disabled={isReadOnly} className="w-full border p-2 rounded bg-white text-xs font-medium text-slate-800" value={formData.type_of_inspection} onChange={e => setFormData({...formData, type_of_inspection: e.target.value})}>
-                  <option value="PPI">Pre-Production Inspection (PPI)</option>
-                  <option value="PRI">Pre-Registration Inspection (PRI)</option>
-                  <option value="RI">Routine Inspection (RI)</option>
-                  <option value="FUI">Follow-Up / CAPA Verification (FUI)</option>
-                </select>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Site Phone</label>
+                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.phone} onChange={e => setFormData({...formData, site_contact_details: {...formData.site_contact_details, phone: e.target.value}})} />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Site Email</label>
+                  <input type="email" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.email} onChange={e => setFormData({...formData, site_contact_details: {...formData.site_contact_details, email: e.target.value}})} />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Site Website</label>
+                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.website} onChange={e => setFormData({...formData, site_contact_details: {...formData.site_contact_details, website: e.target.value}})} />
+                </div>
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Activities Carried Out</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Scope of Operations / Activities Carried Out</label>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                 {["Active Ingredient", "Finished Product", "Packaging", "Importing", "Lab Testing", "Batch Release"].map((act) => (
                   <label key={act} className="flex items-center gap-2 p-2 border rounded bg-slate-50 cursor-pointer select-none font-medium text-slate-700">
@@ -178,7 +219,7 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Lead Inspector</label>
-                <input type="text" placeholder="e.g. Mr. Biyama Kalang, Senior Regulatory Officer, DER" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.lead_inspector} onChange={e => setFormData({...formData, lead_inspector: e.target.value})} />
+                <input type="text" placeholder="e.g. Senior Regulatory Officer" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.lead_inspector} onChange={e => setFormData({...formData, lead_inspector: e.target.value})} />
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Co-Inspectors / Trainees</label>
@@ -188,7 +229,29 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
 
             <div className="text-xs">
               <label className="block font-bold text-slate-700 mb-1">Vicinity Assessment</label>
-              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" placeholder="Observe external physical features..." value={formData.vicinity_assessment} onChange={e => setFormData({...formData, vicinity_assessment: e.target.value})} />
+              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" placeholder="Observe external physical features, surroundings, sanitation, and nearby risk factors..." value={formData.vicinity_assessment} onChange={e => setFormData({...formData, vicinity_assessment: e.target.value})} />
+            </div>
+
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1 mb-3">Historical Baseline & Previous Performance</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Previous Inspection Date & Type</label>
+                  <input type="text" placeholder="e.g. 14th March 2024 (Routine)" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_date_type} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, prev_date_type: e.target.value}})} />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Previous Inspection Team</label>
+                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_team} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, prev_team: e.target.value}})} />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Past CAPA Status / Outstanding Items</label>
+                  <input type="text" placeholder="Fully implemented / partially pending..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.past_capa_status} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, past_capa_status: e.target.value}})} />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Major Changes Since Last Intervention</label>
+                  <input type="text" placeholder="Facility upgrades, management transitions, new lines..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.major_changes} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, major_changes: e.target.value}})} />
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -196,7 +259,7 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
         {/* --- STEP 2: THE 6 QUALITY SYSTEMS --- */}
         {activeTab === 2 && (
           <div className="space-y-6">
-            <p className="text-xs text-slate-500 italic">Enter bullet points of raw observations. The NAFDAC AI compilation engine will synthesize these into professional regulatory narrative prose.</p>
+            <p className="text-xs text-slate-500 italic">Enter bullet points of raw observations. The system compilation framework will parse these metrics directly into the regulatory output draft.</p>
             
             {[
               { key: "pqs", label: "System 1: Pharmaceutical Quality System (PQS)", scoreKey: "pqs_score", notesKey: "pqs_notes", placeholder: "Sighted Site Master File Ref... Change control SOP ref..." },
@@ -211,7 +274,7 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
                   <h4 className="font-bold text-slate-800 uppercase tracking-wide">{sys.label}</h4>
                   <div className="flex items-center gap-1.5">
                     <span className="font-semibold text-slate-500 text-[11px]">Grade:</span>
-                    <input type="number" min="0" max="100" disabled={isReadOnly} className="w-16 p-1 border rounded text-center font-bold bg-white text-slate-800" value={(formData as any)[sys.scoreKey]} onChange={e => setFormData({...formData, [sys.scoreKey]: Math.min(100, Number(e.target.value))})} />
+                    <input type="number" min="0" max="100" disabled={isReadOnly} className="w-16 p-1 border rounded text-center font-bold bg-white text-slate-800" value={(formData as any)[sys.scoreKey]} onChange={e => setFormData({...formData, [sys.scoreKey]: Math.min(100, Math.max(0, Number(e.target.value)))})} />
                     <span className="font-bold text-slate-600">%</span>
                   </div>
                 </div>
@@ -265,21 +328,31 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
             )}
 
             {/* CURRENT LOG DISPLAY */}
-            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-              {formData.observations.map((obs) => (
-                <div key={obs.id} className="p-2 border rounded bg-slate-50/50 flex justify-between items-center text-xs">
-                  <div className="flex gap-2 items-center">
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] text-white font-bold uppercase tracking-wide ${obs.severity === "critical" ? "bg-rose-600" : obs.severity === "major" ? "bg-amber-500" : "bg-blue-500"}`}>{obs.severity}</span>
-                    <span className="text-slate-700 font-medium">{obs.text}</span>
+            <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+              {formData.observations.length === 0 ? (
+                <p className="text-slate-400 italic p-4 text-center border border-dashed rounded">No non-conformances registered yet for this cycle.</p>
+              ) : (
+                formData.observations.map((obs) => (
+                  <div key={obs.id} className="p-2 border rounded bg-slate-50/50 flex justify-between items-center text-xs group">
+                    <div className="flex gap-2 items-center overflow-hidden mr-2">
+                      <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] text-white font-bold uppercase tracking-wide ${obs.severity === "critical" ? "bg-rose-600" : obs.severity === "major" ? "bg-amber-500" : "bg-blue-500"}`}>{obs.severity}</span>
+                      <span className="text-slate-700 font-medium truncate">{obs.text}</span>
+                    </div>
+                    {!isReadOnly && (
+                      <button type="button" onClick={() => removeObservation(obs.id, obs.severity)} className="text-rose-500 hover:text-rose-700 font-bold px-1.5 py-0.5 rounded hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity">
+                        ✕
+                      </button>
+                    )}
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
             {/* FINAL ADJUDICATION DROPDOWN */}
             <div className="pt-2 border-t">
               <label className="block font-bold text-slate-800 mb-1 uppercase tracking-wide">Final Recommendation / Adjudication</label>
               <select disabled={isReadOnly} className="w-full border p-2.5 rounded bg-white font-semibold text-slate-800 text-xs" value={formData.final_recommendation} onChange={e => setFormData({...formData, final_recommendation: e.target.value})}>
+                <option value="PENDING">Select / Awaiting Final Evaluation</option>
                 <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
                 <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
                 <option value="REJECTED">Recommended for Rejection / Hold</option>

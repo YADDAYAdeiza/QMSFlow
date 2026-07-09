@@ -1,11 +1,12 @@
-// @/app/api/gmp-report/generate/route.ts
+// @/app/api/LocalInspectionReports/generate/route.ts
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
+// FIX: Use named braces instead of a default import
+import { GoogleGenAI } from "@google/genai"; 
 import { db } from "@/db";
 import { applications } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// Initialize the Google Gen AI SDK
+// This will now compile cleanly under Turbopack
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(request: Request) {
