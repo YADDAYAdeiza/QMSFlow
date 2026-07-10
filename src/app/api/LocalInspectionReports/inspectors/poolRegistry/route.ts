@@ -4,7 +4,6 @@ import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = "force-dynamic";
 
-// Define the tracking thresholds based on inspectionReportWorkflow
 const BLOCKED_WORKFLOW_STEPS = [
   "STAFF_TECHNICAL_REVIEW",
   "DDD_TECHNICAL_REVIEW",
@@ -17,72 +16,75 @@ export async function GET() {
   try {
     const supabase = await createClient();
 
-    // 1. Fetch all personnel registered under the core INSPECTOR profile designation
-    const { data: profiles, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .eq('designation', 'INSPECTOR')
-      .order('full_name', { ascending: true });
+    // 1. Fetch field-ready personnel from your users table
+    const { data: staffList, error: staffError } = await supabase
+      .from('users')
+      .select('id, name, division, role')
+      .eq('role', 'Staff')
+      .order('name', { ascending: true });
 
-    if (profileError) throw profileError;
-    if (!profiles || profiles.length === 0) {
+    if (staffError) throw staffError;
+    if (!staffList || staffList.length === 0) {
       return NextResponse.json({ inspectors: [] });
     }
 
-    // 2. Fetch all active team assignments and trace their application tracking states
-    // Pulls the Inspector ID -> Inspection Schedule -> Target Application Context
+    // 2. Cross-join using your exact production column: schedule_id
     const { data: activeAssignments, error: joinError } = await supabase
       .from('inspection_team_assignments')
       .select(`
         inspector_id,
-        inspection_schedules (
+        inspection_schedules:schedule_id (
           id,
           application_id,
-          applications (
+          applications:application_id (
             id,
-            company_name,
-            current_workflow_step,
-            current_step_title
+            details
           )
         )
       `);
 
     if (joinError) throw joinError;
 
-    // 3. Process the matrix to group blockages by individual Inspector ID
+    // 3. Process matrix based on your live JSONB properties
     const trackingMap: Record<string, Array<{ application_id: number; company_name: string; current_step_title: string }>> = {};
 
     activeAssignments?.forEach((assignment: any) => {
       const inspectorId = assignment.inspector_id;
       const app = assignment.inspection_schedules?.applications;
+      
+      if (app && app.details) {
+        const detailsObj = typeof app.details === 'string' ? JSON.parse(app.details) : app.details;
+        const currentStepKey = detailsObj?.inspectionWorkflowMeta?.currentStepKey;
 
-      // If the application exists and falls within our strict lock threshold
-      if (app && BLOCKED_WORKFLOW_STEPS.includes(app.current_workflow_step)) {
-        if (!trackingMap[inspectorId]) {
-          trackingMap[inspectorId] = [];
-        }
-        
-        // Ensure we don't duplicate identical blocking files for the same inspector
-        if (!trackingMap[inspectorId].some(item => item.application_id === app.id)) {
-          trackingMap[inspectorId].push({
-            application_id: app.id,
-            company_name: app.company_name,
-            current_step_title: app.current_step_title || "Pending Review"
-          });
+        if (currentStepKey && BLOCKED_WORKFLOW_STEPS.includes(currentStepKey)) {
+          if (!trackingMap[inspectorId]) {
+            trackingMap[inspectorId] = [];
+          }
+
+          const siteName = detailsObj?.savedChecklistSnapshot?.inspected_site_name || "Unknown Facility";
+
+          if (!trackingMap[inspectorId].some(item => item.application_id === app.id)) {
+            trackingMap[inspectorId].push({
+              application_id: app.id,
+              company_name: siteName,
+              current_step_title: currentStepKey.replace(/_/g, ' ')
+            });
+          }
         }
       }
     });
 
-    // 4. Map back across the master profile list to derive conditional readiness
-    const structuredWorkforceMatrix = profiles.map(profile => {
-      const lockedWorkflows = trackingMap[profile.id] || [];
-      return {
-        id: profile.id,
-        full_name: profile.full_name,
-        is_available: lockedWorkflows.length === 0, // Instantly true if array is clear
-        locked_workflows: lockedWorkflows
-      };
-    });
+    // 4. Build output matrix using your user fields
+    const structuredWorkforceMatrix = staffList.map(user => {
+      const lockedWorkflows = trackingMap[user.id] || [];
+        return {
+          id: user.id,
+          full_name: user.name, 
+          division: user.division, // <-- Ensure this property is passed down!
+          is_available: lockedWorkflows.length === 0,
+          locked_workflows: lockedWorkflows
+        };
+      });
 
     return NextResponse.json({ inspectors: structuredWorkforceMatrix });
 

@@ -11,16 +11,16 @@ export async function POST(request: Request) {
 
     // --- MODE 1: BLANK APPLICATION FOR NEW INSPECTION ---
     if (mode === "blank") {
-      const companyId = 901;
-      const applicationId = 601;
+      const companyId = 902;
+      const applicationId = 602;
 
-      // 1. Ensure Company Exists using the correct onConflict options configuration
+      // 1. Ensure Company Exists using proper .upsert syntax
       const { error: compErr } = await supabase
         .from("companies")
-        .insert(
+        .upsert(
           {
             id: companyId,
-            name: "Alpha Veterinary Biologicals Ltd",
+            name: "Balfa Veterinary Biologicals Ltd",
             address: "12 Industrial Estate, Kaduna, Nigeria",
             category: "LOCAL",
           },
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       // 2. Insert Blank Application
       const { error: appErr } = await supabase
         .from("applications")
-        .insert({
+        .upsert({
           id: applicationId,
           application_number: `APP-2026-AVB-${applicationId}`,
           type: "PRI",
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
             savedChecklistSnapshot: null,
             compiledReportHtml: ""
           }
-        });
+        }, { onConflict: "id" });
 
       if (appErr) throw appErr;
 
@@ -57,15 +57,15 @@ export async function POST(request: Request) {
     // --- MODE 2: FILLED APP WITH DEFICIENCIES & CAPA HISTORY ---
     if (mode === "filled_capa") {
       const companyId = 103;
-      const applicationId = 503;
+      const applicationId = 505;
 
-      // 1. Ensure Company Exists using the correct onConflict options configuration
+      // 1. Ensure Company Exists using proper .upsert syntax
       const { error: compErr } = await supabase
         .from("companies")
-        .insert(
+        .upsert(
           {
             id: companyId,
-            name: "Orange Kalbe Limited",
+            name: "Borange Kalbe Limited",
             address: "Planning Way, Ilupeju, Mushin, Lagos State",
             category: "LOCAL",
           },
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
       // 2. Insert Pre-filled Record
       const { error: appErr } = await supabase
         .from("applications")
-        .insert({
+        .upsert({
           id: applicationId,
           application_number: "APP-2026-OKL-003",
           type: "PRI",
@@ -140,7 +140,7 @@ export async function POST(request: Request) {
             },
             compiledReportHtml: "<h3>NAFDAC GMP Inspection Report</h3><p><strong>Site Name:</strong> Orange Kalbe Limited</p><ul><li><strong>Critical Deficiencies:</strong> Complete reversal of differential pressure air cascade gradient...</li></ul>"
           }
-        });
+        }, { onConflict: "id" });
 
       if (appErr) throw appErr;
 

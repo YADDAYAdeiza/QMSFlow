@@ -11,6 +11,7 @@ interface LockedWorkflow {
 interface Inspector {
   id: string;
   full_name: string;
+  division?: string; // Appended to handle incoming API matrix allocations safely
   is_available: boolean;
   locked_workflows?: LockedWorkflow[];
 }
@@ -50,9 +51,16 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
   useEffect(() => {
     async function getStaffPoolRegistry() {
       try {
-        const res = await fetch('/api/Inspectors/PoolRegistry');
-        if (!res.ok) throw new Error('Failed to retrieve inspector workforce matrix.');
+        setErrorMsg(null);
+        setLoading(true);
+        
+        // Point directly to our newly structured API route
+        const res = await fetch('/api/LocalInspectionReports/inspectors/poolRegistry');
+        if (!res.ok) throw new Error('Failed to retrieve inspector workforce matrix from QMS registry.');
+        
         const data = await res.json();
+        
+        // This sets the unified state array containing all profiles + block lists
         setInspectors(data.inspectors || []);
       } catch (err: any) {
         setErrorMsg(err.message);
@@ -164,7 +172,9 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
             >
               <option value="">-- Select Active, Clear Leader --</option>
               {availableInspectors.map(ins => (
-                <option key={ins.id} value={ins.id}>{ins.full_name}</option>
+                <option key={ins.id} value={ins.id}>
+                  {ins.full_name} [{ins.division?.toUpperCase() || 'STAFF'}]
+                </option>
               ))}
             </select>
           </div>
@@ -175,14 +185,19 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
             <p className="text-[11px] text-slate-400 mb-2">Only showing personnel cleared past the DDD_IRSD_REVIEW milestone.</p>
             <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-md p-2 space-y-1 bg-slate-50">
               {availableInspectors.filter(ins => ins.id !== teamLeader && !traineeInspectors.includes(ins.id)).map(ins => (
-                <label key={ins.id} className="flex items-center text-sm space-x-2 p-1 hover:bg-white rounded cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="rounded text-emerald-600 focus:ring-emerald-500"
-                    checked={coInspectors.includes(ins.id)}
-                    onChange={() => handleCoInspectorToggle(ins.id)}
-                  />
-                  <span className="text-slate-700">{ins.full_name}</span>
+                <label key={ins.id} className="flex items-center text-sm space-x-2 p-1 hover:bg-white rounded cursor-pointer justify-between">
+                  <div className="flex items-center space-x-2">
+                    <input 
+                      type="checkbox" 
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                      checked={coInspectors.includes(ins.id)}
+                      onChange={() => handleCoInspectorToggle(ins.id)}
+                    />
+                    <span className="text-slate-700">{ins.full_name}</span>
+                  </div>
+                  <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase rounded bg-slate-200 text-slate-700">
+                    {ins.division || 'STAFF'}
+                  </span>
                 </label>
               ))}
               {availableInspectors.filter(ins => ins.id !== teamLeader && !traineeInspectors.includes(ins.id)).length === 0 && (
@@ -196,14 +211,19 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
             <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Trainee Inspectors Attachment (Max 2)</label>
             <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-md p-2 space-y-1 bg-slate-50">
               {availableInspectors.filter(ins => ins.id !== teamLeader && !coInspectors.includes(ins.id)).map(ins => (
-                <label key={ins.id} className="flex items-center text-sm space-x-2 p-1 hover:bg-white rounded cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="rounded text-amber-600 focus:ring-amber-500"
-                    checked={traineeInspectors.includes(ins.id)}
-                    onChange={() => handleTraineeToggle(ins.id)}
-                  />
-                  <span className="text-slate-700">{ins.full_name}</span>
+                <label key={ins.id} className="flex items-center text-sm space-x-2 p-1 hover:bg-white rounded cursor-pointer justify-between">
+                  <div className="flex items-center space-x-2">
+                    <input 
+                      type="checkbox" 
+                      className="rounded text-amber-600 focus:ring-amber-500"
+                      checked={traineeInspectors.includes(ins.id)}
+                      onChange={() => handleTraineeToggle(ins.id)}
+                    />
+                    <span className="text-slate-700">{ins.full_name}</span>
+                  </div>
+                  <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase rounded bg-slate-200 text-slate-700">
+                    {ins.division || 'STAFF'}
+                  </span>
                 </label>
               ))}
               {availableInspectors.filter(ins => ins.id !== teamLeader && !coInspectors.includes(ins.id)).length === 0 && (
@@ -243,7 +263,9 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
                     : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                 }`}
               >
-                <span className="truncate max-w-[140px]">{ins.full_name}</span>
+                <span className="truncate max-w-[130px]">
+                  {ins.full_name} <span className="opacity-75 text-[10px]">({ins.division?.toUpperCase() || 'STAFF'})</span>
+                </span>
                 <span className={`px-1.5 py-0.5 text-[10px] rounded font-bold ${
                   ins.is_available 
                     ? 'bg-emerald-100 text-emerald-800' 
@@ -259,7 +281,7 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
           {focusedInspector ? (
             <div className="bg-white border border-slate-200 rounded p-3 shadow-inner min-h-[140px]">
               <h4 className="text-xs font-bold text-slate-800 truncate mb-2">
-                {focusedInspector.full_name}
+                {focusedInspector.full_name} <span className="text-[10px] text-slate-400">({focusedInspector.division?.toUpperCase() || 'STAFF'})</span>
               </h4>
               
               {!focusedInspector.is_available && focusedInspector.locked_workflows && focusedInspector.locked_workflows.length > 0 ? (

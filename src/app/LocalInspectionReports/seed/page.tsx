@@ -50,7 +50,7 @@ export default function SeedUtilityPage() {
 
         <div className="space-y-4">
           {/* Button 1: Blank Application */}
-          <div className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-lg hover:border-slate-650 transition">
+          <div className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-lg hover:border-slate-600 transition">
             <h3 className="font-semibold text-sm text-slate-200 mb-1">1. Clean Slate Template</h3>
             <p className="text-xs text-slate-400 mb-3">
               Creates a brand new company record and an application in <strong>INSPECTION_PENDING</strong> status with no observations. Ideal for testing fresh reporting workflows.
@@ -60,22 +60,22 @@ export default function SeedUtilityPage() {
               disabled={loading !== null}
               className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium text-xs py-2 px-4 rounded-md transition duration-150"
             >
-              {loading === "blank" ? "Processing..." : "Seed Blank Application (ID: 601)"}
+              {loading === "blank" ? "Processing..." : "Seed Blank Application (ID: 602)"}
             </button>
           </div>
 
           {/* Button 2: Filled CAPA Application */}
-          <div className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-lg hover:border-slate-650 transition">
+          <div className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-lg hover:border-slate-600 transition">
             <h3 className="font-semibold text-sm text-slate-200 mb-1">2. Completed Deficiencies Snapshot</h3>
             <p className="text-xs text-slate-400 mb-3">
-              Inserts <strong>Orange Kalbe Limited (ID: 503)</strong> populated with pre-existing audit logs, a critical differential pressure failure, and a trailing rework history.
+              Inserts <strong>Borange Kalbe Limited (Company ID: 103)</strong> populated with pre-existing audit logs, a critical differential pressure failure, and a trailing rework history.
             </p>
             <button
               onClick={() => triggerSeed("filled_capa")}
               disabled={loading !== null}
               className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-medium text-xs py-2 px-4 rounded-md transition duration-150"
             >
-              {loading === "filled_capa" ? "Processing..." : "Seed Filled CAPA Application (ID: 503)"}
+              {loading === "filled_capa" ? "Processing..." : "Seed Filled CAPA Application (ID: 505)"}
             </button>
           </div>
         </div>
