@@ -105,7 +105,7 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
     setSubmitting(true);
 
     try {
-      const response = await fetch('/api/InspectionSchedules', {
+      const response = await fetch('/api/LocalInspectionReports/inspectors/InspectionSchedules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

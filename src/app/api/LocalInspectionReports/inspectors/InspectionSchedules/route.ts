@@ -47,13 +47,13 @@ export async function POST(request: Request) {
       role: 'TEAM_LEADER'
     });
 
-    // 4. Map Co-Inspectors tracking role entries
+    // 4. Map Co-Inspectors tracking role entries (Fixed: changed hyphen to underscore to match CHECK constraint)
     if (coInspectors && Array.isArray(coInspectors)) {
       coInspectors.forEach((id: string) => {
         arrayInsertions.push({
           schedule_id: newScheduleUUID,
           inspector_id: id,
-          role: 'CO-INSPECTOR'
+          role: 'CO_INSPECTOR'
         });
       });
     }

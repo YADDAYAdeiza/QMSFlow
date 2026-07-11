@@ -20,6 +20,8 @@ export default async function DDDApplicationReviewPage({ params }: PageProps) {
   // 1. Authenticate and pull user role context
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+
+  console.log('This is user: ', user);
   
   // Replace with your actual user profile/metadata check mapping to QMS roles
   const userRole = user?.user_metadata?.role || "Divisional Deputy Director"; 
