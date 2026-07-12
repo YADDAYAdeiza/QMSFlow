@@ -102,14 +102,16 @@ export async function POST(request: Request) {
     
     // Update inner tracking context parameters
     currentDetails.inspectionWorkflowMeta.lastAction = "FORWARD";
-    currentDetails.inspectionWorkflowMeta.currentStepKey = "FIELD_INSPECTION_MANDATE";
+    // Synchronized with master workflow engine config schemas to fix registry pool selection leaks
+    currentDetails.inspectionWorkflowMeta.currentStepKey = "STAFF_TECHNICAL_REVIEW";
 
     // 8. Commit changes back to the main file registry with correct step keys
     const { error: updateError } = await supabase
       .from('applications')
       .update({ 
         details: currentDetails,
-        current_point: "Staff Technical Field Review" // Synchronized with active deployment
+        current_point: "Staff Technical Field Review", // Synchronized with active deployment
+        status: "INSPECTION_PENDING"                   // Explicit flag indicating mandate assigned but unexecuted
       })
       .eq('id', applicationId);
 

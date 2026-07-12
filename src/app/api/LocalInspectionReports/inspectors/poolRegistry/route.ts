@@ -11,7 +11,6 @@ const BLOCKED_WORKFLOW_STEPS = [
   "IRSD_STAFF_VETTING",
   "DDD_IRSD_REVIEW"
 ];
-
 export async function GET() {
   try {
     const supabase = await createClient();

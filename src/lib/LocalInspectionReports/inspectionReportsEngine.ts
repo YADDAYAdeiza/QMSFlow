@@ -54,10 +54,16 @@ export async function executeInspectionReportTransition({
       const oldDetails = (app.details as any) || {};
       const timestamp = new Date();
 
-      // --- 🌟 STRATEGIC INTERCEPTOR FOR TERMINAL STATUS FORK 🌟 ---
       let finalStatusLabel = nextStep.statusLabel;
       let finalTitle = nextStep.title;
 
+      // --- 🌟 STRATEGIC INTERCEPTOR: MOVING OUT OF FIELD INSPECTION 🌟 ---
+      // When field review checklist reports are pushed forward to management tracking
+      if (currentStepKey === "STAFF_TECHNICAL_REVIEW" && direction === "FORWARD") {
+        finalStatusLabel = "UNDER_DD_REVIEW";
+      }
+
+      // --- 🌟 STRATEGIC INTERCEPTOR FOR TERMINAL STATUS FORK 🌟 ---
       // If we are moving FORWARD from the Director's Final Sign-Off step:
       if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
         const recommendation = oldDetails.savedChecklistSnapshot?.final_recommendation || "PENDING";
@@ -91,7 +97,7 @@ export async function executeInspectionReportTransition({
       await tx.update(applications)
         .set({
           currentPoint: finalTitle, 
-          status: finalStatusLabel, // Dynamically intercepted for PENDING vs PASSED
+          status: finalStatusLabel, // Dynamically intercepted for UNDER_DD_REVIEW or terminal forks
           updatedAt: timestamp,
           details: {
             ...oldDetails,
