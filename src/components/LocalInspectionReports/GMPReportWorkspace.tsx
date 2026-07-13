@@ -22,6 +22,7 @@ interface WorkspaceProps {
   applicationId: string;
   companyId: string;
   companyName: string;
+  activeUserName?: string; 
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps; 
   initialReportHtml?: string | null;
   initialChecklistSnapshot?: any;
@@ -32,6 +33,7 @@ export default function GMPReportWorkspace({
   applicationId,
   companyId,
   companyName,
+  activeUserName = "Roseline", 
   initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
   initialReportHtml = null,
   initialChecklistSnapshot = null,
@@ -44,6 +46,14 @@ export default function GMPReportWorkspace({
   const [remarks, setRemarks] = useState("");
   const [selectedStaff, setSelectedStaff] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+
+  // DIAGNOSTIC LOG
+  console.log("🔐 SECURITY CHECK - Active User Prop:", {
+    receivedValue: activeUserName,
+    type: typeof activeUserName,
+    isMatch: activeUserName.trim().toLowerCase() === "roseline"
+  });
   
   // Real-time audit history log tracking
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
@@ -51,6 +61,9 @@ export default function GMPReportWorkspace({
   const [checklistSnapshot, setChecklistSnapshot] = useState<any>(initialChecklistSnapshot);
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
+
+  // SECURITY BOUNDARY: Evaluate if the active session user is authorized to forward dossiers
+  const isAuthorizedToForward = activeUserName.trim().toLowerCase() === "roseline";
 
   const staffDirectory = [
     { id: "usr_201", name: "Aliyu Ahmed", division: "VMD", role: "Technical Staff Reviewer" },
@@ -69,13 +82,43 @@ export default function GMPReportWorkspace({
     observations: []
   };
 
-  // Safe runtime fallback evaluation for child components
   const currentLiveChecklistData = checklistSnapshot || defaultChecklistData;
+
+  // 📝 COLLABORATIVE FEATURE: Save Draft function without running compilation engine
+  const handleSaveDraft = async (draftPayload: any) => {
+    setIsSavingDraft(true);
+    try {
+      console.log("Persisting collaborative checklist draft snapshot directly to database matrix...");
+      setChecklistSnapshot(draftPayload);
+
+      const res = await fetch(`/api/LocalInspectionReports/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          applicationId,
+          checklistSnapshot: draftPayload,
+          savedBy: activeUserName
+        }),
+      });
+
+      const outcome = await res.json();
+      if (res.ok && outcome.success) {
+        alert(`Draft snapshot saved successfully by ${activeUserName}! Other team reviewers will now see these observations.`);
+        router.refresh();
+      } else {
+        throw new Error(outcome.error || "Draft storage rejection.");
+      }
+    } catch (err: any) {
+      console.error("Draft sync failure:", err);
+      alert(`Draft Save Error: ${err.message}`);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
 
   const handleAICorrelationCompile = async (completedFormPayload: any) => {
     try {
       console.log("Transmitting payload to synthesis engine...");
-      // Cache the local checklist snapshot state so it feeds live into the router transition trigger payload
       setChecklistSnapshot(completedFormPayload);
 
       const res = await fetch("/api/LocalInspectionReports/generate", {
@@ -104,6 +147,11 @@ export default function GMPReportWorkspace({
   };
 
   const handleTransition = async (direction: "FORWARD" | "REWORK") => {
+    if (direction === "FORWARD" && !isAuthorizedToForward) {
+      alert("Unauthorized Operation: Forwarding clearance restricted to Roseline.");
+      return;
+    }
+
     if (!remarks.trim()) {
       alert("Please provide official directives/minutes before moving this file.");
       return;
@@ -111,7 +159,6 @@ export default function GMPReportWorkspace({
 
     setIsSubmitting(true);
     try {
-      // 1. Intercept Terminal Steps to sync state and fire notifications via API route
       if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
         console.log("Routing via structural endpoint handler matrix...");
         const transitionRes = await fetch("/api/LocalInspectionReports", {
@@ -122,7 +169,7 @@ export default function GMPReportWorkspace({
             currentStepKey: currentStep,
             direction,
             companyName,
-            checklistSnapshot: currentLiveChecklistData // FIX: Passes up-to-date runtime state mutation payload securely
+            checklistSnapshot: currentLiveChecklistData
           })
         });
 
@@ -132,13 +179,12 @@ export default function GMPReportWorkspace({
         }
       }
 
-      // 2. Commit standard state change metadata engine transaction updates
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
         direction,
         actingUserId: "usr_active_session", 
-        actingUserName: `Officer (${activeStepConfig.division})`,
+        actingUserName: `${activeUserName} (${activeStepConfig.division})`,
         targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
         remarks: remarks
       });
@@ -146,7 +192,6 @@ export default function GMPReportWorkspace({
       if (res.success && "arrivedAt" in res && res.arrivedAt) {
         const nextStepKey = res.arrivedAt as keyof typeof inspectionReportWorkflow.steps;
         
-        // Account for final fork interceptor titles
         let targetStepTitle = inspectionReportWorkflow.steps[nextStepKey]?.title || "Archived Desk";
         if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
           targetStepTitle = currentLiveChecklistData?.final_recommendation === "PENDING"
@@ -159,7 +204,7 @@ export default function GMPReportWorkspace({
           action: direction,
           fromStep: activeStepConfig.title,
           toStep: targetStepTitle,
-          actorName: `Officer (${activeStepConfig.division})`,
+          actorName: `${activeUserName} (${activeStepConfig.division})`,
           timestamp: new Date().toISOString()
         };
 
@@ -227,6 +272,7 @@ export default function GMPReportWorkspace({
               <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
                 <p>Division: <span className="font-bold text-white">{activeStepConfig?.division}</span></p>
                 <p>Authorized Actor: <span className="italic text-white">{activeStepConfig?.role}</span></p>
+                <p>Current User Session: <span className="font-bold text-amber-400 font-mono">{activeUserName}</span></p>
               </div>
             </div>
           </div>
@@ -270,6 +316,7 @@ export default function GMPReportWorkspace({
             <InspectionChecklistForm
               initialData={currentLiveChecklistData}
               onSave={handleAICorrelationCompile}
+              onSaveDraft={handleSaveDraft} // 👈 Injected draft channel hook so form internally can save too
               isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
             />
 
@@ -319,6 +366,26 @@ export default function GMPReportWorkspace({
 
           {/* Action Dashboard Sidebar */}
           <div className="space-y-6">
+            
+            {/* Collaborative Draft Quick-Saver Board */}
+            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
+              <h3 className="text-xs font-bold mb-2 uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                💾 Team Draft Status
+              </h3>
+              <p className="text-[11px] text-slate-500 mb-3 leading-normal">
+                Working in a technical trio? Save continuous drafts to share field findings without forwarding ownership custody.
+              </p>
+              <button
+                type="button"
+                disabled={isSavingDraft || (currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE")}
+                onClick={() => handleSaveDraft(currentLiveChecklistData)}
+                className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-2xs"
+              >
+                {isSavingDraft ? "Saving Draft Matrix..." : "💾 Save Collaborative Draft"}
+              </button>
+            </div>
+
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
               <h3 className="text-sm font-bold mb-4 uppercase tracking-wider text-slate-700">
@@ -361,7 +428,6 @@ export default function GMPReportWorkspace({
                 </div>
               )}
 
-              {/* Contextual Banner for the Director's Final Adjudication */}
               {currentStep === "DIRECTOR_FINAL_SIGN_OFF" && (
                 <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed animate-fadeIn">
                   <strong>📋 Adjudication Check:</strong> The checklist snapshot current recommendation reads:{" "}
@@ -383,8 +449,8 @@ export default function GMPReportWorkspace({
                   placeholder={
                     currentStep === "DIRECTOR_FINAL_SIGN_OFF"
                       ? (currentLiveChecklistData?.final_recommendation === "PENDING"
-                          ? "Provide official directive text to issue with the CAPA requirement..."
-                          : "Enter validation clearance minutes for final certified sign-off...")
+                        ? "Provide official directive text to issue with the CAPA requirement..."
+                        : "Enter validation clearance minutes for final certified sign-off...")
                       : `Provide dynamic feedback or instructions as ${activeStepConfig?.role || "Reviewer"}...`
                   }
                   className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
@@ -396,7 +462,7 @@ export default function GMPReportWorkspace({
                   <>
                     <button
                       type="button"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || !isAuthorizedToForward}
                       onClick={() => {
                         const recommendation = currentLiveChecklistData?.final_recommendation || "PENDING";
                         const msg = recommendation === "PENDING"
@@ -404,7 +470,7 @@ export default function GMPReportWorkspace({
                           : "Confirm absolute final certification and release of official GMP Certificate?";
                         if (window.confirm(msg)) handleTransition("FORWARD");
                       }}
-                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border ${
+                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed ${
                         currentLiveChecklistData?.final_recommendation === "PENDING"
                           ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
                           : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
@@ -412,6 +478,8 @@ export default function GMPReportWorkspace({
                     >
                       {isSubmitting 
                         ? "Processing Action..." 
+                        : !isAuthorizedToForward
+                        ? "🔒 Forwarding Restricted to Roseline"
                         : currentLiveChecklistData?.final_recommendation === "PENDING"
                         ? "✍️ Approve & Issue CAPA Directive"
                         : "✍️ Concur & Grant Final Approval"}
@@ -435,11 +503,17 @@ export default function GMPReportWorkspace({
                     {activeStepConfig?.nextStepKey && (
                       <button
                         type="button"
-                        disabled={isSubmitting || (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)}
+                        disabled={isSubmitting || !isAuthorizedToForward || (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)}
                         onClick={() => handleTransition("FORWARD")}
-                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
                       >
-                        {isSubmitting ? "Routing..." : currentStep.includes("DDD") ? "✍️ Sign Minutes & Forward Desk" : "🚀 Dispatch Dossier Forward"}
+                        {isSubmitting 
+                          ? "Routing..." 
+                          : !isAuthorizedToForward 
+                          ? "🔒 Forwarding Restricted to Roseline" 
+                          : currentStep.includes("DDD") 
+                          ? "✍️ Sign Minutes & Forward Desk" 
+                          : "🚀 Dispatch Dossier Forward"}
                       </button>
                     )}
 

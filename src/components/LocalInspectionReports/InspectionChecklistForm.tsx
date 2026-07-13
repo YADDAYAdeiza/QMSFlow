@@ -43,10 +43,16 @@ interface ChecklistData {
 interface ChecklistFormProps {
   initialData?: Partial<ChecklistData> | null;
   onSave: (data: ChecklistData) => void;
+  onSaveDraft?: (data: ChecklistData) => void; // 👈 Injected draft channel hook
   isReadOnly?: boolean;
 }
 
-export default function InspectionChecklistForm({ initialData, onSave, isReadOnly = false }: ChecklistFormProps) {
+export default function InspectionChecklistForm({ 
+  initialData, 
+  onSave, 
+  onSaveDraft, 
+  isReadOnly = false 
+}: ChecklistFormProps) {
   const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
 
   // --- STABLE CONTROLLED STATE HYDRATION ---
@@ -113,10 +119,7 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
   const addObservation = () => {
     if (!newObsText.trim()) return;
 
-    const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID 
-      ? crypto.randomUUID() 
-      : `obs_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-
+    const uniqueId = crypto.randomUUID();
     const newObs: Observation = { id: uniqueId, severity: newObsSeverity, text: newObsText.trim() };
     const updatedObs = [...formData.observations, newObs];
     
@@ -229,7 +232,7 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
 
             <div className="text-xs">
               <label className="block font-bold text-slate-700 mb-1">Vicinity Assessment</label>
-              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" placeholder="Observe external physical features, surroundings, sanitation, and nearby risk factors..." value={formData.vicinity_assessment} onChange={e => setFormData({...formData, vicinity_assessment: e.target.value})} />
+              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" placeholder="Observe external physical features, surroundings, sanitation..." value={formData.vicinity_assessment} onChange={e => setFormData({...formData, vicinity_assessment: e.target.value})} />
             </div>
 
             <div>
@@ -245,11 +248,11 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Past CAPA Status / Outstanding Items</label>
-                  <input type="text" placeholder="Fully implemented / partially pending..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.past_capa_status} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, past_capa_status: e.target.value}})} />
+                  <input type="text" placeholder="Fully implemented..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.past_capa_status} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, past_capa_status: e.target.value}})} />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Major Changes Since Last Intervention</label>
-                  <input type="text" placeholder="Facility upgrades, management transitions, new lines..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.major_changes} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, major_changes: e.target.value}})} />
+                  <input type="text" placeholder="Facility upgrades, new lines..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.major_changes} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, major_changes: e.target.value}})} />
                 </div>
               </div>
             </div>
@@ -262,12 +265,12 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
             <p className="text-xs text-slate-500 italic">Enter bullet points of raw observations. The system compilation framework will parse these metrics directly into the regulatory output draft.</p>
             
             {[
-              { key: "pqs", label: "System 1: Pharmaceutical Quality System (PQS)", scoreKey: "pqs_score", notesKey: "pqs_notes", placeholder: "Sighted Site Master File Ref... Change control SOP ref..." },
-              { key: "personnel", label: "System 2: Personnel & Training Protocols", scoreKey: "personnel_score", notesKey: "personnel_notes", placeholder: "Key staff qualifications independent?..." },
-              { key: "premises", label: "System 3: Premises and Process Equipment", scoreKey: "premises_equipment_score", notesKey: "premises_equipment_notes", placeholder: "Zoning & man-material layout flow check..." },
+              { key: "pqs", label: "System 1: Pharmaceutical Quality System (PQS)", scoreKey: "pqs_score", notesKey: "pqs_notes", placeholder: "Sighted Site Master File Ref..." },
+              { key: "personnel", label: "System 2: Personnel & Training Protocols", scoreKey: "personnel_score", notesKey: "personnel_notes", placeholder: "Key staff qualifications..." },
+              { key: "premises", label: "System 3: Premises and Process Equipment", scoreKey: "premises_equipment_score", notesKey: "premises_equipment_notes", placeholder: "Zoning & layout check..." },
               { key: "validation", label: "System 4: Qualification and Validation", scoreKey: "qualification_validation_score", notesKey: "qualification_validation_notes", placeholder: "Validation Master Plan status..." },
               { key: "material", label: "System 5: Material Management & Storage", scoreKey: "material_management_score", notesKey: "material_management_notes", placeholder: "Vendor audits checklist..." },
-              { key: "lab", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence, Ethylene Glycol impurity screening..." },
+              { key: "lab", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence..." },
             ].map((sys) => (
               <div key={sys.key} className="border border-slate-100 rounded-lg p-4 bg-slate-50/50 space-y-2 text-xs">
                 <div className="flex justify-between items-center">
@@ -368,17 +371,26 @@ export default function InspectionChecklistForm({ initialData, onSave, isReadOnl
           ← Back
         </button>
         
-        {activeTab < 3 ? (
-          <button type="button" onClick={() => setActiveTab((activeTab + 1) as any)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded">
-            Next Section →
-          </button>
-        ) : (
-          !isReadOnly && (
-            <button type="button" onClick={() => onSave(formData)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center gap-1.5">
-              ✨ Compile Draft via NAFDAC AI Engine
+        <div className="flex items-center gap-2">
+          {/* INTERMEDIARY DRAFT ACTION BUTTON */}
+          {!isReadOnly && onSaveDraft && (
+            <button type="button" onClick={() => onSaveDraft(formData)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-200/60 hover:bg-slate-200 rounded transition-all">
+              Save Draft Progress
             </button>
-          )
-        )}
+          )}
+
+          {activeTab < 3 ? (
+            <button type="button" onClick={() => setActiveTab((activeTab + 1) as any)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded">
+              Next Section →
+            </button>
+          ) : (
+            !isReadOnly && (
+              <button type="button" onClick={() => onSave(formData)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center gap-1.5">
+                ✨ Compile Draft via NAFDAC AI Engine
+              </button>
+            )
+          )}
+        </div>
       </div>
     </div>
   );

@@ -22,8 +22,8 @@ export default async function LocalReportPage({ params }: PageProps) {
   const appData = await db
     .select({
       id: applications.id,
-      applicationNumber:applications.applicationNumber,
-      type:applications.type,
+      applicationNumber: applications.applicationNumber,
+      type: applications.type,
       companyId: applications.companyId,
       companyName: companies.name,
       details: applications.details,
@@ -66,10 +66,17 @@ export default async function LocalReportPage({ params }: PageProps) {
       ? Math.round((end.getTime() - start.getTime()) / 1000) 
       : Math.round((new Date().getTime() - start.getTime()) / 1000); // Running total if still active
 
+    // 🔄 Applied custom structural mapping for NAFDAC units
+    const mappedDivision = log.division; 
+    const finalDivision = ["VMD", "PAD", "AFPD", "IRSD"].includes(mappedDivision || "") 
+      ? mappedDivision 
+      : "VMD"; // Sensible default alignment
+
     return {
       id: log.id.toString(),
-      point: log.point || "Unknown Desk Node",
-      division: log.division || "Unassigned",
+      // Clean string conversion for UI text mapping rules
+      point: log.point ? log.point.replace("DDD", "Divisional Deputy Director") : "Unknown Desk Node",
+      division: finalDivision,
       staffName: log.staffId || "System Pending", 
       enteredAt: start.toISOString(),
       exitedAt: end ? end.toISOString() : null,
@@ -78,19 +85,22 @@ export default async function LocalReportPage({ params }: PageProps) {
   });
 
   // --- 4. Safely extract values from the jsonb details block ---
-const appDetails = (application.details as any) || {};
+  const appDetails = (application.details as any) || {};
 
-const initialComments = appDetails.comments || [];
-const initialReportHtml = appDetails.compiledReportHtml || null;
-const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey || "STAFF_TECHNICAL_REVIEW"; 
+  const initialComments = appDetails.comments || [];
+  const initialReportHtml = appDetails.compiledReportHtml || null;
+  const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey || "STAFF_TECHNICAL_REVIEW"; 
 
-// FIX: Generate an intelligent dynamic fallback instead of absolute null
-const initialChecklistSnapshot = appDetails.savedChecklistSnapshot || {
-  inspected_site_name: application.companyName || "Unknown Manufacturing Site",
-  type_of_inspection: application.type || "PRI", // Grabs the 'PRI' value from your row data
-  report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`, // Matches your API generation schema
-  final_recommendation: "PENDING"
-};
+  // Generate an intelligent dynamic fallback instead of absolute null
+  const initialChecklistSnapshot = appDetails.savedChecklistSnapshot || {
+    inspected_site_name: application.companyName || "Unknown Manufacturing Site",
+    type_of_inspection: application.type || "PRI", // Grabs the 'PRI' value from your row data
+    report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`, // Matches your API generation schema
+    final_recommendation: "PENDING"
+  };
+
+  // 🔐 In a real production build, you would pull this name string right from your next-auth session payload!
+  const authenticatedUserSessionName = "Roseline";
 
   return (
     <div className="bg-slate-50 min-h-screen py-6">
@@ -98,11 +108,11 @@ const initialChecklistSnapshot = appDetails.savedChecklistSnapshot || {
         applicationId={application.id.toString()} 
         companyId={application.companyId ? application.companyId.toString() : ""} 
         companyName={application.companyName || "Unknown Manufacturing Site"}
+        activeUserName={authenticatedUserSessionName} // 🚀 Passed prop into Workspace
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}
         initialChecklistSnapshot={initialChecklistSnapshot}
         initialComments={initialComments}
-        // If your workspace requires the raw timeline metrics display:
         // timeLogs={formattedTimeLogs} 
       />
     </div>
