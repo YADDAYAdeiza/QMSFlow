@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     // --- MODE 1: BLANK APPLICATION FOR NEW INSPECTION ---
     if (mode === "blank") {
       const companyId = 903;
-      const applicationId = 603;
+      const applicationId = 604;
 
       // 1. Ensure Company Exists using proper .upsert syntax
       const { error: compErr } = await supabase
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
         .upsert(
           {
             id: companyId,
-            name: "Calfa Veterinary Biologicals Ltd",
+            name: "Dalfa Veterinary Biologicals Ltd",
             address: "12 Industrial Estate, Kaduna, Nigeria",
             category: "LOCAL",
           },

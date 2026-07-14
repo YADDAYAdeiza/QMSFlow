@@ -9,6 +9,50 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+// 📋 Strict 1:1 deduction of your ChecklistData Schema structure 
+// Used to safely initialize missing properties in older or fresh database records
+const BASE_CHECKLIST_TEMPLATE = {
+  // Step 1: Meta & History
+  report_doc_number: "OKL-LA-PRI-01-2026",
+  inspection_dates: "",
+  type_of_inspection: "PRI",
+  inspected_site_name: "Orange Kalbe Limited",
+  site_contact_details: { 
+    phone: "", 
+    email: "", 
+    website: "" 
+  },
+  activities_carried_out: [] as string[],
+  vicinity_assessment: "",
+  lead_inspector: "",
+  co_inspectors: "",
+  historical_baseline: {
+    prev_date_type: "",
+    prev_team: "",
+    past_capa_status: "",
+    major_changes: ""
+  },
+  // Step 2: The 6 Quality Systems (Defaulted to 100% grades and clean notes strings)
+  pqs_score: 100, 
+  pqs_notes: "",
+  personnel_score: 100, 
+  personnel_notes: "",
+  premises_equipment_score: 100, 
+  premises_equipment_notes: "",
+  qualification_validation_score: 100, 
+  qualification_validation_notes: "",
+  material_management_score: 100, 
+  material_management_notes: "",
+  laboratory_control_score: 100, 
+  laboratory_control_notes: "",
+  // Step 3: Synthesis
+  critical_count: 0,
+  major_count: 0,
+  other_count: 0,
+  observations: [] as Array<{ id: string; severity: "critical" | "major" | "other"; text: string }>,
+  final_recommendation: "PENDING"
+};
+
 export default async function LocalReportPage({ params }: PageProps) {
   const resolvedParams = await params;
   const targetId = resolvedParams.id;
@@ -74,7 +118,7 @@ export default async function LocalReportPage({ params }: PageProps) {
 
     return {
       id: log.id.toString(),
-      // Clean string conversion for UI text mapping rules
+      // Clean string conversion for UI text mapping rules (DDD updated to Divisional Deputy Director)
       point: log.point ? log.point.replace("DDD", "Divisional Deputy Director") : "Unknown Desk Node",
       division: finalDivision,
       staffName: log.staffId || "System Pending", 
@@ -89,17 +133,38 @@ export default async function LocalReportPage({ params }: PageProps) {
 
   const initialComments = appDetails.comments || [];
   const initialReportHtml = appDetails.compiledReportHtml || null;
-  const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey || "STAFF_TECHNICAL_REVIEW"; 
+  
+  // Try to find the step in the workflow metadata, fallback to row-level currentPoint, then standard default
+  const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey 
+    || application.currentPoint 
+    || "STAFF_TECHNICAL_REVIEW"; 
 
-  // Generate an intelligent dynamic fallback instead of absolute null
-  const initialChecklistSnapshot = appDetails.savedChecklistSnapshot || {
-    inspected_site_name: application.companyName || "Unknown Manufacturing Site",
-    type_of_inspection: application.type || "PRI", // Grabs the 'PRI' value from your row data
-    report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`, // Matches your API generation schema
-    final_recommendation: "PENDING"
-  };
+  // Focus directly on the active 'checklistSnapshot', falling back to 'savedChecklistSnapshot' if needed
+  const activeSnapshot = appDetails.checklistSnapshot || appDetails.savedChecklistSnapshot;
 
-  // 🔐 In a real production build, you would pull this name string right from your next-auth session payload!
+  const initialChecklistSnapshot = activeSnapshot 
+    ? {
+        ...BASE_CHECKLIST_TEMPLATE,
+        ...activeSnapshot,
+        // Hydrate sub-structures safely so undefined nested elements do not cause layout crashes
+        site_contact_details: {
+          ...BASE_CHECKLIST_TEMPLATE.site_contact_details,
+          ...(activeSnapshot.site_contact_details || {})
+        },
+        historical_baseline: {
+          ...BASE_CHECKLIST_TEMPLATE.historical_baseline,
+          ...(activeSnapshot.historical_baseline || {})
+        }
+      }
+    : {
+        ...BASE_CHECKLIST_TEMPLATE,
+        inspected_site_name: application.companyName || "Unknown Manufacturing Site",
+        type_of_inspection: application.type || "PRI", // Grabs 'PRI' value from applications row
+        report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`,
+        final_recommendation: "PENDING"
+      };
+
+  // 🔐 Authenticated session context default
   const authenticatedUserSessionName = "Roseline";
 
   return (
@@ -108,7 +173,7 @@ export default async function LocalReportPage({ params }: PageProps) {
         applicationId={application.id.toString()} 
         companyId={application.companyId ? application.companyId.toString() : ""} 
         companyName={application.companyName || "Unknown Manufacturing Site"}
-        activeUserName={authenticatedUserSessionName} // 🚀 Passed prop into Workspace
+        activeUserName={authenticatedUserSessionName} 
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}
         initialChecklistSnapshot={initialChecklistSnapshot}

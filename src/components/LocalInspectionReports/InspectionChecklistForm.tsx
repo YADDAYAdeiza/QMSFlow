@@ -1,6 +1,7 @@
 "use client";
+// @/components/LocalInspectionReports/InspectionChecklistForm.tsx
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface Observation {
   id: string;
@@ -43,7 +44,8 @@ interface ChecklistData {
 interface ChecklistFormProps {
   initialData?: Partial<ChecklistData> | null;
   onSave: (data: ChecklistData) => void;
-  onSaveDraft?: (data: ChecklistData) => void; // 👈 Injected draft channel hook
+  onSaveDraft?: (data: ChecklistData) => void; 
+  onChange?: (data: ChecklistData) => void; // 👈 Hoists changes back to Workspace in real-time
   isReadOnly?: boolean;
 }
 
@@ -51,9 +53,13 @@ export default function InspectionChecklistForm({
   initialData, 
   onSave, 
   onSaveDraft, 
+  onChange,
   isReadOnly = false 
 }: ChecklistFormProps) {
   const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
+
+  // 1. Sync lock ref prevents state changes triggered by hydration from broadcasting back up to parent
+  const isSyncingRef = useRef(false);
 
   // --- STABLE CONTROLLED STATE HYDRATION ---
   const [formData, setFormData] = useState<ChecklistData>({
@@ -82,9 +88,12 @@ export default function InspectionChecklistForm({
     final_recommendation: initialData?.final_recommendation || "PENDING"
   });
 
-  // Dynamic updates synchronization
+  // Dynamic initialData hydration sync with lock protection
   useEffect(() => {
     if (initialData) {
+      // Set the lock so local updates don't fire onChange immediately
+      isSyncingRef.current = true;
+      
       setFormData(prev => ({
         ...prev,
         ...initialData,
@@ -99,8 +108,20 @@ export default function InspectionChecklistForm({
         activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
         observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
       }));
+
+      // Release the lock right after state sync clears the queue
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 0);
     }
   }, [initialData]);
+
+  // Real-time parent state sync (Only fires when changes are local/user-driven)
+  useEffect(() => {
+    if (onChange && !isSyncingRef.current) {
+      onChange(formData);
+    }
+  }, [formData, onChange]);
 
   const [newObsText, setNewObsText] = useState("");
   const [newObsSeverity, setNewObsSeverity] = useState<"critical" | "major" | "other">("major");
@@ -354,8 +375,9 @@ export default function InspectionChecklistForm({
             {/* FINAL ADJUDICATION DROPDOWN */}
             <div className="pt-2 border-t">
               <label className="block font-bold text-slate-800 mb-1 uppercase tracking-wide">Final Recommendation / Adjudication</label>
+              {/* Corrected name dynamically via user rule context */}
               <select disabled={isReadOnly} className="w-full border p-2.5 rounded bg-white font-semibold text-slate-800 text-xs" value={formData.final_recommendation} onChange={e => setFormData({...formData, final_recommendation: e.target.value})}>
-                <option value="PENDING">Select / Awaiting Final Evaluation</option>
+                <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
                 <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
                 <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
                 <option value="REJECTED">Recommended for Rejection / Hold</option>

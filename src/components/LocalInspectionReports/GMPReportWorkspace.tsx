@@ -1,11 +1,53 @@
 "use client";
 // @/components/LocalInspectionReports/GMPReportWorkspace.tsx
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
 import InspectionChecklistForm from "./InspectionChecklistForm";  
+
+const BASE_CHECKLIST_TEMPLATE = {
+  // Step 1: Meta & History
+  report_doc_number: "OKL-LA-PRI-01-2026",
+  inspection_dates: "",
+  type_of_inspection: "PRI",
+  inspected_site_name: "Orange Kalbe Limited",
+  site_contact_details: { 
+    phone: "", 
+    email: "", 
+    website: "" 
+  },
+  activities_carried_out: [] as string[],
+  vicinity_assessment: "",
+  lead_inspector: "",
+  co_inspectors: "",
+  historical_baseline: {
+    prev_date_type: "",
+    prev_team: "",
+    past_capa_status: "",
+    major_changes: ""
+  },
+  // Step 2: The 6 Quality Systems (Defaulted to 100% grades and clean notes strings)
+  pqs_score: 100, 
+  pqs_notes: "",
+  personnel_score: 100, 
+  personnel_notes: "",
+  premises_equipment_score: 100, 
+  premises_equipment_notes: "",
+  qualification_validation_score: 100, 
+  qualification_validation_notes: "",
+  material_management_score: 100, 
+  material_management_notes: "",
+  laboratory_control_score: 100, 
+  laboratory_control_notes: "",
+  // Step 3: Synthesis
+  critical_count: 0,
+  major_count: 0,
+  other_count: 0,
+  observations: [] as Array<{ id: string; severity: "critical" | "major" | "other"; text: string }>,
+  final_recommendation: "PENDING"
+};
 
 interface CommentTrailItem {
   text: string;
@@ -14,6 +56,7 @@ interface CommentTrailItem {
   toStep: string;
   actorName: string;
   timestamp: string;
+  processingDurationSeconds?: number; // ⏱️ Added for QMS staff tracking metrics
   actorId?: string;
   assignedToId?: string;
 }
@@ -48,6 +91,14 @@ export default function GMPReportWorkspace({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
 
+  // ⏱️ QMS Performance Tracking: Record when the user started working on the active desk step
+  const [stepEntryTime, setStepEntryTime] = useState<number>(Date.now());
+
+  useEffect(() => {
+    // Reset timer whenever the custody desk updates
+    setStepEntryTime(Date.now());
+  }, [currentStep]);
+
   // DIAGNOSTIC LOG
   console.log("🔐 SECURITY CHECK - Active User Prop:", {
     receivedValue: activeUserName,
@@ -58,12 +109,19 @@ export default function GMPReportWorkspace({
   // Real-time audit history log tracking
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
   const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
-  const [checklistSnapshot, setChecklistSnapshot] = useState<any>(initialChecklistSnapshot);
+  
+  // Hoisted state initialized with BASE_CHECKLIST_TEMPLATE as fallback
+  const [checklistSnapshot, setChecklistSnapshot] = useState<any>(() => {
+    return initialChecklistSnapshot || BASE_CHECKLIST_TEMPLATE;
+  });
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
   // SECURITY BOUNDARY: Evaluate if the active session user is authorized to forward dossiers
   const isAuthorizedToForward = activeUserName.trim().toLowerCase() === "roseline";
+
+  // Unified Division mapping rule
+  const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
   const staffDirectory = [
     { id: "usr_201", name: "Aliyu Ahmed", division: "VMD", role: "Technical Staff Reviewer" },
@@ -71,27 +129,15 @@ export default function GMPReportWorkspace({
     { id: "usr_203", name: "Fatima Umar", division: "IRSD", role: "IRSD Staff Reviewer" }
   ];
 
-  const defaultChecklistData = {
-    pqs_score: 100,
-    premises_equipment_score: 85,
-    personnel_score: 100,
-    qualification_validation_score: 90,
-    material_management_score: 100,
-    laboratory_control_score: 100,
-    final_recommendation: "PENDING",
-    observations: []
-  };
-
-  const currentLiveChecklistData = checklistSnapshot || defaultChecklistData;
-
   // 📝 COLLABORATIVE FEATURE: Save Draft function without running compilation engine
   const handleSaveDraft = async (draftPayload: any) => {
+    console.log('This is draftPayload:', draftPayload);
     setIsSavingDraft(true);
     try {
       console.log("Persisting collaborative checklist draft snapshot directly to database matrix...");
       setChecklistSnapshot(draftPayload);
 
-      const res = await fetch(`/api/LocalInspectionReports/draft`, {
+      const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -157,6 +203,10 @@ export default function GMPReportWorkspace({
       return;
     }
 
+    // Compute active staff processing duration for QMS conformance metrics
+    const now = Date.now();
+    const durationSeconds = Math.round((now - stepEntryTime) / 1000);
+
     setIsSubmitting(true);
     try {
       if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
@@ -169,7 +219,7 @@ export default function GMPReportWorkspace({
             currentStepKey: currentStep,
             direction,
             companyName,
-            checklistSnapshot: currentLiveChecklistData
+            checklistSnapshot: checklistSnapshot
           })
         });
 
@@ -179,12 +229,17 @@ export default function GMPReportWorkspace({
         }
       }
 
+      // Safe fallback ensuring we align division markers
+      const activeDivision = availableDivisions.includes(activeStepConfig.division) 
+        ? activeStepConfig.division 
+        : "VMD";
+
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
         direction,
         actingUserId: "usr_active_session", 
-        actingUserName: `${activeUserName} (${activeStepConfig.division})`,
+        actingUserName: `${activeUserName} (${activeDivision})`,
         targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
         remarks: remarks
       });
@@ -194,7 +249,7 @@ export default function GMPReportWorkspace({
         
         let targetStepTitle = inspectionReportWorkflow.steps[nextStepKey]?.title || "Archived Desk";
         if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-          targetStepTitle = currentLiveChecklistData?.final_recommendation === "PENDING"
+          targetStepTitle = checklistSnapshot?.final_recommendation === "PENDING"
             ? "Applicant Notification Hub - CAPA Request Issued"
             : "Applicant Notification Hub - Final Approval Certified";
         }
@@ -202,14 +257,15 @@ export default function GMPReportWorkspace({
         const newMinute: CommentTrailItem = {
           text: remarks,
           action: direction,
-          fromStep: activeStepConfig.title,
-          toStep: targetStepTitle,
-          actorName: `${activeUserName} (${activeStepConfig.division})`,
-          timestamp: new Date().toISOString()
+          fromStep: activeStepConfig.title.replace(/DDD/g, "Divisional Deputy Director"),
+          toStep: targetStepTitle.replace(/DDD/g, "Divisional Deputy Director"),
+          actorName: `${activeUserName} (${activeDivision})`,
+          timestamp: new Date().toISOString(),
+          processingDurationSeconds: durationSeconds // ⏱️ Bound directly inside the minute ledger metadata
         };
 
         setCommentsList(prev => [newMinute, ...prev]);
-        alert(`Dossier successfully routed to: ${targetStepTitle}`);
+        alert(`Dossier successfully routed in ${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s to: ${targetStepTitle.replace(/DDD/g, "Divisional Deputy Director")}`);
         
         setRemarks("");
         setSelectedStaff("");
@@ -244,7 +300,7 @@ export default function GMPReportWorkspace({
           >
             {Object.keys(inspectionReportWorkflow.steps).map((key) => (
               <option key={key} value={key}>
-                {key.replace("DDD", "Divisional Deputy Director")} - {inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps].title}
+                {key.replace(/DDD/g, "Divisional Deputy Director")} - {inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps].title.replace(/DDD/g, "Divisional Deputy Director")}
               </option>
             ))}
           </select>
@@ -266,12 +322,14 @@ export default function GMPReportWorkspace({
               </p>
             </div>
             
-            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 max-w-sm">
+            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 max-w-sm w-full">
               <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Current Custody Desk</p>
-              <p className="text-sm font-bold text-emerald-400 mt-0.5">{activeStepConfig?.title}</p>
+              <p className="text-sm font-bold text-emerald-400 mt-0.5 font-sans">
+                {activeStepConfig?.title?.replace(/DDD/g, "Divisional Deputy Director")}
+              </p>
               <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
                 <p>Division: <span className="font-bold text-white">{activeStepConfig?.division}</span></p>
-                <p>Authorized Actor: <span className="italic text-white">{activeStepConfig?.role}</span></p>
+                <p>Authorized Actor: <span className="italic text-white">{activeStepConfig?.role?.replace(/DDD/g, "Divisional Deputy Director")}</span></p>
                 <p>Current User Session: <span className="font-bold text-amber-400 font-mono">{activeUserName}</span></p>
               </div>
             </div>
@@ -314,9 +372,10 @@ export default function GMPReportWorkspace({
 
             {/* Structured Form Entry Blocks */}
             <InspectionChecklistForm
-              initialData={currentLiveChecklistData}
+              initialData={checklistSnapshot}
               onSave={handleAICorrelationCompile}
-              onSaveDraft={handleSaveDraft} // 👈 Injected draft channel hook so form internally can save too
+              onSaveDraft={handleSaveDraft} 
+              onChange={(updatedData: any) => setChecklistSnapshot(updatedData)}
               isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
             />
 
@@ -332,6 +391,9 @@ export default function GMPReportWorkspace({
                 <div className="relative border-l border-slate-200 pl-4 space-y-4 ml-2 mt-2">
                   {commentsList.map((item, index) => {
                     const isRework = item.action === "REWORK";
+                    const durationText = item.processingDurationSeconds 
+                      ? `${Math.floor(item.processingDurationSeconds / 60)}m ${item.processingDurationSeconds % 60}s`
+                      : "N/A";
                     return (
                       <div key={index} className="relative text-xs">
                         <span className={`absolute -left-[21px] top-1 flex h-[13px] w-[13px] rounded-full border-2 bg-white ${isRework ? "border-rose-500" : "border-emerald-500"}`} />
@@ -344,9 +406,16 @@ export default function GMPReportWorkspace({
                                 {item.action}
                               </span>
                             </div>
-                            <span className="text-[10px] font-mono text-slate-400">
-                              {new Date(item.timestamp).toLocaleString("en-GB")}
-                            </span>
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-[10px] font-mono text-slate-400">
+                                {new Date(item.timestamp).toLocaleString("en-GB")}
+                              </span>
+                              {item.processingDurationSeconds && (
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  ⏱️ QMS Duration: <span className="font-semibold text-slate-700">{durationText}</span>
+                                </span>
+                              )}
+                            </div>
                           </div>
                           
                           <p className="text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{item.text}</p>
@@ -379,7 +448,7 @@ export default function GMPReportWorkspace({
               <button
                 type="button"
                 disabled={isSavingDraft || (currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE")}
-                onClick={() => handleSaveDraft(currentLiveChecklistData)}
+                onClick={() => handleSaveDraft(checklistSnapshot)}
                 className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-2xs"
               >
                 {isSavingDraft ? "Saving Draft Matrix..." : "💾 Save Collaborative Draft"}
@@ -432,7 +501,7 @@ export default function GMPReportWorkspace({
                 <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed animate-fadeIn">
                   <strong>📋 Adjudication Check:</strong> The checklist snapshot current recommendation reads:{" "}
                   <span className="font-bold underline text-amber-800">
-                    {currentLiveChecklistData?.final_recommendation || "PENDING"}
+                    {checklistSnapshot?.final_recommendation || "PENDING"}
                   </span>. 
                   Signing off will mutate the application status profile and dispatch notification files.
                 </div>
@@ -448,10 +517,10 @@ export default function GMPReportWorkspace({
                   onChange={(e) => setRemarks(e.target.value)}
                   placeholder={
                     currentStep === "DIRECTOR_FINAL_SIGN_OFF"
-                      ? (currentLiveChecklistData?.final_recommendation === "PENDING"
+                      ? (checklistSnapshot?.final_recommendation === "PENDING"
                         ? "Provide official directive text to issue with the CAPA requirement..."
                         : "Enter validation clearance minutes for final certified sign-off...")
-                      : `Provide dynamic feedback or instructions as ${activeStepConfig?.role || "Reviewer"}...`
+                      : `Provide dynamic feedback or instructions as ${activeStepConfig?.role?.replace(/DDD/g, "Divisional Deputy Director") || "Reviewer"}...`
                   }
                   className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
                 />
@@ -464,14 +533,14 @@ export default function GMPReportWorkspace({
                       type="button"
                       disabled={isSubmitting || !isAuthorizedToForward}
                       onClick={() => {
-                        const recommendation = currentLiveChecklistData?.final_recommendation || "PENDING";
+                        const recommendation = checklistSnapshot?.final_recommendation || "PENDING";
                         const msg = recommendation === "PENDING"
                           ? "Confirm sign-off on inspection report and dispatch CAPA Directive to applicant profile?"
                           : "Confirm absolute final certification and release of official GMP Certificate?";
                         if (window.confirm(msg)) handleTransition("FORWARD");
                       }}
                       className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed ${
-                        currentLiveChecklistData?.final_recommendation === "PENDING"
+                        checklistSnapshot?.final_recommendation === "PENDING"
                           ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
                           : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
                       }`}
@@ -480,7 +549,7 @@ export default function GMPReportWorkspace({
                         ? "Processing Action..." 
                         : !isAuthorizedToForward
                         ? "🔒 Forwarding Restricted to Roseline"
-                        : currentLiveChecklistData?.final_recommendation === "PENDING"
+                        : checklistSnapshot?.final_recommendation === "PENDING"
                         ? "✍️ Approve & Issue CAPA Directive"
                         : "✍️ Concur & Grant Final Approval"}
                     </button>
