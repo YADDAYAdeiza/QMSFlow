@@ -8,13 +8,13 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const payload = await request.json();
     
-    // 1. EXTRACT IDENTIFIER (Fixed key mismatch from checklistSnapshot -> savedChecklistSnapshot)
-    const applicationNumber = payload?.savedChecklistSnapshot?.report_doc_number;
+    // 1. EXTRACT IDENTIFIER (Using the correct checklistSnapshot key)
+    const applicationNumber = payload?.checklistSnapshot?.report_doc_number;
     
     if (!applicationNumber) {
-      console.warn('Payload parsing failed: Missing report_doc_number in savedChecklistSnapshot', payload);
+      console.warn('Payload parsing failed: Missing report_doc_number in checklistSnapshot', payload);
       return NextResponse.json(
-        { error: 'Missing report_doc_number inside savedChecklistSnapshot' },
+        { error: 'Missing report_doc_number inside checklistSnapshot' },
         { status: 400 }
       );
     }
@@ -31,16 +31,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
     }
 
-    // Safely default existing JSONB details to an object
-    const currentDetails = existingApp?.details && typeof existingApp.details === 'object'
-      ? (existingApp.details as Record<string, any>)
-      : {};
+    // Safely parse/handle existing JSONB details to prevent wiping other metadata
+    let currentDetails: Record<string, any> = {};
+    if (existingApp?.details) {
+      if (typeof existingApp.details === 'string') {
+        try {
+          currentDetails = JSON.parse(existingApp.details);
+        } catch (e) {
+          console.error('Failed to parse existing details JSON string:', e);
+        }
+      } else if (typeof existingApp.details === 'object') {
+        currentDetails = existingApp.details;
+      }
+    }
 
     // 3. MERGE INCOMING PAYLOAD INTO THE EVOLVING JSONB FIELD
+    // This preserves existing top-level details fields like assignedDivisions, productLines, etc.
     const updatePayload: Record<string, any> = {
       details: {
         ...currentDetails,
-        ...payload // Merges checklist snapshot, custom notes, dynamic criteria safely
+        ...payload, // Merges checklistSnapshot, savedBy, etc.
+        // Ensure both names point to the updated object for fallback protection
+        checklistSnapshot: payload.checklistSnapshot,
+        savedChecklistSnapshot: payload.checklistSnapshot
       },
       updated_at: new Date().toISOString(),
     };
@@ -48,16 +61,15 @@ export async function POST(request: Request) {
     // 4. MAP TOP-LEVEL RELATIONAL COLUMNS (If present)
     const currentStep = payload?.inspectionWorkflowMeta?.currentStepKey;
     if (currentStep) {
-      // Direct assignment of structural workflow points
       updatePayload.current_point = currentStep;
     }
 
-    const finalRecommendation = payload?.savedChecklistSnapshot?.final_recommendation;
+    const finalRecommendation = payload?.checklistSnapshot?.final_recommendation;
     if (finalRecommendation) {
       updatePayload.status = finalRecommendation;
     }
 
-    // 5. COMMIT THE UPDATE
+    // 5. COMMIT THE UPDATE TO THE DATABASE
     const { data, error: updateError } = await supabase
       .from('applications')
       .update(updatePayload)

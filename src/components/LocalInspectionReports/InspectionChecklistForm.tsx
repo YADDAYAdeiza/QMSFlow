@@ -43,9 +43,9 @@ interface ChecklistData {
 
 interface ChecklistFormProps {
   initialData?: Partial<ChecklistData> | null;
-  onSave: (data: ChecklistData) => void;
-  onSaveDraft?: (data: ChecklistData) => void; 
-  onChange?: (data: ChecklistData) => void; // 👈 Hoists changes back to Workspace in real-time
+  onSave: (data: ChecklistData) => void | Promise<void>;
+  onSaveDraft?: (data: ChecklistData) => void | Promise<void>; 
+  onChange?: (data: ChecklistData) => void;
   isReadOnly?: boolean;
 }
 
@@ -57,12 +57,13 @@ export default function InspectionChecklistForm({
   isReadOnly = false 
 }: ChecklistFormProps) {
   const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
-
-  // 1. Sync lock ref prevents state changes triggered by hydration from broadcasting back up to parent
-  const isSyncingRef = useRef(false);
+  
+  // --- ASYNC BUTTON VISUAL FEEDBACK STATES ---
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
 
   // --- STABLE CONTROLLED STATE HYDRATION ---
-  const [formData, setFormData] = useState<ChecklistData>({
+  const [formData, setFormData] = useState<ChecklistData>(() => ({
     report_doc_number: initialData?.report_doc_number || "OKL-LA-PRI-01-2026",
     inspection_dates: initialData?.inspection_dates || "",
     type_of_inspection: initialData?.type_of_inspection || "PRI",
@@ -86,39 +87,37 @@ export default function InspectionChecklistForm({
     other_count: initialData?.other_count ?? 0,
     observations: Array.isArray(initialData?.observations) ? initialData.observations : [],
     final_recommendation: initialData?.final_recommendation || "PENDING"
-  });
+  }));
 
-  // Dynamic initialData hydration sync with lock protection
+  const lastEmittedDataRef = useRef<ChecklistData | null>(null);
+
   useEffect(() => {
     if (initialData) {
-      // Set the lock so local updates don't fire onChange immediately
-      isSyncingRef.current = true;
-      
-      setFormData(prev => ({
-        ...prev,
-        ...initialData,
-        site_contact_details: {
-          ...prev.site_contact_details,
-          ...(initialData.site_contact_details || {})
-        },
-        historical_baseline: {
-          ...prev.historical_baseline,
-          ...(initialData.historical_baseline || {})
-        },
-        activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
-        observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
-      }));
+      const isEcho = lastEmittedDataRef.current && 
+        JSON.stringify(initialData) === JSON.stringify(lastEmittedDataRef.current);
 
-      // Release the lock right after state sync clears the queue
-      setTimeout(() => {
-        isSyncingRef.current = false;
-      }, 0);
+      if (!isEcho) {
+        setFormData(prev => ({
+          ...prev,
+          ...initialData,
+          site_contact_details: {
+            ...prev.site_contact_details,
+            ...(initialData.site_contact_details || {})
+          },
+          historical_baseline: {
+            ...prev.historical_baseline,
+            ...(initialData.historical_baseline || {})
+          },
+          activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
+          observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
+        }));
+      }
     }
   }, [initialData]);
 
-  // Real-time parent state sync (Only fires when changes are local/user-driven)
   useEffect(() => {
-    if (onChange && !isSyncingRef.current) {
+    if (onChange) {
+      lastEmittedDataRef.current = formData;
       onChange(formData);
     }
   }, [formData, onChange]);
@@ -164,6 +163,35 @@ export default function InspectionChecklistForm({
       other_count: severity === "other" ? Math.max(0, prev.other_count - 1) : prev.other_count,
     }));
   };
+
+  // --- INTERCEPT WRAPPER HANDLERS ---
+  const handleDraftSubmit = async () => {
+    if (!onSaveDraft || isSavingDraft || isCompiling) return;
+    try {
+      setIsSavingDraft(true);
+      await onSaveDraft(formData);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const handleFinalSubmit = async () => {
+    if (isCompiling || isSavingDraft) return;
+    try {
+      setIsCompiling(true);
+      await onSave(formData);
+    } finally {
+      setIsCompiling(false);
+    }
+  };
+
+  // Helper reusable spinner element
+  const Spinner = () => (
+    <svg className="animate-spin h-3.5 w-3.5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  );
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -375,7 +403,6 @@ export default function InspectionChecklistForm({
             {/* FINAL ADJUDICATION DROPDOWN */}
             <div className="pt-2 border-t">
               <label className="block font-bold text-slate-800 mb-1 uppercase tracking-wide">Final Recommendation / Adjudication</label>
-              {/* Corrected name dynamically via user rule context */}
               <select disabled={isReadOnly} className="w-full border p-2.5 rounded bg-white font-semibold text-slate-800 text-xs" value={formData.final_recommendation} onChange={e => setFormData({...formData, final_recommendation: e.target.value})}>
                 <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
                 <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
@@ -389,26 +416,57 @@ export default function InspectionChecklistForm({
 
       {/* FOOTER ACTIONS PANEL */}
       <div className="bg-slate-50 px-6 py-4 border-t flex justify-between items-center">
-        <button type="button" disabled={activeTab === 1} onClick={() => setActiveTab((activeTab - 1) as any)} className="px-3 py-1.5 border font-semibold text-xs rounded bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700">
+        <button type="button" disabled={activeTab === 1 || isSavingDraft || isCompiling} onClick={() => setActiveTab((activeTab - 1) as any)} className="px-3 py-1.5 border font-semibold text-xs rounded bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700">
           ← Back
         </button>
         
         <div className="flex items-center gap-2">
           {/* INTERMEDIARY DRAFT ACTION BUTTON */}
           {!isReadOnly && onSaveDraft && (
-            <button type="button" onClick={() => onSaveDraft(formData)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-200/60 hover:bg-slate-200 rounded transition-all">
-              Save Draft Progress
+            <button 
+              type="button" 
+              disabled={isSavingDraft || isCompiling}
+              onClick={handleDraftSubmit} 
+              className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-200/60 hover:bg-slate-200 disabled:opacity-50 rounded transition-all flex items-center gap-2 min-w-[130px] justify-center"
+            >
+              {isSavingDraft ? (
+                <>
+                  <Spinner />
+                  <span>Saving Draft...</span>
+                </>
+              ) : (
+                <span>Save Draft Progress</span>
+              )}
             </button>
           )}
 
           {activeTab < 3 ? (
-            <button type="button" onClick={() => setActiveTab((activeTab + 1) as any)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded">
+            <button 
+              type="button" 
+              disabled={isSavingDraft || isCompiling}
+              onClick={() => setActiveTab((activeTab + 1) as any)} 
+              className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold text-xs rounded"
+            >
               Next Section →
             </button>
           ) : (
             !isReadOnly && (
-              <button type="button" onClick={() => onSave(formData)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center gap-1.5">
-                ✨ Compile Draft via NAFDAC AI Engine
+              <button 
+                type="button" 
+                disabled={isCompiling || isSavingDraft}
+                onClick={handleFinalSubmit} 
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center gap-2 min-w-[210px] justify-center"
+              >
+                {isCompiling ? (
+                  <>
+                    <Spinner />
+                    <span>Running Engine...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>✨ Compile Draft via NAFDAC AI Engine</span>
+                  </>
+                )}
               </button>
             )
           )}

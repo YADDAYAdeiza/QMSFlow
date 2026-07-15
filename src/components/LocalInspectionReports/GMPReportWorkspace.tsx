@@ -97,6 +97,7 @@ export default function GMPReportWorkspace({
   useEffect(() => {
     // Reset timer whenever the custody desk updates
     setStepEntryTime(Date.now());
+    console.log('Timer reset')
   }, [currentStep]);
 
   // DIAGNOSTIC LOG
