@@ -1,6 +1,10 @@
 import { pgTable, serial, text, varchar, timestamp, jsonb, integer, uuid, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+// ==========================================
+// 1. MASTER TABLES & SYSTEM CONFIGURATIONS
+// ==========================================
+
 // 1. Master Company List
 export const companies = pgTable("companies", {
   id: serial("id").primaryKey(),
@@ -73,12 +77,11 @@ export const applications = pgTable("applications", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// 6. QMS Timelines
 // 6. QMS Timelines (Updated for automatic cascade delete support)
 export const qmsTimelines = pgTable("qms_timelines", {
   id: serial("id").primaryKey(),
-  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }), // <-- Added here
-  staffId: text("staff_id"),
+  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }),
+  staffId: text("staff_id"), // Maps to users.id (UUID text string representation)
   division: text("division"),
   point: text("point"),
   startTime: timestamp("start_time").defaultNow(),
@@ -128,7 +131,47 @@ export const riskAssessments = pgTable("risk_assessments", {
   uniqueAppRisk: uniqueIndex("unique_app_risk").on(table.applicationId),
 }));
 
+// 10. Local Inspection Reports
+export const localInspectionReports = pgTable("local_inspection_reports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  applicationId: integer("application_id")
+    .references(() => applications.id, { onDelete: "cascade" })
+    .notNull(),
+  companyId: integer("company_id")
+    .references(() => companies.id, { onDelete: "cascade" })
+    .notNull(),
+  inspectorId: uuid("inspector_id")
+    .references(() => users.id),
+  reportDocNumber: varchar("report_doc_number", { length: 100 }).unique().notNull(),
+  typeOfInspection: varchar("type_of_inspection", { length: 10 }).notNull(),
+  currentStatus: varchar("current_status", { length: 50 }).default("LOD_INTAKE").notNull(),
+  checklistRaw: jsonb("checklist_raw").notNull(),
+  reportHtml: text("report_html"),
+  versionHistory: jsonb("version_history").$type<Array<{
+    modifiedBy: string;
+    updatedAt: string;
+    changes: string;
+  }>>().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// 11. CAPA Submissions
+export const capaSubmissions = pgTable("capa_submissions", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").references(() => applications.id),
+  refNumber: varchar("ref_number", { length: 255 }),
+  status: varchar("status", { length: 50 }).default("PENDING_VERIFICATION"),
+  capaItems: jsonb("capa_items"),
+  signatures: jsonb("signatures"),
+  createdAt: text("created_at"), 
+  submittedAt: text("submitted_at"),
+});
+
+
+// ==========================================
 // --- RELATIONS ---
+// ==========================================
 
 export const companiesRelations = relations(companies, ({ many }) => ({
   productLines: many(productLines),
@@ -161,11 +204,22 @@ export const applicationsRelations = relations(applications, ({ one, many }) => 
   riskAssessments: many(riskAssessments), 
 }));
 
+// UPDATED: Linked qmsTimelines to both Applications and Users
 export const qmsTimelinesRelations = relations(qmsTimelines, ({ one }) => ({
   application: one(applications, {
     fields: [qmsTimelines.applicationId],
     references: [applications.id],
   }),
+  staff: one(users, {
+    fields: [qmsTimelines.staffId],
+    references: [users.id],
+  }),
+}));
+
+// ADDED: Backwards relation definition so users can load their historical/active timelines
+export const usersRelations = relations(users, ({ many }) => ({
+  timelines: many(qmsTimelines),
+  reportsInspected: many(localInspectionReports),
 }));
 
 export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => ({
@@ -173,54 +227,12 @@ export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => 
   application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),
 }));
 
-// Add this directly to your schema file alongside your other tables
-
-export const localInspectionReports = pgTable("local_inspection_reports", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  
-  // FIX: Type altered from uuid to integer to correctly reference your serial primary keys
-  applicationId: integer("application_id")
-    .references(() => applications.id, { onDelete: "cascade" })
-    .notNull(),
-  companyId: integer("company_id")
-    .references(() => companies.id, { onDelete: "cascade" })
-    .notNull(),
-  inspectorId: uuid("inspector_id")
-    .references(() => users.id),
-  
-  // Searchable Meta parameters
-  reportDocNumber: varchar("report_doc_number", { length: 100 }).unique().notNull(), // e.g., OKL-LA-PRI-01-2026
-  typeOfInspection: varchar("type_of_inspection", { length: 10 }).notNull(),       // PPI, PRI, RI, FUI
-  currentStatus: varchar("current_status", { length: 50 }).default("LOD_INTAKE").notNull(), // Matches workflow statusLabels
-  
-  // The Data Cores
-  checklistRaw: jsonb("checklist_raw").notNull(), // Structured telemetry questions mapped by quality system
-  reportHtml: text("report_html"),                // The narrative text generated from the inspection findings
-  versionHistory: jsonb("version_history").$type<Array<{
-    modifiedBy: string;
-    updatedAt: string;
-    changes: string;
-  }>>().default([]),
-  
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
-// Relational Definitions for Clean Joined Queries
 export const localInspectionReportsRelations = relations(localInspectionReports, ({ one }) => ({
   application: one(applications, { fields: [localInspectionReports.applicationId], references: [applications.id] }),
   company: one(companies, { fields: [localInspectionReports.companyId], references: [companies.id] }),
   inspector: one(users, { fields: [localInspectionReports.inspectorId], references: [users.id] }),
 }));
 
-// Add this directly inside src/db/schema.ts
-export const capaSubmissions = pgTable("capa_submissions", {
-  id: serial("id").primaryKey(),
-  application_id: integer("application_id").references(() => applications.id),
-  ref_number: varchar("ref_number", { length: 255 }),
-  status: varchar("status", { length: 50 }).default("PENDING_VERIFICATION"),
-  capa_items: jsonb("capa_items"),
-  signatures: jsonb("signatures"),
-  created_at: text("created_at"), 
-  submitted_at: text("submitted_at"),
-});
+export const capaSubmissionsRelations = relations(capaSubmissions, ({ one }) => ({
+  application: one(applications, { fields: [capaSubmissions.applicationId], references: [applications.id] }),
+}));
