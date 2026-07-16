@@ -97,7 +97,7 @@ export default function GMPReportWorkspace({
   useEffect(() => {
     // Reset timer whenever the custody desk updates
     setStepEntryTime(Date.now());
-    console.log('Timer reset')
+    console.log('Timer reset');
   }, [currentStep]);
 
   // DIAGNOSTIC LOG
@@ -250,7 +250,7 @@ export default function GMPReportWorkspace({
         
         let targetStepTitle = inspectionReportWorkflow.steps[nextStepKey]?.title || "Archived Desk";
         if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-          targetStepTitle = checklistSnapshot?.final_recommendation === "PENDING"
+          targetStepTitle = checklistSnapshot?.final_recommendation === "CAPA_PENDING"
             ? "Applicant Notification Hub - CAPA Request Issued"
             : "Applicant Notification Hub - Final Approval Certified";
         }
@@ -535,7 +535,7 @@ export default function GMPReportWorkspace({
                       disabled={isSubmitting || !isAuthorizedToForward}
                       onClick={() => {
                         const recommendation = checklistSnapshot?.final_recommendation || "PENDING";
-                        const msg = recommendation === "PENDING"
+                        const msg = recommendation === "CAPA_PENDING"
                           ? "Confirm sign-off on inspection report and dispatch CAPA Directive to applicant profile?"
                           : "Confirm absolute final certification and release of official GMP Certificate?";
                         if (window.confirm(msg)) handleTransition("FORWARD");
@@ -550,7 +550,7 @@ export default function GMPReportWorkspace({
                         ? "Processing Action..." 
                         : !isAuthorizedToForward
                         ? "🔒 Forwarding Restricted to Roseline"
-                        : checklistSnapshot?.final_recommendation === "PENDING"
+                        : checklistSnapshot?.final_recommendation === "CAPA_PENDING"
                         ? "✍️ Approve & Issue CAPA Directive"
                         : "✍️ Concur & Grant Final Approval"}
                     </button>

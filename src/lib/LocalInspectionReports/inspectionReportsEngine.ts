@@ -68,7 +68,7 @@ export async function executeInspectionReportTransition({
       if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
         const recommendation = oldDetails.savedChecklistSnapshot?.final_recommendation || "PENDING";
         
-        if (recommendation === "PENDING") {
+        if (recommendation === "CAPA_PENDING") {
           finalStatusLabel = "AWAITING_CAPA";
           finalTitle = "Applicant Notification Hub - CAPA Request Issued";
           

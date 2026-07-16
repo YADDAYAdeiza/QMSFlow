@@ -55,7 +55,7 @@ export async function POST(request: Request) {
         // });
 
         // Build unique secure tracking address
-        const applicantPortalUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/LocalInspetionReports/applicant/applications/${applicationId}/capa`;
+        const applicantPortalUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/LocalInspectionReports/applicant/applications/${applicationId}/capa`;
 
         // Format a dynamic bullet list of structural observations for the email payload
         const observationListHtml = structuralObservations.length > 0
