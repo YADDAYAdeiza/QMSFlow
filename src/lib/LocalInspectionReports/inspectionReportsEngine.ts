@@ -15,6 +15,7 @@ interface TransitionPayload {
   actingUserName: string;
   targetUserId: string | null; // Desk officer receiving the file
   remarks: string;
+  checklistSnapshot?: any; // 🌟 Added to capture snapshots on mid-stage transitions
 }
 
 export async function executeInspectionReportTransition({
@@ -24,7 +25,8 @@ export async function executeInspectionReportTransition({
   actingUserId,
   actingUserName,
   targetUserId,
-  remarks
+  remarks,
+  checklistSnapshot
 }: TransitionPayload) {
   try {
     const config = inspectionReportWorkflow;
@@ -54,6 +56,9 @@ export async function executeInspectionReportTransition({
       const oldDetails = (app.details as any) || {};
       const timestamp = new Date();
 
+      // Determine the initial incoming baseline snapshot block
+      const incomingSnapshot = checklistSnapshot || oldDetails.savedChecklistSnapshot || null;
+
       let finalStatusLabel = nextStep.statusLabel;
       let finalTitle = nextStep.title;
 
@@ -66,7 +71,7 @@ export async function executeInspectionReportTransition({
       // --- 🌟 STRATEGIC INTERCEPTOR FOR TERMINAL STATUS FORK 🌟 ---
       // If we are moving FORWARD from the Director's Final Sign-Off step:
       if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-        const recommendation = oldDetails.savedChecklistSnapshot?.final_recommendation || "PENDING";
+        const recommendation = incomingSnapshot?.final_recommendation || "PENDING";
         
         if (recommendation === "CAPA_PENDING") {
           finalStatusLabel = "AWAITING_CAPA";
@@ -101,6 +106,7 @@ export async function executeInspectionReportTransition({
           updatedAt: timestamp,
           details: {
             ...oldDetails,
+            savedChecklistSnapshot: incomingSnapshot, // 🌟 Safe state capture directly inside JSONB fields
             comments: [...(oldDetails.comments || []), systemLogEntry],
             inspectionWorkflowMeta: {
               currentStepKey: targetStepKey,

@@ -9,7 +9,7 @@ interface Observation {
   text: string;
 }
 
-interface ChecklistData {
+export interface ChecklistData {
   // Step 1: Meta & History
   report_doc_number: string;
   inspection_dates: string;
@@ -47,6 +47,16 @@ interface ChecklistFormProps {
   onSaveDraft?: (data: ChecklistData) => void | Promise<void>; 
   onChange?: (data: ChecklistData) => void;
   isReadOnly?: boolean;
+}
+
+type QualitySystemKey = 'pqs' | 'personnel' | 'premises_equipment' | 'qualification_validation' | 'material_management' | 'laboratory_control';
+
+interface QualitySystemConfig {
+  key: QualitySystemKey;
+  label: string;
+  scoreKey: keyof ChecklistData & string;
+  notesKey: keyof ChecklistData & string;
+  placeholder: string;
 }
 
 export default function InspectionChecklistForm({ 
@@ -101,12 +111,15 @@ export default function InspectionChecklistForm({
           ...prev,
           ...initialData,
           site_contact_details: {
-            ...prev.site_contact_details,
-            ...(initialData.site_contact_details || {})
+            phone: initialData.site_contact_details?.phone ?? prev.site_contact_details.phone,
+            email: initialData.site_contact_details?.email ?? prev.site_contact_details.email,
+            website: initialData.site_contact_details?.website ?? prev.site_contact_details.website,
           },
           historical_baseline: {
-            ...prev.historical_baseline,
-            ...(initialData.historical_baseline || {})
+            prev_date_type: initialData.historical_baseline?.prev_date_type ?? prev.historical_baseline.prev_date_type,
+            prev_team: initialData.historical_baseline?.prev_team ?? prev.historical_baseline.prev_team,
+            past_capa_status: initialData.historical_baseline?.past_capa_status ?? prev.historical_baseline.past_capa_status,
+            major_changes: initialData.historical_baseline?.major_changes ?? prev.historical_baseline.major_changes,
           },
           activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
           observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
@@ -164,7 +177,6 @@ export default function InspectionChecklistForm({
     }));
   };
 
-  // --- INTERCEPT WRAPPER HANDLERS ---
   const handleDraftSubmit = async () => {
     if (!onSaveDraft || isSavingDraft || isCompiling) return;
     try {
@@ -185,7 +197,15 @@ export default function InspectionChecklistForm({
     }
   };
 
-  // Helper reusable spinner element
+  const qualitySystemsConfigs: QualitySystemConfig[] = [
+    { key: "pqs", label: "System 1: Pharmaceutical Quality System (PQS)", scoreKey: "pqs_score", notesKey: "pqs_notes", placeholder: "Sighted Site Master File Ref..." },
+    { key: "personnel", label: "System 2: Personnel & Training Protocols", scoreKey: "personnel_score", notesKey: "personnel_notes", placeholder: "Key staff qualifications..." },
+    { key: "premises_equipment", label: "System 3: Premises and Process Equipment", scoreKey: "premises_equipment_score", notesKey: "premises_equipment_notes", placeholder: "Zoning & layout check..." },
+    { key: "qualification_validation", label: "System 4: Qualification and Validation", scoreKey: "qualification_validation_score", notesKey: "qualification_validation_notes", placeholder: "Validation Master Plan status..." },
+    { key: "material_management", label: "System 5: Material Management & Storage", scoreKey: "material_management_score", notesKey: "material_management_notes", placeholder: "Vendor audits checklist..." },
+    { key: "laboratory_control", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence..." },
+  ];
+
   const Spinner = () => (
     <svg className="animate-spin h-3.5 w-3.5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -257,10 +277,10 @@ export default function InspectionChecklistForm({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Scope of Operations / Activities Carried Out</label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+              <label className="block text-xs font-bold text-slate-700 mb-1">Scope of Operations / Jurisdictions</label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 {["Active Ingredient", "Finished Product", "Packaging", "Importing", "Lab Testing", "Batch Release"].map((act) => (
-                  <label key={act} className="flex items-center gap-2 p-2 border rounded bg-slate-50 cursor-pointer select-none font-medium text-slate-700">
+                  <label key={act} className="flex items-center gap-2 p-2 border rounded bg-slate-50 cursor-pointer select-none font-bold text-slate-700">
                     <input type="checkbox" disabled={isReadOnly} checked={formData.activities_carried_out.includes(act)} onChange={() => toggleActivity(act)} className="rounded text-emerald-600 focus:ring-0" />
                     <span>{act}</span>
                   </label>
@@ -313,24 +333,32 @@ export default function InspectionChecklistForm({
           <div className="space-y-6">
             <p className="text-xs text-slate-500 italic">Enter bullet points of raw observations. The system compilation framework will parse these metrics directly into the regulatory output draft.</p>
             
-            {[
-              { key: "pqs", label: "System 1: Pharmaceutical Quality System (PQS)", scoreKey: "pqs_score", notesKey: "pqs_notes", placeholder: "Sighted Site Master File Ref..." },
-              { key: "personnel", label: "System 2: Personnel & Training Protocols", scoreKey: "personnel_score", notesKey: "personnel_notes", placeholder: "Key staff qualifications..." },
-              { key: "premises", label: "System 3: Premises and Process Equipment", scoreKey: "premises_equipment_score", notesKey: "premises_equipment_notes", placeholder: "Zoning & layout check..." },
-              { key: "validation", label: "System 4: Qualification and Validation", scoreKey: "qualification_validation_score", notesKey: "qualification_validation_notes", placeholder: "Validation Master Plan status..." },
-              { key: "material", label: "System 5: Material Management & Storage", scoreKey: "material_management_score", notesKey: "material_management_notes", placeholder: "Vendor audits checklist..." },
-              { key: "lab", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence..." },
-            ].map((sys) => (
+            {qualitySystemsConfigs.map((sys) => (
               <div key={sys.key} className="border border-slate-100 rounded-lg p-4 bg-slate-50/50 space-y-2 text-xs">
                 <div className="flex justify-between items-center">
                   <h4 className="font-bold text-slate-800 uppercase tracking-wide">{sys.label}</h4>
                   <div className="flex items-center gap-1.5">
                     <span className="font-semibold text-slate-500 text-[11px]">Grade:</span>
-                    <input type="number" min="0" max="100" disabled={isReadOnly} className="w-16 p-1 border rounded text-center font-bold bg-white text-slate-800" value={(formData as any)[sys.scoreKey]} onChange={e => setFormData({...formData, [sys.scoreKey]: Math.min(100, Math.max(0, Number(e.target.value)))})} />
+                    <input 
+                      type="number" 
+                      min="0" 
+                      max="100" 
+                      disabled={isReadOnly} 
+                      className="w-16 p-1 border rounded text-center font-bold bg-white text-slate-800" 
+                      value={formData[sys.scoreKey] as number} 
+                      onChange={e => setFormData({...formData, [sys.scoreKey]: Math.min(100, Math.max(0, Number(e.target.value)))})} 
+                    />
                     <span className="font-bold text-slate-600">%</span>
                   </div>
                 </div>
-                <textarea rows={3} disabled={isReadOnly} placeholder={sys.placeholder} className="w-full border p-2 rounded bg-white text-slate-800 text-xs font-medium" value={(formData as any)[sys.notesKey]} onChange={e => setFormData({...formData, [sys.notesKey]: e.target.value})} />
+                <textarea 
+                  rows={3} 
+                  disabled={isReadOnly} 
+                  placeholder={sys.placeholder} 
+                  className="w-full border p-2 rounded bg-white text-slate-800 text-xs font-medium" 
+                  value={formData[sys.notesKey] as string} 
+                  onChange={e => setFormData({...formData, [sys.notesKey]: e.target.value})} 
+                />
               </div>
             ))}
           </div>
@@ -464,7 +492,7 @@ export default function InspectionChecklistForm({
                   </>
                 ) : (
                   <>
-                    <span>✨ Compile Draft via NAFDAC AI Engine</span>
+                    <span>跑 Draft via System Engine</span>
                   </>
                 )}
               </button>

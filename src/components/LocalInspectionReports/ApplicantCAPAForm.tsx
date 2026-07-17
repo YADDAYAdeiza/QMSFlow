@@ -15,7 +15,6 @@ export interface CAPALineItem {
   responsibility: string;
   status: "Open" | "Pending Verification" | "Resolved";
   uploadedEvidenceUrl?: string; 
-  // Add properties to interface definition
   inspectorStatus?: "Acceptable" | "Rework Required";
   inspectorRemarks?: string;
 }
@@ -65,6 +64,7 @@ export default function ApplicantCAPAForm({
   const [responsiblePerson, setResponsiblePerson] = useState({ name: "", date: "" });
   const [managingDirector, setManagingDirector] = useState({ name: "", date: "" });
   const [isUploading, setIsUploading] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     setCapaItems(parseInitialState());
@@ -112,16 +112,24 @@ export default function ApplicantCAPAForm({
       alert("Validation Error: Signatures from both the Responsible Person and the Managing Director are mandatory.");
       return;
     }
-    if (onSave) {
-      await onSave({
-        applicationId,
-        refNumber,
-        capaItems,
-        signatures: { responsiblePerson, managingDirector },
-        submittedAt: new Date().toISOString()
-      });
-    } else {
-      alert("CAPA data snapshot captured successfully.");
+    
+    setIsSubmitting(true);
+    try {
+      if (onSave) {
+        await onSave({
+          applicationId,
+          refNumber,
+          capaItems,
+          signatures: { responsiblePerson, managingDirector },
+          submittedAt: new Date().toISOString()
+        });
+      } else {
+        alert("CAPA data snapshot captured successfully.");
+      }
+    } catch (err: any) {
+      alert(`Submission failed: ${err.message || err}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -450,9 +458,24 @@ export default function ApplicantCAPAForm({
           <div className="border-t border-slate-200 pt-3 flex justify-end print:hidden">
             <button
               type="submit"
-              className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-lg transition-all shadow-md tracking-wide uppercase"
+              disabled={isSubmitting}
+              className={`px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-lg transition-all shadow-md tracking-wide uppercase inline-flex items-center gap-2 ${
+                isSubmitting ? "opacity-75 cursor-not-allowed" : ""
+              }`}
             >
-              🚀 Finalize & Transmit CAPA Ledger to VMAP Desk
+              {isSubmitting ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Transmitting Ledger...</span>
+                </>
+              ) : (
+                <>
+                  🚀 Finalize & Transmit CAPA Ledger to VMAP Desk
+                </>
+              )}
             </button>
           </div>
         )}

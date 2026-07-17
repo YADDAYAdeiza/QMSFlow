@@ -204,7 +204,7 @@ export default function GMPReportWorkspace({
       return;
     }
 
-    // Compute active staff processing duration for QMS conformance metrics
+    // ⏱️ Compute active staff processing duration for QMS conformance metrics
     const now = Date.now();
     const durationSeconds = Math.round((now - stepEntryTime) / 1000);
 
@@ -220,6 +220,8 @@ export default function GMPReportWorkspace({
             currentStepKey: currentStep,
             direction,
             companyName,
+            remarks: remarks,
+            processingDurationSeconds: durationSeconds, // Enforcing QMS step timing on finalized metrics
             checklistSnapshot: checklistSnapshot
           })
         });
@@ -541,7 +543,7 @@ export default function GMPReportWorkspace({
                         if (window.confirm(msg)) handleTransition("FORWARD");
                       }}
                       className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed ${
-                        checklistSnapshot?.final_recommendation === "PENDING"
+                        checklistSnapshot?.final_recommendation === "CAPA_PENDING"
                           ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
                           : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
                       }`}
