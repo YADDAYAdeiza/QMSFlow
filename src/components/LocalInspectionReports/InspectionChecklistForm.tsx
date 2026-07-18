@@ -43,6 +43,7 @@ export interface ChecklistData {
 
 interface ChecklistFormProps {
   initialData?: Partial<ChecklistData> | null;
+  currentInspector?: string; // ← Pass the authenticated inspector's name down here!
   onSave: (data: ChecklistData) => void | Promise<void>;
   onSaveDraft?: (data: ChecklistData) => void | Promise<void>; 
   onChange?: (data: ChecklistData) => void;
@@ -61,18 +62,16 @@ interface QualitySystemConfig {
 
 export default function InspectionChecklistForm({ 
   initialData, 
+  currentInspector,
   onSave, 
   onSaveDraft, 
   onChange,
   isReadOnly = false 
 }: ChecklistFormProps) {
   const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
-  
-  // --- ASYNC BUTTON VISUAL FEEDBACK STATES ---
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
 
-  // --- STABLE CONTROLLED STATE HYDRATION ---
   const [formData, setFormData] = useState<ChecklistData>(() => ({
     report_doc_number: initialData?.report_doc_number || "OKL-LA-PRI-01-2026",
     inspection_dates: initialData?.inspection_dates || "",
@@ -81,7 +80,7 @@ export default function InspectionChecklistForm({
     site_contact_details: initialData?.site_contact_details || { phone: "", email: "", website: "" },
     activities_carried_out: Array.isArray(initialData?.activities_carried_out) ? initialData.activities_carried_out : [],
     vicinity_assessment: initialData?.vicinity_assessment || "",
-    lead_inspector: initialData?.lead_inspector || "",
+    lead_inspector: initialData?.lead_inspector || currentInspector || "",
     co_inspectors: initialData?.co_inspectors || "",
     historical_baseline: initialData?.historical_baseline || { prev_date_type: "", prev_team: "", past_capa_status: "", major_changes: "" },
     
@@ -100,6 +99,13 @@ export default function InspectionChecklistForm({
   }));
 
   const lastEmittedDataRef = useRef<ChecklistData | null>(null);
+
+  // Fallback assignment loop if currentInspector resolves after initial state setup
+  useEffect(() => {
+    if (currentInspector && !formData.lead_inspector && !initialData?.lead_inspector) {
+      setFormData(prev => ({ ...prev, lead_inspector: currentInspector }));
+    }
+  }, [currentInspector, initialData, formData.lead_inspector]);
 
   useEffect(() => {
     if (initialData) {
@@ -291,7 +297,7 @@ export default function InspectionChecklistForm({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Lead Inspector</label>
-                <input type="text" placeholder="e.g. Senior Regulatory Officer" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.lead_inspector} onChange={e => setFormData({...formData, lead_inspector: e.target.value})} />
+                <input type="text" placeholder="Authorized Inspector Name" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.lead_inspector} onChange={e => setFormData({...formData, lead_inspector: e.target.value})} />
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Co-Inspectors / Trainees</label>
@@ -449,7 +455,6 @@ export default function InspectionChecklistForm({
         </button>
         
         <div className="flex items-center gap-2">
-          {/* INTERMEDIARY DRAFT ACTION BUTTON */}
           {!isReadOnly && onSaveDraft && (
             <button 
               type="button" 
@@ -458,10 +463,7 @@ export default function InspectionChecklistForm({
               className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-200/60 hover:bg-slate-200 disabled:opacity-50 rounded transition-all flex items-center gap-2 min-w-[130px] justify-center"
             >
               {isSavingDraft ? (
-                <>
-                  <Spinner />
-                  <span>Saving Draft...</span>
-                </>
+                <><Spinner /><span>Saving Draft...</span></>
               ) : (
                 <span>Save Draft Progress</span>
               )}
@@ -486,14 +488,9 @@ export default function InspectionChecklistForm({
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center gap-2 min-w-[210px] justify-center"
               >
                 {isCompiling ? (
-                  <>
-                    <Spinner />
-                    <span>Running Engine...</span>
-                  </>
+                  <><Spinner /><span>Running Engine...</span></>
                 ) : (
-                  <>
-                    <span>跑 Draft via System Engine</span>
-                  </>
+                  <span>跑 Draft via System Engine</span>
                 )}
               </button>
             )

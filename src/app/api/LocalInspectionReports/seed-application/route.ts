@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     // --- MODE 1: BLANK APPLICATION FOR NEW INSPECTION ---
     if (mode === "blank") {
       const companyId = 904;
-      const applicationId = 606;
+      const applicationId = 609 ;
 
       // 1. Ensure Company Exists using proper .upsert syntax
       const { error: compErr } = await supabase

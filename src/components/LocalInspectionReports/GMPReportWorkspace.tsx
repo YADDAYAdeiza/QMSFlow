@@ -8,16 +8,11 @@ import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/
 import InspectionChecklistForm from "./InspectionChecklistForm";  
 
 const BASE_CHECKLIST_TEMPLATE = {
-  // Step 1: Meta & History
   report_doc_number: "OKL-LA-PRI-01-2026",
   inspection_dates: "",
   type_of_inspection: "PRI",
   inspected_site_name: "Orange Kalbe Limited",
-  site_contact_details: { 
-    phone: "", 
-    email: "", 
-    website: "" 
-  },
+  site_contact_details: { phone: "", email: "", website: "" },
   activities_carried_out: [] as string[],
   vicinity_assessment: "",
   lead_inspector: "",
@@ -28,7 +23,6 @@ const BASE_CHECKLIST_TEMPLATE = {
     past_capa_status: "",
     major_changes: ""
   },
-  // Step 2: The 6 Quality Systems (Defaulted to 100% grades and clean notes strings)
   pqs_score: 100, 
   pqs_notes: "",
   personnel_score: 100, 
@@ -41,7 +35,6 @@ const BASE_CHECKLIST_TEMPLATE = {
   material_management_notes: "",
   laboratory_control_score: 100, 
   laboratory_control_notes: "",
-  // Step 3: Synthesis
   critical_count: 0,
   major_count: 0,
   other_count: 0,
@@ -56,7 +49,7 @@ interface CommentTrailItem {
   toStep: string;
   actorName: string;
   timestamp: string;
-  processingDurationSeconds?: number; // ⏱️ Added for QMS staff tracking metrics
+  processingDurationSeconds?: number;
   actorId?: string;
   assignedToId?: string;
 }
@@ -65,6 +58,7 @@ interface WorkspaceProps {
   applicationId: string;
   companyId: string;
   companyName: string;
+  activeUserId: string;       // 🆔 True Authenticated User ID from your Auth Layer
   activeUserName?: string; 
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps; 
   initialReportHtml?: string | null;
@@ -76,6 +70,7 @@ export default function GMPReportWorkspace({
   applicationId,
   companyId,
   companyName,
+  activeUserId,              // 🛡️ Captured here safely
   activeUserName = "Roseline", 
   initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
   initialReportHtml = null,
@@ -84,44 +79,44 @@ export default function GMPReportWorkspace({
 }: WorkspaceProps) {
   const router = useRouter();
   
-  // Core workflow states
+  const expectedUserRaw = activeUserName;
+  const expectedUserLower = activeUserName.trim().toLowerCase();
+
+  // Core workflow states driven by simulation rig
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [remarks, setRemarks] = useState("");
   const [selectedStaff, setSelectedStaff] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
 
-  // ⏱️ QMS Performance Tracking: Record when the user started working on the active desk step
+  // ⏱️ QMS Performance Tracking
   const [stepEntryTime, setStepEntryTime] = useState<number>(Date.now());
 
   useEffect(() => {
-    // Reset timer whenever the custody desk updates
     setStepEntryTime(Date.now());
-    console.log('Timer reset');
+    console.log("QMS Conformance Step Timer Reset.");
   }, [currentStep]);
 
-  // DIAGNOSTIC LOG
-  console.log("🔐 SECURITY CHECK - Active User Prop:", {
-    receivedValue: activeUserName,
-    type: typeof activeUserName,
-    isMatch: activeUserName.trim().toLowerCase() === "roseline"
-  });
+  // DIAGNOSTIC SECURITY COMPLIANCE LOG - Tracks ID alongside Name
+  useEffect(() => {
+    console.log("🔐 SECURITY CHECK - Active User Session Profile:", {
+      userId: activeUserId,
+      userName: expectedUserRaw,
+      normalizedValue: expectedUserLower
+    });
+  }, [activeUserId, expectedUserRaw, expectedUserLower]);
   
-  // Real-time audit history log tracking
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
   const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
-  
-  // Hoisted state initialized with BASE_CHECKLIST_TEMPLATE as fallback
   const [checklistSnapshot, setChecklistSnapshot] = useState<any>(() => {
     return initialChecklistSnapshot || BASE_CHECKLIST_TEMPLATE;
   });
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
-  // SECURITY BOUNDARY: Evaluate if the active session user is authorized to forward dossiers
-  const isAuthorizedToForward = activeUserName.trim().toLowerCase() === "roseline";
+  // SECURITY CONTROL GATEWAY: Validates that a genuine authenticated session exists
+  const isAuthorizedToForward = !!activeUserId && !!expectedUserLower;
 
-  // Unified Division mapping rule
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
   const staffDirectory = [
@@ -130,12 +125,10 @@ export default function GMPReportWorkspace({
     { id: "usr_203", name: "Fatima Umar", division: "IRSD", role: "IRSD Staff Reviewer" }
   ];
 
-  // 📝 COLLABORATIVE FEATURE: Save Draft function without running compilation engine
   const handleSaveDraft = async (draftPayload: any) => {
-    console.log('This is draftPayload:', draftPayload);
+    if (!draftPayload) return;
     setIsSavingDraft(true);
     try {
-      console.log("Persisting collaborative checklist draft snapshot directly to database matrix...");
       setChecklistSnapshot(draftPayload);
 
       const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
@@ -144,19 +137,19 @@ export default function GMPReportWorkspace({
         body: JSON.stringify({
           applicationId,
           checklistSnapshot: draftPayload,
-          savedBy: activeUserName
+          savedBy: expectedUserRaw,
+          savedById: activeUserId // Pass true user ID to the draft layer
         }),
       });
 
       const outcome = await res.json();
       if (res.ok && outcome.success) {
-        alert(`Draft snapshot saved successfully by ${activeUserName}! Other team reviewers will now see these observations.`);
+        alert(`Draft snapshot saved successfully by ${expectedUserRaw}!`);
         router.refresh();
       } else {
-        throw new Error(outcome.error || "Draft storage rejection.");
+        throw new Error(outcome.error || "Draft storage structural rejection.");
       }
     } catch (err: any) {
-      console.error("Draft sync failure:", err);
       alert(`Draft Save Error: ${err.message}`);
     } finally {
       setIsSavingDraft(false);
@@ -164,8 +157,8 @@ export default function GMPReportWorkspace({
   };
 
   const handleAICorrelationCompile = async (completedFormPayload: any) => {
+    if (!completedFormPayload) return;
     try {
-      console.log("Transmitting payload to synthesis engine...");
       setChecklistSnapshot(completedFormPayload);
 
       const res = await fetch("/api/LocalInspectionReports/generate", {
@@ -182,20 +175,19 @@ export default function GMPReportWorkspace({
       const outcome = await res.json();
       if (outcome.success) {
         setReportHtml(outcome.report_html);
-        alert("AI Technical Report Narrative compiled successfully under SOP Ref. No. DER-800-06! Form snapshot auto-saved.");
+        alert("AI Technical Report Narrative compiled successfully!");
         router.refresh(); 
       } else {
         alert("Synthesis aborted: " + outcome.error);
       }
     } catch (err: any) {
-      console.error("Network sync failure:", err);
       alert(`Execution Error: ${err.message}`);
     }
   };
 
   const handleTransition = async (direction: "FORWARD" | "REWORK") => {
     if (direction === "FORWARD" && !isAuthorizedToForward) {
-      alert("Unauthorized Operation: Forwarding clearance restricted to Roseline.");
+      alert("Unauthorized Operation: No active authenticated user context detected.");
       return;
     }
 
@@ -204,14 +196,12 @@ export default function GMPReportWorkspace({
       return;
     }
 
-    // ⏱️ Compute active staff processing duration for QMS conformance metrics
     const now = Date.now();
     const durationSeconds = Math.round((now - stepEntryTime) / 1000);
 
     setIsSubmitting(true);
     try {
       if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
-        console.log("Routing via structural endpoint handler matrix...");
         const transitionRes = await fetch("/api/LocalInspectionReports", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -221,8 +211,9 @@ export default function GMPReportWorkspace({
             direction,
             companyName,
             remarks: remarks,
-            processingDurationSeconds: durationSeconds, // Enforcing QMS step timing on finalized metrics
-            checklistSnapshot: checklistSnapshot
+            processingDurationSeconds: durationSeconds,
+            checklistSnapshot: checklistSnapshot,
+            executedByUserId: activeUserId // Relays real ID to final endpoint sign-offs
           })
         });
 
@@ -232,17 +223,17 @@ export default function GMPReportWorkspace({
         }
       }
 
-      // Safe fallback ensuring we align division markers
-      const activeDivision = availableDivisions.includes(activeStepConfig.division) 
+      const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division) 
         ? activeStepConfig.division 
         : "VMD";
 
+      // 🚀 The Transition Engine now consumes the genuine ID while using simulated targets
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
         direction,
-        actingUserId: "usr_active_session", 
-        actingUserName: `${activeUserName} (${activeDivision})`,
+        actingUserId: activeUserId, // ⭐ Replaced "usr_active_session" with your true auth ID variable
+        actingUserName: `${expectedUserRaw} (${activeDivision})`,
         targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
         remarks: remarks
       });
@@ -257,14 +248,17 @@ export default function GMPReportWorkspace({
             : "Applicant Notification Hub - Final Approval Certified";
         }
 
+        const sourceStepTitle = activeStepConfig?.title || "Unknown Desk";
+
         const newMinute: CommentTrailItem = {
           text: remarks,
           action: direction,
-          fromStep: activeStepConfig.title.replace(/DDD/g, "Divisional Deputy Director"),
+          fromStep: sourceStepTitle.replace(/DDD/g, "Divisional Deputy Director"),
           toStep: targetStepTitle.replace(/DDD/g, "Divisional Deputy Director"),
-          actorName: `${activeUserName} (${activeDivision})`,
+          actorName: `${expectedUserRaw} (${activeDivision})`,
           timestamp: new Date().toISOString(),
-          processingDurationSeconds: durationSeconds // ⏱️ Bound directly inside the minute ledger metadata
+          processingDurationSeconds: durationSeconds,
+          actorId: activeUserId // ⭐ Saved into trace log ledger array
         };
 
         setCommentsList(prev => [newMinute, ...prev]);
@@ -275,7 +269,7 @@ export default function GMPReportWorkspace({
         setCurrentStep(nextStepKey);
         router.refresh(); 
       } else {
-        const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing error";
+        const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing sequence breakdown";
         alert(`Routing Matrix Error: ${errorMsg}`);
       }
     } catch (err: any) {
@@ -288,7 +282,7 @@ export default function GMPReportWorkspace({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      {/* Simulation Rig */}
+      {/* Simulation Rig Container remains untouched */}
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
         <div>
           <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
@@ -303,7 +297,7 @@ export default function GMPReportWorkspace({
           >
             {Object.keys(inspectionReportWorkflow.steps).map((key) => (
               <option key={key} value={key}>
-                {key.replace(/DDD/g, "Divisional Deputy Director")} - {inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps].title.replace(/DDD/g, "Divisional Deputy Director")}
+                {key.replace(/DDD/g, "Divisional Deputy Director")} - {inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title?.replace(/DDD/g, "Divisional Deputy Director") || "Unlabeled Step"}
               </option>
             ))}
           </select>
@@ -331,9 +325,9 @@ export default function GMPReportWorkspace({
                 {activeStepConfig?.title?.replace(/DDD/g, "Divisional Deputy Director")}
               </p>
               <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
-                <p>Division: <span className="font-bold text-white">{activeStepConfig?.division}</span></p>
-                <p>Authorized Actor: <span className="italic text-white">{activeStepConfig?.role?.replace(/DDD/g, "Divisional Deputy Director")}</span></p>
-                <p>Current User Session: <span className="font-bold text-amber-400 font-mono">{activeUserName}</span></p>
+                <p>Division: <span className="font-bold text-white">{activeStepConfig?.division || "VMD"}</span></p>
+                <p>Authorized Actor: <span className="italic text-white">{activeStepConfig?.role?.replace(/DDD/g, "Divisional Deputy Director") || "Reviewer"}</span></p>
+                <p>Authenticated Session ID: <span className="font-bold text-amber-400 font-mono text-[10px]">{activeUserId}</span></p>
               </div>
             </div>
           </div>
@@ -341,11 +335,7 @@ export default function GMPReportWorkspace({
 
         {/* Content Layout Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
-          
-          {/* Main Form Fields Column */}
           <div className="lg:col-span-2 space-y-6">
-            
-            {/* Primary Report PDF Handle */}
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
               <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
                 📄 Primary Inspection Review Documentation
@@ -360,7 +350,6 @@ export default function GMPReportWorkspace({
               </div>
             </div>
 
-            {/* Generated Compliance Text Narrative Preview */}
             {reportHtml && (
               <div className="bg-white rounded-xl p-6 border border-emerald-200 shadow-sm animate-fadeIn">
                 <h3 className="text-sm font-bold text-emerald-900 border-b border-emerald-100 pb-3 mb-4 uppercase tracking-wider flex items-center gap-2">
@@ -373,7 +362,6 @@ export default function GMPReportWorkspace({
               </div>
             )}
 
-            {/* Structured Form Entry Blocks */}
             <InspectionChecklistForm
               initialData={checklistSnapshot}
               onSave={handleAICorrelationCompile}
@@ -382,7 +370,6 @@ export default function GMPReportWorkspace({
               isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"} 
             />
 
-            {/* Historical Minute Ledger Block */}
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
               <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
                 📋 Official QMS Minute Sheet Log
@@ -413,7 +400,7 @@ export default function GMPReportWorkspace({
                               <span className="text-[10px] font-mono text-slate-400">
                                 {new Date(item.timestamp).toLocaleString("en-GB")}
                               </span>
-                              {item.processingDurationSeconds && (
+                              {item.processingDurationSeconds !== undefined && (
                                 <span className="text-[10px] text-slate-500 font-mono">
                                   ⏱️ QMS Duration: <span className="font-semibold text-slate-700">{durationText}</span>
                                 </span>
@@ -426,6 +413,7 @@ export default function GMPReportWorkspace({
                           <div className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[10px] text-slate-500 flex flex-wrap gap-x-3">
                             <p>From: <span className="font-semibold text-slate-600">{item.fromStep}</span></p>
                             <p>➔ Destination: <span className="font-semibold text-slate-600">{item.toStep}</span></p>
+                            {item.actorId && <p>UID: <span className="font-mono text-[9px] text-slate-400">{item.actorId}</span></p>}
                           </div>
                         </div>
                       </div>
@@ -438,8 +426,6 @@ export default function GMPReportWorkspace({
 
           {/* Action Dashboard Sidebar */}
           <div className="space-y-6">
-            
-            {/* Collaborative Draft Quick-Saver Board */}
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
               <h3 className="text-xs font-bold mb-2 uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
@@ -506,7 +492,6 @@ export default function GMPReportWorkspace({
                   <span className="font-bold underline text-amber-800">
                     {checklistSnapshot?.final_recommendation || "PENDING"}
                   </span>. 
-                  Signing off will mutate the application status profile and dispatch notification files.
                 </div>
               )}
 
@@ -520,9 +505,7 @@ export default function GMPReportWorkspace({
                   onChange={(e) => setRemarks(e.target.value)}
                   placeholder={
                     currentStep === "DIRECTOR_FINAL_SIGN_OFF"
-                      ? (checklistSnapshot?.final_recommendation === "PENDING"
-                        ? "Provide official directive text to issue with the CAPA requirement..."
-                        : "Enter validation clearance minutes for final certified sign-off...")
+                      ? "Enter validation clearance minutes for final certified sign-off..."
                       : `Provide dynamic feedback or instructions as ${activeStepConfig?.role?.replace(/DDD/g, "Divisional Deputy Director") || "Reviewer"}...`
                   }
                   className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
@@ -551,7 +534,7 @@ export default function GMPReportWorkspace({
                       {isSubmitting 
                         ? "Processing Action..." 
                         : !isAuthorizedToForward
-                        ? "🔒 Forwarding Restricted to Roseline"
+                        ? "🔒 Forwarding Restricted"
                         : checklistSnapshot?.final_recommendation === "CAPA_PENDING"
                         ? "✍️ Approve & Issue CAPA Directive"
                         : "✍️ Concur & Grant Final Approval"}
@@ -582,7 +565,7 @@ export default function GMPReportWorkspace({
                         {isSubmitting 
                           ? "Routing..." 
                           : !isAuthorizedToForward 
-                          ? "🔒 Forwarding Restricted to Roseline" 
+                          ? "🔒 Forwarding Restricted" 
                           : currentStep.includes("DDD") 
                           ? "✍️ Sign Minutes & Forward Desk" 
                           : "🚀 Dispatch Dossier Forward"}

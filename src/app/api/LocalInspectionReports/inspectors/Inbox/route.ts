@@ -4,19 +4,22 @@ import { createClient } from '@/utils/supabase/server';
 export async function GET(request: Request) {
   try {
     const supabase = await createClient();
-    const { searchParams } = new URL(request.url);
     
-    // 1. Resolve Target User
-    let targetUserId = searchParams.get('simulatedUserId');
-    if (!targetUserId) {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        return NextResponse.json({ success: false, error: "Authentication required." }, { status: 401 });
-      }
-      targetUserId = user.id;
+    // 1. Resolve target logged-in identity strictly via standard auth headers context
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ success: false, error: "Authentication required." }, { status: 401 });
     }
+    const targetUserId = user.id;
 
-    // 2. STEP 1: Fetch flat assignments with their schedules
+    // Optional cross-reference: Pull specialized staff naming metrics if they exist in your public tables
+    const { data: profileRecord } = await supabase
+      .from('profiles')
+      .select('full_name, role_title, division')
+      .eq('id', targetUserId)
+      .single();
+
+    // 2. STEP 1: Fetch flat assignments mapped to this user identifier
     const { data: assignments, error: assignError } = await supabase
       .from('inspection_team_assignments')
       .select(`
@@ -33,7 +36,17 @@ export async function GET(request: Request) {
 
     if (assignError) throw assignError;
     if (!assignments || assignments.length === 0) {
-      return NextResponse.json({ success: true, inspectorId: targetUserId, tasks: [] });
+      return NextResponse.json({ 
+        success: true, 
+        inspectorId: targetUserId, 
+        inspectorName: profileRecord?.full_name || user.email,
+        profile: profileRecord ? {
+          name: profileRecord.full_name,
+          role: profileRecord.role_title,
+          division: profileRecord.division
+        } : null,
+        tasks: [] 
+      });
     }
 
     // Extract unique application IDs to avoid a messy nested join loop
@@ -92,6 +105,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ 
       success: true, 
       inspectorId: targetUserId, 
+      inspectorName: profileRecord?.full_name || user.email,
+      profile: profileRecord ? {
+        name: profileRecord.full_name,
+        role: profileRecord.role_title,
+        division: profileRecord.division
+      } : null,
       tasks: formattedTasks 
     });
 

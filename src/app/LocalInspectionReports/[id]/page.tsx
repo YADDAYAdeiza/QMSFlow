@@ -2,7 +2,8 @@
 import { db } from "@/db";
 import { applications, companies, qmsTimelines } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { createClient } from "@/utils/supabase/server";
 import GMPReportWorkspace from "@/components/LocalInspectionReports/GMPReportWorkspace";
 
 interface PageProps {
@@ -54,6 +55,23 @@ const BASE_CHECKLIST_TEMPLATE = {
 };
 
 export default async function LocalReportPage({ params }: PageProps) {
+  // 🔐 Authenticated session validation via production Supabase client
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    redirect("/login");
+  }
+
+  // Cross-reference public profiles schema if additional staff meta is required
+  const { data: profileRecord } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", user.id)
+    .single();
+
+  const authenticatedUserSessionName = profileRecord?.full_name || user.email || "Authenticated User";
+
   const resolvedParams = await params;
   const targetId = resolvedParams.id;
 
@@ -85,7 +103,7 @@ export default async function LocalReportPage({ params }: PageProps) {
     notFound();
   }
 
-  // 2. Fetch QMS metrics ledger directly from your Supabase table for this specific record
+  // 2. Fetch QMS metrics ledger directly from your table for this specific record
   const rawTimeLogs = await db
     .select({
       id: qmsTimelines.id,
@@ -119,7 +137,7 @@ export default async function LocalReportPage({ params }: PageProps) {
     return {
       id: log.id.toString(),
       // Clean string conversion for UI text mapping rules (DDD updated to Divisional Deputy Director)
-      point: log.point ? log.point.replace("DDD", "Divisional Deputy Director") : "Unknown Desk Node",
+      point: log.point ? log.point.replace(/DDD/g, "Divisional Deputy Director") : "Unknown Desk Node",
       division: finalDivision,
       staffName: log.staffId || "System Pending", 
       enteredAt: start.toISOString(),
@@ -164,15 +182,13 @@ export default async function LocalReportPage({ params }: PageProps) {
         final_recommendation: "PENDING"
       };
 
-  // 🔐 Authenticated session context default
-  const authenticatedUserSessionName = "Roseline";
-
   return (
     <div className="bg-slate-50 min-h-screen py-6">
       <GMPReportWorkspace 
         applicationId={application.id.toString()} 
         companyId={application.companyId ? application.companyId.toString() : ""} 
         companyName={application.companyName || "Unknown Manufacturing Site"}
+        activeUserId={user.id} // 👈 FIXED: Handed the authenticated Supabase user ID down to the workspace
         activeUserName={authenticatedUserSessionName} 
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}

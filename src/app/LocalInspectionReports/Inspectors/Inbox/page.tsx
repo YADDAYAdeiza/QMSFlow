@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useSimulation } from '@/utils/simulationContext';
 import Link from 'next/link';
 
 interface Task {
@@ -17,24 +16,26 @@ interface Task {
   };
 }
 
+interface UserProfile {
+  name: string;
+  role: string;
+  division?: string;
+}
+
 export default function InspectorWorkspace() {
-  const { activeUser, isSimulating } = useSimulation();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchWorkspace() {
+    async function fetchWorkspaceData() {
       try {
         setLoading(true);
         setError(null);
         
-        let url = '/api/LocalInspectionReports/inspectors/Inbox';
-        if (isSimulating && activeUser?.id) {
-          url += `?simulatedUserId=${activeUser.id}`;
-        }
-
-        const res = await fetch(url);
+        // Fetch active QMS inbox assignments tied to the true authenticated session token
+        const res = await fetch('/api/LocalInspectionReports/inspectors/Inbox');
         const data = await res.json();
 
         if (!res.ok || !data.success) {
@@ -42,6 +43,17 @@ export default function InspectorWorkspace() {
         }
 
         setTasks(data.tasks);
+        
+        // Populate profile layout meta if returned from server context
+        if (data.profile) {
+          setUserProfile(data.profile);
+        } else {
+          setUserProfile({
+            name: data.inspectorName || 'Authenticated Inspector',
+            role: 'Field Reviewer',
+            division: 'VMD'
+          });
+        }
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -49,8 +61,8 @@ export default function InspectorWorkspace() {
       }
     }
 
-    fetchWorkspace();
-  }, [activeUser, isSimulating]);
+    fetchWorkspaceData();
+  }, []);
 
   if (loading) {
     return (
@@ -80,16 +92,11 @@ export default function InspectorWorkspace() {
               Inspector Field Assignment Desk
             </h1>
             <p className="text-xs text-slate-500 mt-1">
-              {activeUser 
-                ? `${activeUser.name} • ${activeUser.role.replace("DDD", "Divisional Deputy Director")} (${activeUser.division || 'VMAP'})` 
+              {userProfile 
+                ? `${userProfile.name} • ${userProfile.role.replace("DDD", "Divisional Deputy Director")} (${userProfile.division || 'VMD'})` 
                 : 'Authenticated Desk'}
             </p>
           </div>
-          {isSimulating && (
-            <span className="text-[10px] font-bold tracking-wider bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full uppercase">
-              Rig Active Session
-            </span>
-          )}
         </div>
       </div>
 
@@ -141,7 +148,7 @@ export default function InspectorWorkspace() {
                   <div className="mt-1 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
                     <span className="text-slate-400 font-medium">Current Stage:</span>
                     <span className="font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
-                      {task.application.currentPoint?.replace("DDD", "Divisional Deputy Director") || 'Field Inspection Pending'}
+                      {task.application.currentPoint?.replace(/DDD/g, "Divisional Deputy Director") || 'Field Inspection Pending'}
                     </span>
                   </div>
                 </div>
