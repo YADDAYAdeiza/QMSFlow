@@ -1,10 +1,9 @@
-import { db } from "@/db"; // Adjust this import string based on your project configuration
-import { applications, companies } from "@/db/schema"; // Adjust these schema imports to match yours
+import { db } from "@/db"; 
+import { applications, companies, capaSubmissions } from "@/db/schema"; // Added capaSubmissions table reference
 import { eq, or, inArray } from "drizzle-orm";
 import React from "react";
-import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; // Import the new client component
+import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
 
-// Clean TypeScript interface reflecting the database columns and the inner JSONB shape
 interface CommentTrail {
   text?: string;
   action?: string;
@@ -24,7 +23,8 @@ interface ApplicationItem {
   status: string;
   currentPoint: string | null;
   companyName: string;
-  details: string | any; // Accounts for the flexible JSONB column mapping
+  details: string | any; 
+  capaStatus?: string | null; // Track outer CAPA verification state
 }
 
 export default async function DivisionalDeputyDirectorInboxDashboardPage({
@@ -49,9 +49,11 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
         currentPoint: applications.currentPoint,
         companyName: companies.name,
         details: applications.details, 
+        capaStatus: capaSubmissions.status, // Consulting the CAPA table
       })
       .from(applications)
       .innerJoin(companies, eq(applications.companyId, companies.id))
+      .leftJoin(capaSubmissions, eq(applications.id, capaSubmissions.applicationId)) // Injected correlation join
       .where(
         or(
           inArray(applications.status, ["INSPECTION_PENDING", "INSPECTION_SCHEDULED", "APPROVED", "CAPA_APPROVED"]),
@@ -193,7 +195,9 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                     <td className="p-4 text-slate-600 max-w-xs truncate">{app.currentPoint || "N/A"}</td>
                     <td className="p-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                        app.status === "APPROVED" || app.status === "FINALIZED"
+                        app.status === "CAPA_APPROVED"
+                          ? "bg-purple-50 text-purple-700 border-purple-200"
+                          : app.status === "APPROVED" || app.status === "FINALIZED"
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                           : app.status === "INSPECTION_PENDING"
                           ? "bg-amber-50 text-amber-700 border-amber-200"
@@ -203,7 +207,6 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                       </span>
                     </td>
                     <td className="p-4 text-right whitespace-nowrap">
-                      {/* Fixed: Passing the unique database 'id' prop cleanly through the server boundary */}
                       <AuditTrailButton id={app.id} applicationNumber={app.applicationNumber} />
                     </td>
                   </tr>
