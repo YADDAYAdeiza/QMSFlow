@@ -168,6 +168,29 @@ export const capaSubmissions = pgTable("capa_submissions", {
   submittedAt: text("submitted_at"),
 });
 
+// 12. Inspection Schedules (Direct SQL sync)
+export const inspectionSchedules = pgTable("inspection_schedules", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  applicationId: integer("application_id")
+    .references(() => applications.id, { onDelete: "cascade" })
+    .notNull(),
+  scheduledDate: timestamp("scheduled_date", { mode: "string" }).notNull(), // using string mode to easily parse date formats without zone shifting
+  status: varchar("status", { length: 50 }).default("SCHEDULED"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// 13. Inspection Team Assignments (Direct SQL sync)
+export const inspectionTeamAssignments = pgTable("inspection_team_assignments", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  scheduleId: uuid("schedule_id")
+    .references(() => inspectionSchedules.id, { onDelete: "cascade" })
+    .notNull(),
+  inspectorId: uuid("inspector_id").notNull(), // Links directly to auth.users in DB
+  role: varchar("role", { length: 50 }).notNull(), // 'TEAM_LEADER' | 'CO_INSPECTOR' | 'TRAINEE_INSPECTOR'
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 
 // ==========================================
 // --- RELATIONS ---
@@ -202,6 +225,7 @@ export const applicationsRelations = relations(applications, ({ one, many }) => 
   }),
   timelines: many(qmsTimelines),
   riskAssessments: many(riskAssessments), 
+  schedules: many(inspectionSchedules), // Relational mapping to inspection system
 }));
 
 // UPDATED: Linked qmsTimelines to both Applications and Users
@@ -220,6 +244,7 @@ export const qmsTimelinesRelations = relations(qmsTimelines, ({ one }) => ({
 export const usersRelations = relations(users, ({ many }) => ({
   timelines: many(qmsTimelines),
   reportsInspected: many(localInspectionReports),
+  assignments: many(inspectionTeamAssignments), // Tracks actual field assignments linked to user records
 }));
 
 export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => ({
@@ -235,4 +260,15 @@ export const localInspectionReportsRelations = relations(localInspectionReports,
 
 export const capaSubmissionsRelations = relations(capaSubmissions, ({ one }) => ({
   application: one(applications, { fields: [capaSubmissions.applicationId], references: [applications.id] }),
+}));
+
+// NEW RELATIONS FOR FIELD DESK WORKFLOWS
+export const inspectionSchedulesRelations = relations(inspectionSchedules, ({ one, many }) => ({
+  application: one(applications, { fields: [inspectionSchedules.applicationId], references: [applications.id] }),
+  teamAssignments: many(inspectionTeamAssignments),
+}));
+
+export const inspectionTeamAssignmentsRelations = relations(inspectionTeamAssignments, ({ one }) => ({
+  schedule: one(inspectionSchedules, { fields: [inspectionTeamAssignments.scheduleId], references: [inspectionSchedules.id] }),
+  inspectorProfile: one(users, { fields: [inspectionTeamAssignments.inspectorId], references: [users.id] }),
 }));

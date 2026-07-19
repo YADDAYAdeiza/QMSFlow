@@ -51,6 +51,7 @@ interface CommentTrailItem {
   timestamp: string;
   processingDurationSeconds?: number;
   actorId?: string;
+  actorRole?: string; 
   assignedToId?: string;
 }
 
@@ -58,7 +59,8 @@ interface WorkspaceProps {
   applicationId: string;
   companyId: string;
   companyName: string;
-  activeUserId: string;       // 🆔 True Authenticated User ID from your Auth Layer
+  activeUserId: string;       
+  activeUserRole: string;     // 🛡️ User Role Profile (e.g., 'TEAM_LEADER', 'CO_INSPECTOR')
   activeUserName?: string; 
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps; 
   initialReportHtml?: string | null;
@@ -70,7 +72,8 @@ export default function GMPReportWorkspace({
   applicationId,
   companyId,
   companyName,
-  activeUserId,              // 🛡️ Captured here safely
+  activeUserId,
+  activeUserRole,             
   activeUserName = "Roseline", 
   initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
   initialReportHtml = null,
@@ -80,9 +83,8 @@ export default function GMPReportWorkspace({
   const router = useRouter();
   
   const expectedUserRaw = activeUserName;
-  const expectedUserLower = activeUserName.trim().toLowerCase();
 
-  // Core workflow states driven by simulation rig
+  // Core workflow states
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [remarks, setRemarks] = useState("");
   const [selectedStaff, setSelectedStaff] = useState("");
@@ -97,14 +99,14 @@ export default function GMPReportWorkspace({
     console.log("QMS Conformance Step Timer Reset.");
   }, [currentStep]);
 
-  // DIAGNOSTIC SECURITY COMPLIANCE LOG - Tracks ID alongside Name
+  // DIAGNOSTIC SECURITY COMPLIANCE LOG
   useEffect(() => {
     console.log("🔐 SECURITY CHECK - Active User Session Profile:", {
       userId: activeUserId,
-      userName: expectedUserRaw,
-      normalizedValue: expectedUserLower
+      userRole: activeUserRole,
+      userName: expectedUserRaw
     });
-  }, [activeUserId, expectedUserRaw, expectedUserLower]);
+  }, [activeUserId, activeUserRole, expectedUserRaw]);
   
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
   const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
@@ -114,8 +116,12 @@ export default function GMPReportWorkspace({
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
-  // SECURITY CONTROL GATEWAY: Validates that a genuine authenticated session exists
-  const isAuthorizedToForward = !!activeUserId && !!expectedUserLower;
+  // 🛡️ SECURITY CONTROL & ROLE AUTHORIZATION GATEWAY
+  const isAuthorizedToForward = !!activeUserId && !!activeUserRole;
+  const isTeamLeader = activeUserRole === "TEAM_LEADER";
+  
+  // Hard gate constraint: Only TEAM_LEADER can move desk files forward
+  const canDispatchForward = isAuthorizedToForward && isTeamLeader;
 
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
@@ -138,7 +144,8 @@ export default function GMPReportWorkspace({
           applicationId,
           checklistSnapshot: draftPayload,
           savedBy: expectedUserRaw,
-          savedById: activeUserId // Pass true user ID to the draft layer
+          savedById: activeUserId,
+          savedByRole: activeUserRole 
         }),
       });
 
@@ -186,8 +193,8 @@ export default function GMPReportWorkspace({
   };
 
   const handleTransition = async (direction: "FORWARD" | "REWORK") => {
-    if (direction === "FORWARD" && !isAuthorizedToForward) {
-      alert("Unauthorized Operation: No active authenticated user context detected.");
+    if (direction === "FORWARD" && !canDispatchForward) {
+      alert("Unauthorized Operation: Forward transitions are exclusive to Team Leaders.");
       return;
     }
 
@@ -213,7 +220,8 @@ export default function GMPReportWorkspace({
             remarks: remarks,
             processingDurationSeconds: durationSeconds,
             checklistSnapshot: checklistSnapshot,
-            executedByUserId: activeUserId // Relays real ID to final endpoint sign-offs
+            executedByUserId: activeUserId,
+            executedByUserRole: activeUserRole 
           })
         });
 
@@ -227,12 +235,12 @@ export default function GMPReportWorkspace({
         ? activeStepConfig.division 
         : "VMD";
 
-      // 🚀 The Transition Engine now consumes the genuine ID while using simulated targets
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
         direction,
-        actingUserId: activeUserId, // ⭐ Replaced "usr_active_session" with your true auth ID variable
+        actingUserId: activeUserId,
+        actingUserRole: activeUserRole,
         actingUserName: `${expectedUserRaw} (${activeDivision})`,
         targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
         remarks: remarks
@@ -258,7 +266,8 @@ export default function GMPReportWorkspace({
           actorName: `${expectedUserRaw} (${activeDivision})`,
           timestamp: new Date().toISOString(),
           processingDurationSeconds: durationSeconds,
-          actorId: activeUserId // ⭐ Saved into trace log ledger array
+          actorId: activeUserId,
+          actorRole: activeUserRole
         };
 
         setCommentsList(prev => [newMinute, ...prev]);
@@ -282,7 +291,7 @@ export default function GMPReportWorkspace({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      {/* Simulation Rig Container remains untouched */}
+      {/* Simulation Rig Container */}
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
         <div>
           <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
@@ -327,7 +336,7 @@ export default function GMPReportWorkspace({
               <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
                 <p>Division: <span className="font-bold text-white">{activeStepConfig?.division || "VMD"}</span></p>
                 <p>Authorized Actor: <span className="italic text-white">{activeStepConfig?.role?.replace(/DDD/g, "Divisional Deputy Director") || "Reviewer"}</span></p>
-                <p>Authenticated Session ID: <span className="font-bold text-amber-400 font-mono text-[10px]">{activeUserId}</span></p>
+                <p>Role Parameter: <span className="font-bold text-sky-400 font-mono text-[10px]">{activeUserRole}</span></p>
               </div>
             </div>
           </div>
@@ -410,10 +419,10 @@ export default function GMPReportWorkspace({
                           
                           <p className="text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{item.text}</p>
                           
-                          <div className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[10px] text-slate-500 flex flex-wrap gap-x-3">
+                          <div className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[10px] text-slate-500 flex flex-wrap gap-x-3 text-ellipsis overflow-hidden">
                             <p>From: <span className="font-semibold text-slate-600">{item.fromStep}</span></p>
                             <p>➔ Destination: <span className="font-semibold text-slate-600">{item.toStep}</span></p>
-                            {item.actorId && <p>UID: <span className="font-mono text-[9px] text-slate-400">{item.actorId}</span></p>}
+                            {item.actorRole && <p>Role: <span className="font-semibold text-sky-700">{item.actorRole}</span></p>}
                           </div>
                         </div>
                       </div>
@@ -558,14 +567,21 @@ export default function GMPReportWorkspace({
                     {activeStepConfig?.nextStepKey && (
                       <button
                         type="button"
-                        disabled={isSubmitting || !isAuthorizedToForward || (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)}
+                        disabled={
+                          isSubmitting || 
+                          !canDispatchForward || // 🛡️ Properly synced variable reference here
+                          (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || 
+                          (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)
+                        }
                         onClick={() => handleTransition("FORWARD")}
-                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
                       >
                         {isSubmitting 
                           ? "Routing..." 
                           : !isAuthorizedToForward 
-                          ? "🔒 Forwarding Restricted" 
+                          ? "🔒 Incomplete Session Context" 
+                          : !isTeamLeader
+                          ? "🔒 Requires Team Leader Authority" 
                           : currentStep.includes("DDD") 
                           ? "✍️ Sign Minutes & Forward Desk" 
                           : "🚀 Dispatch Dossier Forward"}

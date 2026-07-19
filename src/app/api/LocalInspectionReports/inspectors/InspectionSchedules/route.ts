@@ -106,14 +106,15 @@ export async function POST(request: Request) {
     currentDetails.inspectionWorkflowMeta.currentStepKey = "STAFF_TECHNICAL_REVIEW";
 
     // 8. Commit changes back to the main file registry with correct step keys
-    const { error: updateError } = await supabase
-      .from('applications')
-      .update({ 
-        details: currentDetails,
-        current_point: "Staff Technical Field Review", // Synchronized with active deployment
-        status: "INSPECTION_PENDING"                   // Explicit flag indicating mandate assigned but unexecuted
-      })
-      .eq('id', applicationId);
+// 8. Commit changes back to the main file registry with correct step keys
+  const { error: updateError } = await supabase
+    .from('applications')
+    .update({ 
+      details: currentDetails,
+      current_point: "Staff Technical Field Review", 
+      status: "INSPECTION_SCHEDULED" // Changed from INSPECTION_PENDING to move it across tabs!
+  })
+  .eq('id', applicationId);
 
     if (updateError) throw updateError;
 

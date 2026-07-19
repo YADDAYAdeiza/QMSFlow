@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { SimulationProvider } from "@/utils/simulationContext";
-import SimulationRig from "@/components/LocalInspectionReports/SimulationRig";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,11 +27,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-50 text-slate-900`}
       >
-        <SimulationProvider>
-          {children}
-          {/* Bypasses standard auth checks dynamically during local staging */}
-          <SimulationRig />
-        </SimulationProvider>
+        {children}
       </body>
     </html>
   );

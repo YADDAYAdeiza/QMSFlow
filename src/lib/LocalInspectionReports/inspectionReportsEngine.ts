@@ -12,6 +12,7 @@ interface TransitionPayload {
   currentStepKey: keyof typeof inspectionReportWorkflow.steps;
   direction: "FORWARD" | "REWORK" | "RECALL";
   actingUserId: string;
+  actingUserRole: string;     // 🛡️ Added to track acting authority profile
   actingUserName: string;
   targetUserId: string | null; // Desk officer receiving the file
   remarks: string;
@@ -23,6 +24,7 @@ export async function executeInspectionReportTransition({
   currentStepKey,
   direction,
   actingUserId,
+  actingUserRole,             // 📥 Destructured from incoming payload
   actingUserName,
   targetUserId,
   remarks,
@@ -63,13 +65,11 @@ export async function executeInspectionReportTransition({
       let finalTitle = nextStep.title;
 
       // --- 🌟 STRATEGIC INTERCEPTOR: MOVING OUT OF FIELD INSPECTION 🌟 ---
-      // When field review checklist reports are pushed forward to management tracking
       if (currentStepKey === "STAFF_TECHNICAL_REVIEW" && direction === "FORWARD") {
         finalStatusLabel = "UNDER_DD_REVIEW";
       }
 
       // --- 🌟 STRATEGIC INTERCEPTOR FOR TERMINAL STATUS FORK 🌟 ---
-      // If we are moving FORWARD from the Director's Final Sign-Off step:
       if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
         const recommendation = incomingSnapshot?.final_recommendation || "PENDING";
         
@@ -77,7 +77,6 @@ export async function executeInspectionReportTransition({
           finalStatusLabel = "AWAITING_CAPA";
           finalTitle = "Applicant Notification Hub - CAPA Request Issued";
           
-          // Execute your notification dispatcher safely inside the runtime
           console.log(`[QMS MAIL]: Dispatching CAPA directive to ${oldDetails.notificationEmail || 'applicant'}`);
         } else {
           finalStatusLabel = "APPROVED";
@@ -87,11 +86,13 @@ export async function executeInspectionReportTransition({
       // -------------------------------------------------------------
 
       // 3. Build standardized, title-compliant audit notation
+      // Explicitly converts 'DDD' to 'Divisional Deputy Director' for official presentation layers
       const systemLogEntry = {
-        fromStep: activeStep.title,
-        toStep: finalTitle,
+        fromStep: activeStep.title.replace(/DDD/g, "Divisional Deputy Director"),
+        toStep: finalTitle.replace(/DDD/g, "Divisional Deputy Director"),
         actorName: actingUserName,
         actorId: actingUserId,
+        actorRole: actingUserRole, // 📋 Safely logged into the historic JSONB minute sheet array
         assignedToId: targetUserId,
         action: direction,
         text: remarks,
@@ -101,12 +102,12 @@ export async function executeInspectionReportTransition({
       // 4. Update application state matching JSON config parameters
       await tx.update(applications)
         .set({
-          currentPoint: finalTitle, 
-          status: finalStatusLabel, // Dynamically intercepted for UNDER_DD_REVIEW or terminal forks
+          currentPoint: finalTitle.replace(/DDD/g, "Divisional Deputy Director"), 
+          status: finalStatusLabel, 
           updatedAt: timestamp,
           details: {
             ...oldDetails,
-            savedChecklistSnapshot: incomingSnapshot, // 🌟 Safe state capture directly inside JSONB fields
+            savedChecklistSnapshot: incomingSnapshot, 
             comments: [...(oldDetails.comments || []), systemLogEntry],
             inspectionWorkflowMeta: {
               currentStepKey: targetStepKey,
@@ -128,7 +129,7 @@ export async function executeInspectionReportTransition({
       // 6. Start new QMS timing interval customized to current step definitions
       await tx.insert(qmsTimelines).values({
         applicationId,
-        point: finalTitle,
+        point: finalTitle.replace(/DDD/g, "Divisional Deputy Director"),
         division: nextStep.division,
         staffId: targetUserId || actingUserId,
         startTime: timestamp,
