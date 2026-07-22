@@ -4,18 +4,20 @@ import { db } from "@/db";
 import { applications, users, qmsTimelines, riskAssessments } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { sendOversightEmail } from "@/lib/utils/mail"; // Adjust the path to your sendOversightEmail utility file if needed
 
 /**
  * Submits a technical or compliance review to the Divisional Deputy Director.
- * Handles optional file uploads and updates QMS task timing.
+ * Handles optional file uploads, updates QMS task timing, and optionally triggers email notifications.
  */
 export async function submitToDDD(
   appId: number, 
   userId: string, 
   justification: string, 
   isHubVetting: boolean,
-  reportUrl: string, // Passed as empty string from frontend if no file uploaded
-  complianceData: any 
+  reportUrl: string, 
+  complianceData: any,
+  sendEmail: boolean = false // <-- Added parameter matching frontend dispatch
 ) {
   try {
     // 1. Context & Permissions Check
@@ -30,7 +32,7 @@ export async function submitToDDD(
       ),
     });
 
-    return await db.transaction(async (tx) => {
+    const txResult = await db.transaction(async (tx) => {
       const dbTimestamp = new Date();
       
       const app = await tx.query.applications.findFirst({ 
@@ -42,7 +44,6 @@ export async function submitToDDD(
       const oldDetails = (app.details as any) || {};
 
       // 2. Create the Audit Trail Entry
-      // If reportUrl is empty, we set attachmentUrl to null to avoid broken links
       const newComment = {
         from: user.name,
         role: isHubVetting ? "IRSD Officer" : "Technical Specialist",
@@ -53,18 +54,15 @@ export async function submitToDDD(
       };
 
       // 3. Update Application Details with Elevated URLs
-      // We persist the previous URL if a new one wasn't uploaded during this step
       const updatedDetails = { 
         ...oldDetails, 
         comments: [...(oldDetails.comments || []), newComment],
         
-        // Root-level elevation for the Viewer Panel (Optional Handling)
         ...(isHubVetting 
             ? { verificationReportUrl: reportUrl || oldDetails.verificationReportUrl || null } 
             : { technicalAssessmentUrl: reportUrl || oldDetails.technicalAssessmentUrl || null }
         ),
 
-        // Compliance-specific metadata (Pass 2 / Round 2)
         ...(isRound2 && {
           compliance_summary: complianceData.summary, 
           findings_ledger: complianceData.findings,
@@ -87,7 +85,6 @@ export async function submitToDDD(
       if (isRound2 && complianceData.riskId) {
         let level: 'Low' | 'Medium' | 'High' = 'Low';
         
-        // Scoring Logic: Criticals always High; 3+ Majors move to Medium
         if (complianceData.summary.criticalCount > 0) {
           level = 'High';
         } else if (complianceData.summary.majorCount >= 3) {
@@ -106,12 +103,10 @@ export async function submitToDDD(
       }
 
       // 5. QMS Timing Requirements
-      // Close the current staff member's active task
       await tx.update(qmsTimelines)
         .set({ endTime: dbTimestamp })
         .where(and(eq(qmsTimelines.applicationId, appId), isNull(qmsTimelines.endTime)));
 
-      // Open the new task for the Divisional Deputy Director
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
         point: targetPoint,
@@ -120,10 +115,33 @@ export async function submitToDDD(
         startTime: dbTimestamp,
       });
 
-      // 6. Refresh and return
-      revalidatePath('/dashboard/ddd');
-      return { success: true };
+      return {
+        appNumber: app.appNumber || appId.toString(),
+        type: isRound2 ? "Compliance Audit Review" : (isHubVetting ? "IRSD Hub Vetting" : "Technical Review"),
+        companyName: app.companyName || oldDetails.companyName || "N/A",
+        facilityName: app.facilityName || oldDetails.facilityName || "N/A",
+        customRecipient: divisionalDD?.email,
+      };
     });
+
+    // 6. Conditionally Trigger Email Dispatch Post-Transaction
+    if (sendEmail) {
+      // Non-blocking or awaited background notification dispatch
+      sendOversightEmail({
+        appNumber: txResult.appNumber,
+        type: txResult.type,
+        companyName: txResult.companyName,
+        facilityName: txResult.facilityName,
+        lodRemarks: justification,
+        customRecipient: txResult.customRecipient,
+      }).catch((emailErr) => {
+        console.error("Background Email Dispatch Failed:", emailErr);
+      });
+    }
+
+    // 7. Refresh and return
+    revalidatePath('/dashboard/ddd');
+    return { success: true };
   } catch (error: any) { 
     console.error("Submission Error:", error);
     return { success: false, error: error.message }; 

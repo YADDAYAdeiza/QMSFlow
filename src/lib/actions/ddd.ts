@@ -58,6 +58,8 @@ export async function sendOversightEmail(appDetails: {
     
     // Explicit oversight copy target
     const ccOversight = "adeiza.yusuf@nafdac.gov.ng";
+    const portalLandingPageUrl = "https://qms-flow.vercel.app";
+
 
     console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
     console.log(`👉 Target Destination: ${recipientEmail}`);
@@ -109,6 +111,13 @@ export async function sendOversightEmail(appDetails: {
             ` : ""}
           </table>
           <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 25px 0;" />
+          <!-- Interactive Action Redirection Button -->
+          <div style="text-align: center; margin: 25px 0 15px 0;">
+            <a href="${portalLandingPageUrl}" 
+               style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 8px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
+              Open VMAP Portal Dashboard
+            </a>
+          </div>
           <p style="font-size: 11px; color: #94a3b8; text-align: center; text-transform: uppercase; letter-spacing: 0.1em;">
             Veterinary Medicines Directorate (VMD) • QMS Automated Dispatch
           </p>
