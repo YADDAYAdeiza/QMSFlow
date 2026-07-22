@@ -11,7 +11,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [resetSent, setResetSent] = useState(false); // Track reset email status
+  const [resetSent, setResetSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const router = useRouter();
@@ -56,7 +56,7 @@ export default function LoginPage() {
     setError(null);
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/reset-password`,
+      redirectTo: `${window.location.origin}/auth/reset-password`,
     });
 
     if (error) {
