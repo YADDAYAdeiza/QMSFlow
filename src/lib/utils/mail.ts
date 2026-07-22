@@ -35,7 +35,7 @@ export async function sendOversightEmail(appDetails: {
     const ccOversight = "adeiza.yusuf@nafdac.gov.ng";
 
     // hardcoded Vercel URL landing address as requested
-    const portalLandingPageUrl = "https://qms-flow.vercel.app/dashboard";
+    const portalLandingPageUrl = "https://qms-flow.vercel.app";
 
     console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
     console.log(`👉 Target Destination: ${recipientEmail}`);
