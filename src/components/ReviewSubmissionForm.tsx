@@ -4,7 +4,7 @@ import React, { useState, useRef } from "react";
 import { 
   ShieldAlert, CheckCircle2, FileText, 
   Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
-  Info, Activity, History, Mail // Added Mail icon
+  Info, Activity, History, Mail 
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
@@ -46,7 +46,7 @@ export default function ReviewSubmissionForm({
   const [loading, setLoading] = useState(false);
   const [isLedgerVisible, setIsLedgerVisible] = useState(true);
   const [isSra, setIsSra] = useState(previousIsSra);
-  const [sendEmail, setSendEmail] = useState(false); // <-- New State Hook for the email slider flag
+  const [sendEmail, setSendEmail] = useState(true); // <-- Defaulted to true
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [findings, setFindings] = useState<Array<{ id: string; system: string; severity: string; text: string }>>(
@@ -86,7 +86,7 @@ export default function ReviewSubmissionForm({
         const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
-          .from('Documents') // Preserving your exact bucket context 
+          .from('Documents') 
           .upload(filePath, evidenceFile);
         
         if (uploadError) throw uploadError;
@@ -110,7 +110,6 @@ export default function ReviewSubmissionForm({
         findings: findings.filter(f => f.text.trim() !== ""),
       };
 
-      // Appended sendEmail flag into the action payload invocation matching backend position
       const res = await submitToDDD(
         appId, 
         staffId, 
@@ -170,7 +169,7 @@ export default function ReviewSubmissionForm({
                       </p>
                     </div>
                   </div>
-                ))}
+              ))}
             </div>
           ) : (
             <div className="p-10 text-center text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">
@@ -360,7 +359,7 @@ export default function ReviewSubmissionForm({
         {/* EMAIL ALERT SLIDER/TOGGLE SWITCH */}
         <div className="flex items-center justify-between p-6 bg-slate-50 border border-slate-200 rounded-3xl shadow-inner my-4">
           <div className="flex items-center gap-4">
-            <div className={`p-3 rounded-xl transition-colors duration-300 ${sendEmail ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}>
+            <div className={`p-3 rounded-xl transition-colors duration-300 ${sendEmail ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
               <Mail className="w-5 h-5" />
             </div>
             <div>
@@ -369,12 +368,12 @@ export default function ReviewSubmissionForm({
             </div>
           </div>
           
-          {/* Slider Layout */}
+          {/* Slider Layout - Switches to Green when active */}
           <button
             type="button"
             onClick={() => setSendEmail(!sendEmail)}
-            className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none ring-4 ring-blue-500/5 ${
-              sendEmail ? 'bg-blue-600' : 'bg-slate-300'
+            className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none ring-4 ring-emerald-500/5 ${
+              sendEmail ? 'bg-emerald-600' : 'bg-slate-300'
             }`}
           >
             <span
