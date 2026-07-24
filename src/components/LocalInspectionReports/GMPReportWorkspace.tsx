@@ -209,7 +209,7 @@ export default function GMPReportWorkspace({
     setIsSubmitting(true);
     try {
       if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
-        const transitionRes = await fetch("/api/LocalInspectionReports", {
+        const transitionRes = await fetch("/api/LocalInspectionReports", { 
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -569,7 +569,7 @@ export default function GMPReportWorkspace({
                         type="button"
                         disabled={
                           isSubmitting || 
-                          !canDispatchForward || // 🛡️ Properly synced variable reference here
+                          !canDispatchForward ||
                           (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) || 
                           (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)
                         }

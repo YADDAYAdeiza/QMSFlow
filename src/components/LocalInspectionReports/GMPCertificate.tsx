@@ -38,7 +38,7 @@ interface GMPCertificateData {
   signatoryTitle?: string;
 }
 
-export const GMPCertificate = ({ data }: { data: GmpCertificateData }) => {
+export const GMPCertificate = ({ data }: { data: GMPCertificateData }) => {
   const activities = data.productLines?.length 
     ? data.productLines.map(p => `${p.lineName} ${p.riskCategory ? `(${p.riskCategory})` : ''}`)
     : data.activities || [];

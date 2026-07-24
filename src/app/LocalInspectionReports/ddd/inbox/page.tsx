@@ -1,7 +1,8 @@
 import { db } from "@/db"; 
-import { applications, companies, capaSubmissions } from "@/db/schema"; // Added capaSubmissions table reference
+import { applications, companies, capaSubmissions } from "@/db/schema"; 
 import { eq, or, inArray } from "drizzle-orm";
 import React from "react";
+import Link from "next/link";
 import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
 
 interface CommentTrail {
@@ -24,7 +25,7 @@ interface ApplicationItem {
   currentPoint: string | null;
   companyName: string;
   details: string | any; 
-  capaStatus?: string | null; // Track outer CAPA verification state
+  capaStatus?: string | null;
 }
 
 export default async function DivisionalDeputyDirectorInboxDashboardPage({
@@ -49,11 +50,11 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
         currentPoint: applications.currentPoint,
         companyName: companies.name,
         details: applications.details, 
-        capaStatus: capaSubmissions.status, // Consulting the CAPA table
+        capaStatus: capaSubmissions.status,
       })
       .from(applications)
       .innerJoin(companies, eq(applications.companyId, companies.id))
-      .leftJoin(capaSubmissions, eq(applications.id, capaSubmissions.applicationId)) // Injected correlation join
+      .leftJoin(capaSubmissions, eq(applications.id, capaSubmissions.applicationId))
       .where(
         or(
           inArray(applications.status, ["INSPECTION_PENDING", "INSPECTION_SCHEDULED", "APPROVED", "CAPA_APPROVED"]),
@@ -206,7 +207,17 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                         {app.status}
                       </span>
                     </td>
-                    <td className="p-4 text-right whitespace-nowrap">
+                    <td className="p-4 text-right whitespace-nowrap space-x-2">
+                      {/* Show Assign Task button alongside Audit Trail for Unassigned items */}
+                      {activeTab === "unassigned" && (
+                        <Link
+                          href={`/LocalInspectionReports/ddd//applications/${app.id}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                        >
+                          <span>📝</span> Assign Task
+                        </Link>
+                      )}
+                      
                       <AuditTrailButton id={app.id} applicationNumber={app.applicationNumber} />
                     </td>
                   </tr>
