@@ -8,30 +8,42 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const payload = await request.json();
     
-    // 1. EXTRACT IDENTIFIER (Using the correct checklistSnapshot key)
-    const applicationNumber = payload?.checklistSnapshot?.report_doc_number;
+    // 1. EXTRACT IDENTIFIER (Check applicationId first, fallback to report_doc_number)
+    const applicationId = payload?.applicationId || payload?.checklistSnapshot?.application_id;
+    const applicationNumber = payload?.applicationNumber || payload?.checklistSnapshot?.report_doc_number;
     
-    if (!applicationNumber) {
-      console.warn('Payload parsing failed: Missing report_doc_number in checklistSnapshot', payload);
+    if (!applicationId && !applicationNumber) {
+      console.warn('Payload parsing failed: Missing identifier in payload', payload);
       return NextResponse.json(
-        { error: 'Missing report_doc_number inside checklistSnapshot' },
+        { error: 'Missing applicationId or application_number inside payload' },
         { status: 400 }
       );
     }
 
-    // 2. FETCH CURRENT ROW (To safeguard existing JSONB values)
-    const { data: existingApp, error: fetchError } = await supabase
-      .from('applications')
-      .select('details')
-      .eq('application_number', applicationNumber)
-      .maybeSingle();
+    // 2. FETCH CURRENT ROW (Try by ID first, fallback to application_number)
+    let query = supabase.from('applications').select('details, id, application_number');
+    
+    if (applicationId) {
+      query = query.eq('id', Number(applicationId));
+    } else {
+      query = query.eq('application_number', applicationNumber);
+    }
+
+    const { data: existingApp, error: fetchError } = await query.maybeSingle();
 
     if (fetchError) {
       console.error('Supabase fetch error during draft save:', fetchError);
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
     }
 
-    // Safely parse/handle existing JSONB details to prevent wiping other metadata
+    if (!existingApp) {
+      return NextResponse.json(
+        { error: `Application record not found for ID/Number provided.` },
+        { status: 404 }
+      );
+    }
+
+    // Safely parse existing JSONB details
     let currentDetails: Record<string, any> = {};
     if (existingApp?.details) {
       if (typeof existingApp.details === 'string') {
@@ -45,20 +57,31 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. MERGE INCOMING PAYLOAD INTO THE EVOLVING JSONB FIELD
-    // This preserves existing top-level details fields like assignedDivisions, productLines, etc.
+    // Extract incoming compiled report HTML (from payload or nested snapshot)
+    const incomingCompiledReportHtml = 
+      payload?.compiledReportHtml || 
+      payload?.checklistSnapshot?.compiledReportHtml || 
+      payload?.savedChecklistSnapshot?.compiledReportHtml;
+
+    // Preserve existing HTML if incoming value is empty/undefined
+    const finalCompiledReportHtml = 
+      (incomingCompiledReportHtml && incomingCompiledReportHtml.trim() !== '') 
+        ? incomingCompiledReportHtml 
+        : (currentDetails?.compiledReportHtml || '');
+
+    // 3. MERGE INCOMING PAYLOAD INTO JSONB FIELD
     const updatePayload: Record<string, any> = {
       details: {
         ...currentDetails,
-        ...payload, // Merges checklistSnapshot, savedBy, etc.
-        // Ensure both names point to the updated object for fallback protection
+        ...payload,
+        compiledReportHtml: finalCompiledReportHtml,
         checklistSnapshot: payload.checklistSnapshot,
         savedChecklistSnapshot: payload.checklistSnapshot
       },
       updated_at: new Date().toISOString(),
     };
 
-    // 4. MAP TOP-LEVEL RELATIONAL COLUMNS (If present)
+    // 4. MAP TOP-LEVEL RELATIONAL COLUMNS
     const currentStep = payload?.inspectionWorkflowMeta?.currentStepKey;
     if (currentStep) {
       updatePayload.current_point = currentStep;
@@ -69,13 +92,13 @@ export async function POST(request: Request) {
       updatePayload.status = finalRecommendation;
     }
 
-    // 5. COMMIT THE UPDATE TO THE DATABASE
+    // 5. COMMIT UPDATE BY PRIMARY KEY (id)
     const { data, error: updateError } = await supabase
       .from('applications')
       .update(updatePayload)
-      .eq('application_number', applicationNumber)
+      .eq('id', existingApp.id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (updateError) {
       console.error('Supabase application update error:', updateError);

@@ -15,6 +15,7 @@ export interface ChecklistData {
   inspection_dates: string;
   type_of_inspection: string;
   inspected_site_name: string;
+  notificationEmail?: string;
   site_contact_details: { phone: string; email: string; website: string };
   activities_carried_out: string[];
   vicinity_assessment: string;
@@ -42,8 +43,8 @@ export interface ChecklistData {
 }
 
 interface ChecklistFormProps {
-  initialData?: Partial<ChecklistData> | null;
-  currentInspector?: string; // ← Pass the authenticated inspector's name down here!
+  initialData?: Partial<ChecklistData> & Record<string, any> | null;
+  currentInspector?: string;
   onSave: (data: ChecklistData) => void | Promise<void>;
   onSaveDraft?: (data: ChecklistData) => void | Promise<void>; 
   onChange?: (data: ChecklistData) => void;
@@ -72,54 +73,91 @@ export default function InspectionChecklistForm({
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
 
-  const [formData, setFormData] = useState<ChecklistData>(() => ({
-    report_doc_number: initialData?.report_doc_number || "OKL-LA-PRI-01-2026",
-    inspection_dates: initialData?.inspection_dates || "",
-    type_of_inspection: initialData?.type_of_inspection || "PRI",
-    inspected_site_name: initialData?.inspected_site_name || "Orange Kalbe Limited",
-    site_contact_details: initialData?.site_contact_details || { phone: "", email: "", website: "" },
-    activities_carried_out: Array.isArray(initialData?.activities_carried_out) ? initialData.activities_carried_out : [],
-    vicinity_assessment: initialData?.vicinity_assessment || "",
-    lead_inspector: initialData?.lead_inspector || currentInspector || "",
-    co_inspectors: initialData?.co_inspectors || "",
-    historical_baseline: initialData?.historical_baseline || { prev_date_type: "", prev_team: "", past_capa_status: "", major_changes: "" },
-    
-    pqs_score: initialData?.pqs_score ?? 100, pqs_notes: initialData?.pqs_notes || "",
-    personnel_score: initialData?.personnel_score ?? 100, personnel_notes: initialData?.personnel_notes || "",
-    premises_equipment_score: initialData?.premises_equipment_score ?? 100, premises_equipment_notes: initialData?.premises_equipment_notes || "",
-    qualification_validation_score: initialData?.qualification_validation_score ?? 100, qualification_validation_notes: initialData?.qualification_validation_notes || "",
-    material_management_score: initialData?.material_management_score ?? 100, material_management_notes: initialData?.material_management_notes || "",
-    laboratory_control_score: initialData?.laboratory_control_score ?? 100, laboratory_control_notes: initialData?.laboratory_control_notes || "",
+  // Helper function to resolve site email across payload schemas
+  const resolveInitialEmail = (data?: Record<string, any> | null) => {
+    console.log('Email should be here:', data);
+    return (
+      data?.notificationEmail ||
+      data?.site_contact_details?.email ||
+      data?.applicant_email ||
+      ""
+    );
+  };
 
-    critical_count: initialData?.critical_count ?? 0,
-    major_count: initialData?.major_count ?? 0,
-    other_count: initialData?.other_count ?? 0,
-    observations: Array.isArray(initialData?.observations) ? initialData.observations : [],
-    final_recommendation: initialData?.final_recommendation || "PENDING"
-  }));
+  // Helper function to resolve lead inspector across payload schemas
+  const resolveInitialInspector = (data?: Record<string, any> | null, fallbackInspector?: string) => {
+    return (
+      data?.lead_inspector ||
+      data?.leadInspector ||
+      data?.inspector_name ||
+      fallbackInspector ||
+      ""
+    );
+  };
+
+  const [formData, setFormData] = useState<ChecklistData>(() => {
+    const resolvedEmail = resolveInitialEmail(initialData);
+
+    return {
+      report_doc_number: initialData?.report_doc_number || "OKL-LA-PRI-01-2026",
+      inspection_dates: initialData?.inspection_dates || "",
+      type_of_inspection: initialData?.type_of_inspection || "PRI",
+      inspected_site_name: initialData?.inspected_site_name || initialData?.company_name || "Orange Kalbe Limited",
+      notificationEmail: resolvedEmail,
+      site_contact_details: {
+        phone: initialData?.site_contact_details?.phone || initialData?.phone || "",
+        email: resolvedEmail,
+        website: initialData?.site_contact_details?.website || initialData?.website || ""
+      },
+      activities_carried_out: Array.isArray(initialData?.activities_carried_out) ? initialData.activities_carried_out : [],
+      vicinity_assessment: initialData?.vicinity_assessment || "",
+      lead_inspector: resolveInitialInspector(initialData, currentInspector),
+      co_inspectors: initialData?.co_inspectors || "",
+      historical_baseline: initialData?.historical_baseline || { prev_date_type: "", prev_team: "", past_capa_status: "", major_changes: "" },
+      
+      pqs_score: initialData?.pqs_score ?? 100, pqs_notes: initialData?.pqs_notes || "",
+      personnel_score: initialData?.personnel_score ?? 100, personnel_notes: initialData?.personnel_notes || "",
+      premises_equipment_score: initialData?.premises_equipment_score ?? 100, premises_equipment_notes: initialData?.premises_equipment_notes || "",
+      qualification_validation_score: initialData?.qualification_validation_score ?? 100, qualification_validation_notes: initialData?.qualification_validation_notes || "",
+      material_management_score: initialData?.material_management_score ?? 100, material_management_notes: initialData?.material_management_notes || "",
+      laboratory_control_score: initialData?.laboratory_control_score ?? 100, laboratory_control_notes: initialData?.laboratory_control_notes || "",
+
+      critical_count: initialData?.critical_count ?? 0,
+      major_count: initialData?.major_count ?? 0,
+      other_count: initialData?.other_count ?? 0,
+      observations: Array.isArray(initialData?.observations) ? initialData.observations : [],
+      final_recommendation: initialData?.final_recommendation || "PENDING"
+    };
+  });
 
   const lastEmittedDataRef = useRef<ChecklistData | null>(null);
 
-  // Fallback assignment loop if currentInspector resolves after initial state setup
+  // Sync if currentInspector updates after mount
   useEffect(() => {
-    if (currentInspector && !formData.lead_inspector && !initialData?.lead_inspector) {
+    if (currentInspector && !formData.lead_inspector) {
       setFormData(prev => ({ ...prev, lead_inspector: currentInspector }));
     }
-  }, [currentInspector, initialData, formData.lead_inspector]);
+  }, [currentInspector, formData.lead_inspector]);
 
+  // Re-hydrate formData whenever initialData changes from parent state/API payload
   useEffect(() => {
     if (initialData) {
       const isEcho = lastEmittedDataRef.current && 
         JSON.stringify(initialData) === JSON.stringify(lastEmittedDataRef.current);
 
       if (!isEcho) {
+        const resolvedEmail = resolveInitialEmail(initialData);
+
         setFormData(prev => ({
           ...prev,
           ...initialData,
+          inspected_site_name: initialData.inspected_site_name || initialData.company_name || prev.inspected_site_name,
+          lead_inspector: resolveInitialInspector(initialData, currentInspector) || prev.lead_inspector,
+          notificationEmail: resolvedEmail || prev.notificationEmail,
           site_contact_details: {
-            phone: initialData.site_contact_details?.phone ?? prev.site_contact_details.phone,
-            email: initialData.site_contact_details?.email ?? prev.site_contact_details.email,
-            website: initialData.site_contact_details?.website ?? prev.site_contact_details.website,
+            phone: initialData.site_contact_details?.phone ?? initialData.phone ?? prev.site_contact_details.phone,
+            email: resolvedEmail || prev.site_contact_details.email,
+            website: initialData.site_contact_details?.website ?? initialData.website ?? prev.site_contact_details.website,
           },
           historical_baseline: {
             prev_date_type: initialData.historical_baseline?.prev_date_type ?? prev.historical_baseline.prev_date_type,
@@ -132,7 +170,7 @@ export default function InspectionChecklistForm({
         }));
       }
     }
-  }, [initialData]);
+  }, [initialData, currentInspector]);
 
   useEffect(() => {
     if (onChange) {
@@ -273,7 +311,20 @@ export default function InspectionChecklistForm({
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Site Email</label>
-                  <input type="email" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.email} onChange={e => setFormData({...formData, site_contact_details: {...formData.site_contact_details, email: e.target.value}})} />
+                  <input 
+                    type="email" 
+                    disabled={isReadOnly} 
+                    className="w-full border p-2 rounded text-xs font-medium text-slate-800" 
+                    value={formData.notificationEmail || formData.site_contact_details.email} 
+                    onChange={e => {
+                      const emailVal = e.target.value;
+                      setFormData({
+                        ...formData, 
+                        notificationEmail: emailVal,
+                        site_contact_details: { ...formData.site_contact_details, email: emailVal }
+                      });
+                    }} 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Site Website</label>
@@ -490,7 +541,7 @@ export default function InspectionChecklistForm({
                 {isCompiling ? (
                   <><Spinner /><span>Running Engine...</span></>
                 ) : (
-                  <span>跑 Draft via System Engine</span>
+                  <span>Run Draft via System Engine</span>
                 )}
               </button>
             )

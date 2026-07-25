@@ -33,11 +33,54 @@ export async function POST(request: Request) {
       notificationEmail 
     } = body;
 
-    // Fallback extraction from snapshot or body payload
-    const effectiveCompanyName = companyName || checklistSnapshot?.inspected_site_name || "Registered Establishment";
-    const effectiveAddress = facilityAddress || "Registered Facility Address";
-    const effectiveRecipientEmail = notificationEmail || body?.details?.notificationEmail || "managing_director@globalorganics.com";
-    const effectiveProductLines = rawProductLines || checklistSnapshot?.productLines || body?.details?.productLines || [];
+        // 1. Comprehensive Fallback Extraction for Establishment & Site Metadata
+      // 1. Comprehensive Fallback Extraction for Establishment & Site Metadata
+    const effectiveCompanyName = 
+      companyName || 
+      checklistSnapshot?.inspected_site_name || 
+      checklistSnapshot?.company_name ||
+      body?.details?.savedChecklistSnapshot?.inspected_site_name ||
+      body?.details?.savedChecklistSnapshot?.company_name ||
+      body?.details?.companyName || 
+      "Registered Establishment";
+
+    const effectiveAddress = 
+      facilityAddress || 
+      checklistSnapshot?.facility_address || 
+      checklistSnapshot?.facilityAddress || 
+      checklistSnapshot?.inspected_site_address ||
+      body?.details?.savedChecklistSnapshot?.facility_address || 
+      body?.details?.savedChecklistSnapshot?.facilityAddress || 
+      body?.details?.facilityAddress || 
+      "Registered Facility Address";
+
+    const effectiveRecipientEmail = 
+      notificationEmail || 
+      checklistSnapshot?.applicant_email ||
+      body?.details?.savedChecklistSnapshot?.applicant_email ||
+      body?.details?.notificationEmail || 
+      "managing_director@globalorganics.com";
+
+    // 2. Product Lines Extraction (Checking .length > 0 to skip empty arrays)
+    const extractedLines = 
+      (Array.isArray(rawProductLines) && rawProductLines.length > 0) ? rawProductLines :
+      (Array.isArray(checklistSnapshot?.productLines) && checklistSnapshot.productLines.length > 0) ? checklistSnapshot.productLines :
+      (Array.isArray(body?.details?.productLines) && body.details.productLines.length > 0) ? body.details.productLines :
+      [];
+      
+    const effectiveProductLines = Array.isArray(extractedLines) 
+      ? extractedLines.map((line: any) => ({
+          lineName: line.lineName || line.name || line.title || "Manufacturing Line",
+          lineType: line.lineType || line.type || "",
+          products: Array.isArray(line.products) 
+            ? line.products 
+            : Array.isArray(line.approvedProducts) 
+            ? line.approvedProducts 
+            : []
+        }))
+      : [];
+
+    const logoUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/nafdac_logo2-removebg-preview.png`;
 
     console.log(`[QMS] Processing routing transition for App ID: ${applicationId} from Desk: ${currentStepKey}`);
 
@@ -55,7 +98,7 @@ export async function POST(request: Request) {
 
         const observationListHtml = structuralObservations.length > 0
           ? `<ul style="padding-left: 20px; color: #334155; font-size: 13px; line-height: 1.6;">
-              ${structuralObservations.map((obs: any) => `<li><strong>[${obs.severity}]</strong> ${obs.text}</li>`).join("")}
+              ${structuralObservations.map((obs: any) => `<li><strong>[${obs.severity || "DEFICIENCY"}]</strong> ${obs.text || obs.description || obs}</li>`).join("")}
              </ul>`
           : `<p style="font-size: 13px; color: #64748b; font-style: italic;">Please log into the compliance tracking panel to review mapped observations.</p>`;
 
@@ -121,6 +164,7 @@ export async function POST(request: Request) {
           facilityName: effectiveCompanyName,
           facilityAddress: effectiveAddress,
           productLines: effectiveProductLines,
+          logoUrl,
           signatoryName: "Divisional Deputy Director",
           signatoryTitle: "Divisional Deputy Director, Veterinary Medicine & Allied Products"
         };
@@ -129,10 +173,10 @@ export async function POST(request: Request) {
         const productLinesHtml = effectiveProductLines.length > 0
           ? effectiveProductLines.map((line: any) => `
               <li style="margin-bottom: 8px;">
-                <strong>${line.lineName || "Line"}</strong> ${line.lineType ? `(${line.lineType})` : ""}
+                <strong>${line.lineName}</strong> ${line.lineType ? `(${line.lineType})` : ""}
                 ${line.products && line.products.length > 0 ? `
                   <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
-                    ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
+                    ${line.products.map((p: any) => `<li>${p.name || p} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
                   </ul>
                 ` : ""}
               </li>

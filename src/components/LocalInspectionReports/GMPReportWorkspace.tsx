@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
 import InspectionChecklistForm from "./InspectionChecklistForm";
+import ReportRichTextEditor from "./ReportRichTextEditor";
 
 const BASE_CHECKLIST_TEMPLATE = {
   report_doc_number: "OKL-LA-PRI-01-2026",
@@ -60,15 +61,20 @@ interface WorkspaceProps {
   companyId: string;
   companyName: string;
   activeUserId: string;
-  activeUserRole: string; // Dynamic role e.g., 'TEAM_LEADER', 'CO_INSPECTOR', 'DDD', 'DIRECTOR'
+  activeUserRole: string; // Dynamic role e.g., 'TEAM_LEADER', 'CO_INSPECTOR', 'Divisional Deputy Director', 'DIRECTOR'
   activeUserName?: string;
+  globalStructuralRole?: string; // Organizational base role passed from parent page
+  notificationEmail?: string;     // Passed from parent JSX call
+  applicantEmail?: string;        // Fallback/Alias
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps;
   initialReportHtml?: string | null;
   initialChecklistSnapshot?: any;
   initialComments?: CommentTrailItem[];
+  facilityAddressState?: string;
+  productLinesState?: string[];
 }
 
-// Utility helper to normalize title titles dynamically
+// Utility helper to normalize desk titles dynamically
 const formatDeskTitle = (title?: string) => {
   if (!title) return "Unlabeled Desk";
   return title.replace(/DDD/g, "Divisional Deputy Director");
@@ -81,10 +87,15 @@ export default function GMPReportWorkspace({
   activeUserId,
   activeUserRole,
   activeUserName = "Roseline",
+  globalStructuralRole = "",
+  notificationEmail = "",
+  applicantEmail = "",
   initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
   initialReportHtml = null,
   initialChecklistSnapshot = null,
-  initialComments = []
+  initialComments = [],
+  facilityAddressState = "",
+  productLinesState = []
 }: WorkspaceProps) {
   const router = useRouter();
   const expectedUserRaw = activeUserName;
@@ -109,9 +120,10 @@ export default function GMPReportWorkspace({
     console.log("🔐 SECURITY CHECK - Active User Session Profile:", {
       userId: activeUserId,
       userRole: activeUserRole,
+      globalStructuralRole,
       userName: expectedUserRaw
     });
-  }, [activeUserId, activeUserRole, expectedUserRaw]);
+  }, [activeUserId, activeUserRole, globalStructuralRole, expectedUserRaw]);
 
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
   const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
@@ -121,13 +133,23 @@ export default function GMPReportWorkspace({
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
+  // Primary Email Resolution with Fallback Cascade
+  const resolvedNotificationEmail = 
+    notificationEmail || 
+    applicantEmail || 
+    checklistSnapshot?.notificationEmail || 
+    checklistSnapshot?.site_contact_details?.email || 
+    checklistSnapshot?.applicantEmail || 
+    "";
+
   // 🛡️ SECURITY CONTROL & ROLE AUTHORIZATION GATEWAY
   const isAuthorizedToForward = !!activeUserId && !!activeUserRole;
   
-  // Dynamic Role Check: Allows TEAM_LEADER, DDD (Divisional Deputy Director), or matching step role
+  // Dynamic Role Check: Allows TEAM_LEADER, Divisional Deputy Director, or matching step role
   const isAuthorizedRole = 
     activeUserRole === "TEAM_LEADER" || 
     activeUserRole === "DDD" || 
+    activeUserRole === "Divisional Deputy Director" ||
     activeUserRole === activeStepConfig?.role;
 
   const canDispatchForward = isAuthorizedToForward && isAuthorizedRole;
@@ -146,15 +168,25 @@ export default function GMPReportWorkspace({
     try {
       setChecklistSnapshot(draftPayload);
 
+      const currentReportHtml = 
+        reportHtml || 
+        draftPayload?.compiledReportHtml || 
+        "";
+
       const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           applicationId,
+          compiledReportHtml: currentReportHtml,
           checklistSnapshot: draftPayload,
           savedBy: expectedUserRaw,
           savedById: activeUserId,
-          savedByRole: activeUserRole
+          savedByRole: activeUserRole,
+          inspectionWorkflowMeta: {
+            lastAction: "DRAFT_SAVE",
+            currentStepKey: "STAFF_TECHNICAL_REVIEW"
+          }
         }),
       });
 
@@ -177,6 +209,17 @@ export default function GMPReportWorkspace({
     try {
       setChecklistSnapshot(completedFormPayload);
 
+      const resolvedAddress = 
+        facilityAddressState || 
+        completedFormPayload?.inspected_site_address || 
+        completedFormPayload?.facilityAddress || 
+        "";
+
+      const resolvedProductLines = 
+        productLinesState && productLinesState.length > 0 
+          ? productLinesState 
+          : (completedFormPayload?.productLines || []);
+
       const res = await fetch("/api/LocalInspectionReports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -185,6 +228,12 @@ export default function GMPReportWorkspace({
           application_id: applicationId,
           report_doc_number: `NAFDAC/VMD/GMP/${applicationId}/2026`,
           inspected_site_name: companyName,
+          company_name: companyName,
+          facility_address: resolvedAddress,
+          inspected_site_address: resolvedAddress,
+          product_lines: resolvedProductLines,
+          productLines: resolvedProductLines,
+          applicant_email: resolvedNotificationEmail
         }),
       });
 
@@ -201,122 +250,113 @@ export default function GMPReportWorkspace({
     }
   };
 
-  // Inside GMPReportWorkspace.tsx
+  const handleTransition = async (direction: "FORWARD" | "REWORK") => {
+    if (direction === "FORWARD" && !canDispatchForward) {
+      alert("Unauthorized Operation: Forward transitions require appropriate leadership or assigned role authority.");
+      return;
+    }
 
-const handleTransition = async (direction: "FORWARD" | "REWORK") => {
-  if (direction === "FORWARD" && !canDispatchForward) {
-    alert("Unauthorized Operation: Forward transitions require appropriate leadership or assigned role authority.");
-    return;
-  }
+    if (!remarks.trim()) {
+      alert("Please provide official directives/minutes before moving this file.");
+      return;
+    }
 
-  if (!remarks.trim()) {
-    alert("Please provide official directives/minutes before moving this file.");
-    return;
-  }
+    const now = Date.now();
+    const durationSeconds = Math.round((now - stepEntryTime) / 1000);
 
-  const now = Date.now();
-  const durationSeconds = Math.round((now - stepEntryTime) / 1000);
+    setIsSubmitting(true);
+    try {
+      if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
+        const facilityAddress = 
+          facilityAddressState || 
+          checklistSnapshot?.inspected_site_address || 
+          checklistSnapshot?.facilityAddress ||
+          "";
 
-  setIsSubmitting(true);
-  try {
-    if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
-      // Extract properties safely from component state / checklistSnapshot
-      const notificationEmail = 
-        applicantEmail || 
-        checklistSnapshot?.notificationEmail || 
-        checklistSnapshot?.contact_email;
+        const productLines = 
+          productLinesState.length > 0 ? productLinesState : (checklistSnapshot?.productLines || []);
 
-      const facilityAddress = 
-        facilityAddressState || 
-        checklistSnapshot?.inspected_site_address || 
-        checklistSnapshot?.facilityAddress;
+        const transitionRes = await fetch("/api/LocalInspectionReports", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            applicationId,
+            currentStepKey: currentStep,
+            direction,
+            companyName,
+            facilityAddress,
+            productLines,
+            notificationEmail: resolvedNotificationEmail,
+            remarks,
+            processingDurationSeconds: durationSeconds,
+            checklistSnapshot,
+            executedByUserId: activeUserId,
+            executedByUserRole: activeUserRole
+          })
+        });
 
-      const productLines = 
-        productLinesState || 
-        checklistSnapshot?.productLines || 
-        [];
+        const transitionData = await transitionRes.json();
+        if (!transitionRes.ok || !transitionData.success) {
+          throw new Error(transitionData.error || "Integrated endpoint transition rejected.");
+        }
+      }
 
-      const transitionRes = await fetch("/api/LocalInspectionReports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          applicationId,
-          currentStepKey: currentStep,
-          direction,
-          companyName,
-          facilityAddress,
-          productLines,
-          notificationEmail,
-          remarks: remarks,
-          processingDurationSeconds: durationSeconds,
-          checklistSnapshot: checklistSnapshot,
-          executedByUserId: activeUserId,
-          executedByUserRole: activeUserRole
-        })
+      const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division)
+        ? activeStepConfig.division
+        : "VMD";
+
+      const res = await executeInspectionReportTransition({
+        applicationId: Number(applicationId),
+        currentStepKey: currentStep,
+        direction,
+        actingUserId: activeUserId,
+        actingUserRole: activeUserRole,
+        actingUserName: `${expectedUserRaw} (${activeDivision})`,
+        targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
+        remarks
       });
 
-      const transitionData = await transitionRes.json();
-      if (!transitionRes.ok || !transitionData.success) {
-        throw new Error(transitionData.error || "Integrated endpoint transition rejected.");
+      if (res.success && "arrivedAt" in res && res.arrivedAt) {
+        const nextStepKey = res.arrivedAt as keyof typeof inspectionReportWorkflow.steps;
+
+        let targetStepTitle = inspectionReportWorkflow.steps[nextStepKey]?.title || "Archived Desk";
+        if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
+          targetStepTitle = checklistSnapshot?.final_recommendation === "CAPA_PENDING"
+            ? "Applicant Notification Hub - CAPA Request Issued"
+            : "Applicant Notification Hub - Final Approval Certified";
+        }
+
+        const sourceStepTitle = activeStepConfig?.title || "Unknown Desk";
+
+        const newMinute: CommentTrailItem = {
+          text: remarks,
+          action: direction,
+          fromStep: formatDeskTitle(sourceStepTitle),
+          toStep: formatDeskTitle(targetStepTitle),
+          actorName: `${expectedUserRaw} (${activeDivision})`,
+          timestamp: new Date().toISOString(),
+          processingDurationSeconds: durationSeconds,
+          actorId: activeUserId,
+          actorRole: activeUserRole
+        };
+
+        setCommentsList(prev => [newMinute, ...prev]);
+        alert(`Dossier successfully routed in ${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s to: ${formatDeskTitle(targetStepTitle)}`);
+
+        setRemarks("");
+        setSelectedStaff("");
+        setCurrentStep(nextStepKey);
+        router.refresh();
+      } else {
+        const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing sequence breakdown";
+        alert(`Routing Matrix Error: ${errorMsg}`);
       }
+    } catch (err: any) {
+      alert(`Execution Error: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division)
-      ? activeStepConfig.division
-      : "VMD";
-
-    const res = await executeInspectionReportTransition({
-      applicationId: Number(applicationId),
-      currentStepKey: currentStep,
-      direction,
-      actingUserId: activeUserId,
-      actingUserRole: activeUserRole,
-      actingUserName: `${expectedUserRaw} (${activeDivision})`,
-      targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
-      remarks: remarks
-    });
-
-    if (res.success && "arrivedAt" in res && res.arrivedAt) {
-      const nextStepKey = res.arrivedAt as keyof typeof inspectionReportWorkflow.steps;
-
-      let targetStepTitle = inspectionReportWorkflow.steps[nextStepKey]?.title || "Archived Desk";
-      if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-        targetStepTitle = checklistSnapshot?.final_recommendation === "CAPA_PENDING"
-          ? "Applicant Notification Hub - CAPA Request Issued"
-          : "Applicant Notification Hub - Final Approval Certified";
-      }
-
-      const sourceStepTitle = activeStepConfig?.title || "Unknown Desk";
-
-      const newMinute: CommentTrailItem = {
-        text: remarks,
-        action: direction,
-        fromStep: formatDeskTitle(sourceStepTitle),
-        toStep: formatDeskTitle(targetStepTitle),
-        actorName: `${expectedUserRaw} (${activeDivision})`,
-        timestamp: new Date().toISOString(),
-        processingDurationSeconds: durationSeconds,
-        actorId: activeUserId,
-        actorRole: activeUserRole
-      };
-
-      setCommentsList(prev => [newMinute, ...prev]);
-      alert(`Dossier successfully routed in ${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s to: ${formatDeskTitle(targetStepTitle)}`);
-
-      setRemarks("");
-      setSelectedStaff("");
-      setCurrentStep(nextStepKey);
-      router.refresh();
-    } else {
-      const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing sequence breakdown";
-      alert(`Routing Matrix Error: ${errorMsg}`);
-    }
-  } catch (err: any) {
-    alert(`Execution Error: ${err.message}`);
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -393,15 +433,15 @@ const handleTransition = async (direction: "FORWARD" | "REWORK") => {
               </div>
             </div>
 
-            {/* Compiled Narrative Preview */}
             {reportHtml && (
               <div className="bg-white rounded-xl p-6 border border-emerald-200 shadow-sm animate-fadeIn">
                 <h3 className="text-sm font-bold text-emerald-900 border-b border-emerald-100 pb-3 mb-4 uppercase tracking-wider flex items-center gap-2">
                   <span>📝</span> SOP Ref. No. DER-800-06 Compiled Narrative Draft
                 </h3>
-                <div
-                  className="prose prose-sm max-w-none text-slate-800 prose-headings:text-slate-900 prose-strong:text-slate-900 prose-ul:list-disc prose-p:leading-relaxed bg-slate-50/50 p-4 border border-slate-100 rounded-lg"
-                  dangerouslySetInnerHTML={{ __html: reportHtml }}
+                <ReportRichTextEditor
+                  contentHtml={reportHtml}
+                  onChange={(updatedHtml) => setReportHtml(updatedHtml)}
+                  readOnly={currentStep !== "STAFF_TECHNICAL_REVIEW"}
                 />
               </div>
             )}
@@ -409,6 +449,7 @@ const handleTransition = async (direction: "FORWARD" | "REWORK") => {
             {/* Checklist Matrix Form Component */}
             <InspectionChecklistForm
               initialData={checklistSnapshot}
+              notificationEmail={resolvedNotificationEmail} // 👈 Added explicit notificationEmail prop
               onSave={handleAICorrelationCompile}
               onSaveDraft={handleSaveDraft}
               onChange={(updatedData: any) => setChecklistSnapshot(updatedData)}

@@ -54,6 +54,7 @@ export interface GMPCertificateData {
   facilityName?: string;
   facilityAddress?: string;
   productLines?: ProductLine[];
+  logoUrl?: string;
   signatoryName?: string;
   signatoryTitle?: string;
 }
@@ -65,7 +66,10 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
     <Document>
       <Page size="A4" style={styles.page}>
         <View style={styles.header}>
-          <Image src="/nafdac_logo2-removebg-preview.png" style={styles.logo} />
+          <Image 
+            src={data?.logoUrl || "/nafdac_logo2-removebg-preview.png"} 
+            style={styles.logo} 
+          />
           <Text style={styles.nafdacTitle}>National Agency for Food and Drug</Text>
           <Text style={styles.nafdacTitle}>Administration and Control</Text>
           <Text style={styles.subTitle}>(NAFDAC)</Text>
@@ -100,7 +104,7 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
                 {line.products && line.products.length > 0 ? (
                   line.products.map((prod, pIdx) => (
                     <Text key={pIdx} style={styles.productItem}>
-                      - Product: {prod.name} {prod.classification ? `[${prod.classification}]` : ""}
+                      - Product: {typeof prod === "string" ? prod : prod.name} {typeof prod === "object" && prod.classification ? `[${prod.classification}]` : ""}
                     </Text>
                   ))
                 ) : (

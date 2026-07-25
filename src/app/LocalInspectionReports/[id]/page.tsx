@@ -16,6 +16,7 @@ const BASE_CHECKLIST_TEMPLATE = {
   inspection_dates: "",
   type_of_inspection: "PRI",
   inspected_site_name: "Orange Kalbe Limited",
+  notificationEmail: "",
   site_contact_details: { phone: "", email: "", website: "" },
   activities_carried_out: [] as string[],
   vicinity_assessment: "",
@@ -86,7 +87,6 @@ export default async function LocalReportPage({ params }: PageProps) {
   }
 
   // 🛡️ 2. Dynamic Assignment Role Retrieval
-  // Cross-reference this application's schedule with team assignments for this specific user
   const assignmentData = await db
     .select({
       role: inspectionTeamAssignments.role,
@@ -103,6 +103,8 @@ export default async function LocalReportPage({ params }: PageProps) {
       )
     )
     .limit(1);
+
+  console.log('This is applications: ', application);
 
   // Fallback to "CO_INSPECTOR" if no explicit schedule assignment is found in the ledger yet
   const dynamicAssignmentRole = assignmentData[0]?.role || "CO_INSPECTOR";
@@ -159,6 +161,7 @@ export default async function LocalReportPage({ params }: PageProps) {
   const appDetails = (application.details as any) || {};
   const initialComments = appDetails.comments || [];
   const initialReportHtml = appDetails.compiledReportHtml || null;
+  const notificationEmail = appDetails.notificationEmail || ""; // Extracted from details JSON
   
   const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey 
     || application.currentPoint 
@@ -166,12 +169,15 @@ export default async function LocalReportPage({ params }: PageProps) {
 
   const activeSnapshot = appDetails.checklistSnapshot || appDetails.savedChecklistSnapshot;
 
+  // 📦 Bundling notificationEmail neatly into the snapshot construct
   const initialChecklistSnapshot = activeSnapshot 
     ? {
         ...BASE_CHECKLIST_TEMPLATE,
         ...activeSnapshot,
+        notificationEmail: activeSnapshot.notificationEmail || notificationEmail,
         site_contact_details: {
           ...BASE_CHECKLIST_TEMPLATE.site_contact_details,
+          email: notificationEmail,
           ...(activeSnapshot.site_contact_details || {})
         },
         historical_baseline: {
@@ -181,6 +187,11 @@ export default async function LocalReportPage({ params }: PageProps) {
       }
     : {
         ...BASE_CHECKLIST_TEMPLATE,
+        notificationEmail,
+        site_contact_details: {
+          ...BASE_CHECKLIST_TEMPLATE.site_contact_details,
+          email: notificationEmail
+        },
         inspected_site_name: application.companyName || "Unknown Manufacturing Site",
         type_of_inspection: application.type || "PRI", 
         report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`,
@@ -195,7 +206,7 @@ export default async function LocalReportPage({ params }: PageProps) {
         companyName={application.companyName || "Unknown Manufacturing Site"}
         activeUserId={user.id} 
         activeUserName={authenticatedUserSessionName} 
-        activeUserRole={dynamicAssignmentRole} // 👈 Dynamic per-dossier role verification
+        activeUserRole={dynamicAssignmentRole} // Dynamic per-dossier role verification
         globalStructuralRole={structuralBaseRole} // Pass organizational role context if needed
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}
