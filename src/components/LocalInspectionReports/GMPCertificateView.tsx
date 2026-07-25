@@ -8,7 +8,7 @@ const styles = StyleSheet.create({
     fontSize: 10, 
     fontFamily: "Helvetica", 
     lineHeight: 1.5,
-    backgroundColor: "#F4E8C1" // Deeper, classic straw/parchment tone
+    backgroundColor: "#F4E8C1" // Classic straw/parchment tone
   },
   logo: { width: 65, height: 65, marginBottom: 8 },
   header: { marginBottom: 15, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" },
@@ -19,14 +19,16 @@ const styles = StyleSheet.create({
   body: { marginBottom: 12, textAlign: "justify" },
   signature: { marginTop: 35 },
   signatureName: { fontWeight: "bold", fontSize: 11, marginTop: 4 },
-  listItem: { marginBottom: 3, marginLeft: 12 },
+  lineBlock: { marginBottom: 6, marginLeft: 8 },
+  lineTitle: { fontWeight: "bold", fontSize: 10, color: "#1e293b" },
+  productItem: { marginLeft: 14, fontSize: 9, color: "#334155" },
   footer: { 
     position: "absolute", 
     bottom: 25, 
     left: 50, 
     right: 50, 
     borderTopWidth: 1, 
-    borderTopColor: "#D8CBB0", // Adjusted to match the deeper straw background
+    borderTopColor: "#D8CBB0", 
     paddingTop: 6, 
     fontSize: 7, 
     textAlign: "center", 
@@ -34,24 +36,30 @@ const styles = StyleSheet.create({
   }
 });
 
+export interface ProductItem {
+  name: string;
+  classification?: string;
+}
+
+export interface ProductLine {
+  lineName: string;
+  lineType?: string;
+  riskCategory?: string;
+  products?: ProductItem[];
+}
+
 export interface GMPCertificateData {
   appNumber?: string;
   date?: string;
   facilityName?: string;
   facilityAddress?: string;
-  productLines?: Array<{ lineName: string; riskCategory?: string }>;
-  activities?: string[];
+  productLines?: ProductLine[];
   signatoryName?: string;
   signatoryTitle?: string;
 }
 
 export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
   const productLines = data?.productLines || [];
-  const rawActivities = data?.activities || [];
-
-  const activities = productLines.length 
-    ? productLines.map(p => `${p.lineName || "Line"} ${p.riskCategory ? `(${p.riskCategory})` : ""}`)
-    : rawActivities;
 
   return (
     <Document>
@@ -81,14 +89,27 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
 
         <View style={{ marginBottom: 10 }}>
           <Text style={{ fontWeight: "bold", marginBottom: 6 }}>
-            Scope of Approved Manufacturing Activities / Lines:
+            Scope of Approved Manufacturing Lines & Approved Products:
           </Text>
-          {activities.length > 0 ? (
-            activities.map((item, i) => (
-              <Text key={i} style={styles.listItem}>• {item}</Text>
+          {productLines.length > 0 ? (
+            productLines.map((line, i) => (
+              <View key={i} style={styles.lineBlock}>
+                <Text style={styles.lineTitle}>
+                  • {line.lineName} {line.lineType ? `(${line.lineType})` : ""}
+                </Text>
+                {line.products && line.products.length > 0 ? (
+                  line.products.map((prod, pIdx) => (
+                    <Text key={pIdx} style={styles.productItem}>
+                      - Product: {prod.name} {prod.classification ? `[${prod.classification}]` : ""}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.productItem}>- Standard formulations under scope</Text>
+                )}
+              </View>
             ))
           ) : (
-            <Text style={styles.listItem}>• General Finished Product Manufacturing</Text>
+            <Text style={{ marginLeft: 8 }}>• General Finished Product Manufacturing Line</Text>
           )}
         </View>
 

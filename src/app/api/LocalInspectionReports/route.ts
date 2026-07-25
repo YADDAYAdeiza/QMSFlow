@@ -4,7 +4,6 @@ import nodemailer from "nodemailer";
 import { renderToBuffer } from "@react-pdf/renderer";
 import React from "react";
 import GMPCertificateView from "@/components/LocalInspectionReports/GMPCertificateView";
-// import { createClient } from "@/utils/supabase/server"; 
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
@@ -23,11 +22,25 @@ const transporter = nodemailer.createTransport({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { applicationId, currentStepKey, direction, checklistSnapshot, companyName, facilityAddress } = body;
+    const { 
+      applicationId, 
+      currentStepKey, 
+      direction, 
+      checklistSnapshot, 
+      companyName, 
+      facilityAddress,
+      productLines: rawProductLines,
+      notificationEmail 
+    } = body;
+
+    // Fallback extraction from snapshot or body payload
+    const effectiveCompanyName = companyName || checklistSnapshot?.inspected_site_name || "Registered Establishment";
+    const effectiveAddress = facilityAddress || "Registered Facility Address";
+    const effectiveRecipientEmail = notificationEmail || body?.details?.notificationEmail || "managing_director@globalorganics.com";
+    const effectiveProductLines = rawProductLines || checklistSnapshot?.productLines || body?.details?.productLines || [];
 
     console.log(`[QMS] Processing routing transition for App ID: ${applicationId} from Desk: ${currentStepKey}`);
 
-    // Core Interceptor for Director's Final Sign-Off
     if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
       const recommendation = checklistSnapshot?.final_recommendation || "PENDING";
 
@@ -48,7 +61,7 @@ export async function POST(request: Request) {
 
         const mailOptions = {
           from: `"NAFDAC VMAP Directorate" <${process.env.SMTP_USER}>`,
-          to: "managing_director@globalorganics.com", // Query applicant email dynamically in production
+          to: effectiveRecipientEmail,
           cc: "adeiza.yusuf@nafdac.gov.ng",
           subject: `NOTIFICATION OF OUTCOME OF GOOD MANUFACTURING PRACTICE (GMP) INSPECTION - ID: #${applicationId}`,
           html: `
@@ -58,9 +71,12 @@ export async function POST(request: Request) {
                 <p style="margin: 4px 0 0 0; font-size: 12px; color: #94a3b8;">Veterinary Medicines and Allied Products Directorate</p>
               </div>
               <div style="padding: 32px; background-color: #ffffff;">
-                <p style="font-size: 14px; color: #1e293b; font-weight: bold; margin-bottom: 20px;">Dear Sir / Ma,</p>
+                <p style="font-size: 14px; color: #1e293b; font-weight: bold; margin-bottom: 4px;">The Managing Director,</p>
+                <p style="font-size: 14px; color: #0f172a; font-weight: bold; margin-top: 0; margin-bottom: 4px;">${effectiveCompanyName}</p>
+                <p style="font-size: 12px; color: #64748b; margin-top: 0; margin-bottom: 20px;">${effectiveAddress}</p>
+                
                 <p style="font-size: 13px; color: #334155; line-height: 1.6; margin-bottom: 16px;">
-                  Please recall that a team of NAFDAC inspectors carried out a Good Manufacturing Practice (GMP) Routine Inspection at your facility, <strong>${companyName}</strong>.
+                  Please recall that a team of NAFDAC inspectors carried out a Good Manufacturing Practice (GMP) Routine Inspection at your facility, <strong>${effectiveCompanyName}</strong>.
                 </p>
                 <div style="background-color: #f8fafc; border-left: 4px solid #f59e0b; padding: 16px; margin-bottom: 24px;">
                   <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; color: #b45309; text-transform: uppercase;">Logged Audit Deficiencies Snapshot</h4>
@@ -102,14 +118,27 @@ export async function POST(request: Request) {
         const certificateData = {
           appNumber: `NAFDAC/VMAP/GMP/${applicationId}`,
           date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-          facilityName: companyName || "Registered Establishment",
-          facilityAddress: facilityAddress || "Registered Facility Address",
-          productLines: checklistSnapshot?.productLines || [],
+          facilityName: effectiveCompanyName,
+          facilityAddress: effectiveAddress,
+          productLines: effectiveProductLines,
           signatoryName: "Divisional Deputy Director",
           signatoryTitle: "Divisional Deputy Director, Veterinary Medicine & Allied Products"
         };
 
-        // Render PDF to buffer server-side to attach directly to email
+        // Format HTML summary for Product Lines & Products in the email body
+        const productLinesHtml = effectiveProductLines.length > 0
+          ? effectiveProductLines.map((line: any) => `
+              <li style="margin-bottom: 8px;">
+                <strong>${line.lineName || "Line"}</strong> ${line.lineType ? `(${line.lineType})` : ""}
+                ${line.products && line.products.length > 0 ? `
+                  <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
+                    ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
+                  </ul>
+                ` : ""}
+              </li>
+            `).join("")
+          : "<li>General Finished Product Manufacturing Line</li>";
+
         let pdfBuffer: Buffer | null = null;
         try {
           pdfBuffer = await renderToBuffer(
@@ -121,7 +150,7 @@ export async function POST(request: Request) {
 
         const mailOptions = {
           from: `"NAFDAC VMAP Directorate" <${process.env.SMTP_USER}>`,
-          to: "managing_director@globalorganics.com", // Query applicant email dynamically in production
+          to: effectiveRecipientEmail,
           cc: "adeiza.yusuf@nafdac.gov.ng",
           subject: `GMP COMPLIANCE CERTIFICATION / NOTIFICATION OF OUTCOME - ID: #${applicationId}`,
           html: `
@@ -131,14 +160,26 @@ export async function POST(request: Request) {
                 <p style="margin: 4px 0 0 0; font-size: 12px; color: #d1fae5;">Veterinary Medicines and Allied Products Directorate</p>
               </div>
               <div style="padding: 32px; background-color: #ffffff;">
-                <p style="font-size: 14px; color: #1e293b; font-weight: bold; margin-bottom: 20px;">Dear Sir / Ma,</p>
+                <p style="font-size: 14px; color: #1e293b; font-weight: bold; margin-bottom: 4px;">The Managing Director,</p>
+                <p style="font-size: 14px; color: #0f172a; font-weight: bold; margin-top: 0; margin-bottom: 4px;">${effectiveCompanyName}</p>
+                <p style="font-size: 12px; color: #64748b; margin-top: 0; margin-bottom: 20px;">${effectiveAddress}</p>
+
                 <p style="font-size: 13px; color: #334155; line-height: 1.6; margin-bottom: 16px;">
-                  We are pleased to inform you that following the technical evaluation of your facility, <strong>${companyName}</strong>, your establishment has been evaluated and found compliant with NAFDAC's Good Manufacturing Practice (GMP) standards.
+                  We are pleased to inform you that following the technical evaluation of your facility, <strong>${effectiveCompanyName}</strong>, your establishment has been evaluated and found compliant with NAFDAC's Good Manufacturing Practice (GMP) standards.
                 </p>
-                <div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; padding: 16px; margin-bottom: 24px;">
+
+                <div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; padding: 16px; margin-bottom: 20px;">
                   <h4 style="margin: 0 0 4px 0; font-size: 12px; font-weight: bold; color: #15803d; text-transform: uppercase;">Status: GMP Compliant Approved</h4>
                   <p style="margin: 0; font-size: 12px; color: #166534;">Your official Notification of Outcome / Certificate is attached to this email and available on your portal dashboard.</p>
                 </div>
+
+                <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin-bottom: 24px;">
+                  <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; color: #334155; text-transform: uppercase;">Approved Scope & Product Lines:</h4>
+                  <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #334155;">
+                    ${productLinesHtml}
+                  </ul>
+                </div>
+
                 <p style="font-size: 13px; color: #334155; line-height: 1.6; margin-bottom: 24px;">
                   This approval is valid for three (3) years from the date of final sign-off, subject to continued regulatory compliance.
                 </p>
@@ -170,7 +211,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Default internal routing
     return NextResponse.json({
       success: true,
       arrivedAt: "NEXT_DESK_STEP",
