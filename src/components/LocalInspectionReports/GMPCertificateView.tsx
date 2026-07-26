@@ -14,7 +14,11 @@ const styles = StyleSheet.create({
   header: { marginBottom: 15, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" },
   nafdacTitle: { fontSize: 13, fontWeight: "bold", color: "#004d00", textTransform: "uppercase" },
   subTitle: { fontSize: 9, marginBottom: 8, fontWeight: "bold" },
-  metaRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 15, marginBottom: 15, fontSize: 9 },
+  metaRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 15, marginBottom: 12, fontSize: 9 },
+  recipientAddress: { marginBottom: 12, fontSize: 10, lineHeight: 1.4 },
+  recipientTitle: { fontWeight: "bold" },
+  companyNameText: { fontWeight: "bold" },
+  facilityAddressText: { color: "#1e293b" },
   subject: { fontWeight: "bold", textDecoration: "underline", marginVertical: 12, textAlign: "center", fontSize: 11 },
   body: { marginBottom: 12, textAlign: "justify" },
   signature: { marginTop: 35 },
@@ -53,6 +57,7 @@ export interface GMPCertificateData {
   date?: string;
   facilityName?: string;
   facilityAddress?: string;
+  effectiveCompanyName?: string;
   productLines?: ProductLine[];
   logoUrl?: string;
   signatoryName?: string;
@@ -61,6 +66,7 @@ export interface GMPCertificateData {
 
 export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
   const productLines = data?.productLines || [];
+  const targetCompanyName = data?.effectiveCompanyName || data?.facilityName || "The Company";
 
   return (
     <Document>
@@ -80,6 +86,15 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
           <Text><Text style={{ fontWeight: "bold" }}>Date:</Text> {data?.date || "N/A"}</Text>
         </View>
 
+        {/* 🏢 Recipient Address Block */}
+        <View style={styles.recipientAddress}>
+          <Text style={styles.recipientTitle}>The Managing Director,</Text>
+          <Text style={styles.companyNameText}>{targetCompanyName},</Text>
+          {data?.facilityAddress ? (
+            <Text style={styles.facilityAddressText}>{data.facilityAddress}</Text>
+          ) : null}
+        </View>
+
         <Text style={styles.subject}>
           NOTIFICATION OF OUTCOME OF GOOD MANUFACTURING PRACTICE (GMP) AUDIT
         </Text>
@@ -95,7 +110,7 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
           <Text style={{ fontWeight: "bold", marginBottom: 6 }}>
             Scope of Approved Manufacturing Lines & Approved Products:
           </Text>
-          {productLines.length > 0 ? (
+          {/* {productLines.length > 0 ? (
             productLines.map((line, i) => (
               <View key={i} style={styles.lineBlock}>
                 <Text style={styles.lineTitle}>
@@ -114,7 +129,7 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
             ))
           ) : (
             <Text style={{ marginLeft: 8 }}>• General Finished Product Manufacturing Line</Text>
-          )}
+          )} */}
         </View>
 
         <Text style={[styles.body, { marginTop: 8 }]}>

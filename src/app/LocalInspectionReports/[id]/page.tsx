@@ -1,6 +1,5 @@
 // @/app/dashboard/local-reports/[id]/page.tsx
 import { db } from "@/db";
-// 📝 Imported inspectionSchedules and inspectionTeamAssignments from your schema file
 import { applications, companies, qmsTimelines, inspectionSchedules, inspectionTeamAssignments } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
@@ -71,6 +70,7 @@ export default async function LocalReportPage({ params }: PageProps) {
       type: applications.type,
       companyId: applications.companyId,
       companyName: companies.name,
+      companyAddress: companies.address, // Added as secondary safety net
       details: applications.details,
       currentPoint: applications.currentPoint,
       status: applications.status,
@@ -161,13 +161,31 @@ export default async function LocalReportPage({ params }: PageProps) {
   const appDetails = (application.details as any) || {};
   const initialComments = appDetails.comments || [];
   const initialReportHtml = appDetails.compiledReportHtml || null;
-  const notificationEmail = appDetails.notificationEmail || ""; // Extracted from details JSON
+  const notificationEmail = appDetails.notificationEmail || "";
   
   const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey 
     || application.currentPoint 
     || "STAFF_TECHNICAL_REVIEW"; 
 
   const activeSnapshot = appDetails.checklistSnapshot || appDetails.savedChecklistSnapshot;
+
+  // 📍 Extract facility address (checking details JSON keys with fallbacks to database level)
+  const facilityAddressState: string = 
+    appDetails.facilityAddress || 
+    appDetails.siteAddress || 
+    appDetails.inspected_site_address || 
+    application.companyAddress || 
+    "Registered Facility Address";
+
+  // 🏷️ Extract productLines and format as string array
+  const rawProductLines = appDetails.productLines || [];
+  const productLinesState: string[] = rawProductLines.map((line: any) => {
+    const lineName = line.lineName || line.lineType || "Production Line";
+    const productNames = Array.isArray(line.products)
+      ? line.products.map((p: any) => p.name).filter(Boolean).join(", ")
+      : "";
+    return productNames ? `${lineName} (${productNames})` : lineName;
+  });
 
   // 📦 Bundling notificationEmail neatly into the snapshot construct
   const initialChecklistSnapshot = activeSnapshot 
@@ -198,6 +216,8 @@ export default async function LocalReportPage({ params }: PageProps) {
         final_recommendation: "PENDING"
       };
 
+  // console.log('This is appdetails: ', appDetails);
+
   return (
     <div className="bg-slate-50 min-h-screen py-6">
       <GMPReportWorkspace 
@@ -206,12 +226,15 @@ export default async function LocalReportPage({ params }: PageProps) {
         companyName={application.companyName || "Unknown Manufacturing Site"}
         activeUserId={user.id} 
         activeUserName={authenticatedUserSessionName} 
-        activeUserRole={dynamicAssignmentRole} // Dynamic per-dossier role verification
-        globalStructuralRole={structuralBaseRole} // Pass organizational role context if needed
+        activeUserRole={dynamicAssignmentRole} 
+        globalStructuralRole={structuralBaseRole} 
+        notificationEmail={notificationEmail}
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}
         initialChecklistSnapshot={initialChecklistSnapshot}
         initialComments={initialComments}
+        facilityAddressState={facilityAddressState}
+        productLinesState={productLinesState}
       />
     </div>
   );

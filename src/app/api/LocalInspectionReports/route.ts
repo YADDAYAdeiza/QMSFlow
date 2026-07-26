@@ -33,8 +33,9 @@ export async function POST(request: Request) {
       notificationEmail 
     } = body;
 
-        // 1. Comprehensive Fallback Extraction for Establishment & Site Metadata
-      // 1. Comprehensive Fallback Extraction for Establishment & Site Metadata
+    console.log('This is rawProductLines: ', rawProductLines);
+    console.log('This is the body: ', body);
+    // 1. Comprehensive Fallback Extraction for Establishment & Site Metadata
     const effectiveCompanyName = 
       companyName || 
       checklistSnapshot?.inspected_site_name || 
@@ -61,23 +62,42 @@ export async function POST(request: Request) {
       body?.details?.notificationEmail || 
       "managing_director@globalorganics.com";
 
-    // 2. Product Lines Extraction (Checking .length > 0 to skip empty arrays)
-    const extractedLines = 
-      (Array.isArray(rawProductLines) && rawProductLines.length > 0) ? rawProductLines :
-      (Array.isArray(checklistSnapshot?.productLines) && checklistSnapshot.productLines.length > 0) ? checklistSnapshot.productLines :
-      (Array.isArray(body?.details?.productLines) && body.details.productLines.length > 0) ? body.details.productLines :
-      [];
-      
+    // 2. Comprehensive Product Lines & Products Extraction (Skipping empty [] arrays)
+    const rawLinesArray = [
+      rawProductLines,
+      body?.productLines,
+      body?.product_lines,
+      checklistSnapshot?.productLines,
+      checklistSnapshot?.product_lines,
+      body?.details?.productLines,
+      body?.details?.product_lines,
+      body?.details?.savedChecklistSnapshot?.productLines,
+      body?.details?.savedChecklistSnapshot?.product_lines,
+    ];
+
+    // Pick the first entry that is an array and contains elements
+    const extractedLines = rawLinesArray.find(
+      (arr) => Array.isArray(arr) && arr.length > 0
+    ) || [];
+
+    // Normalize manufacturing lines & nested products into a clean structure for React-PDF & HTML
+
+    console.log('This is extractedLines: ', extractedLines);
     const effectiveProductLines = Array.isArray(extractedLines) 
-      ? extractedLines.map((line: any) => ({
-          lineName: line.lineName || line.name || line.title || "Manufacturing Line",
-          lineType: line.lineType || line.type || "",
-          products: Array.isArray(line.products) 
-            ? line.products 
-            : Array.isArray(line.approvedProducts) 
-            ? line.approvedProducts 
-            : []
-        }))
+      ? extractedLines.map((line: any) => {
+          const rawProducts = line.products || line.productList || line.approvedProducts || [];
+          
+          return {
+            lineName: line.lineName || line.line_name || line.name || line.title || line || "Manufacturing Line",
+            lineType: line.lineType || line.line_type || line.type || "",
+            products: Array.isArray(rawProducts)
+              ? rawProducts.map((p: any) => ({
+                  name: typeof p === 'string' ? p : (p.name || p.productName || p.product_name || "Unnamed Product"),
+                  classification: typeof p === 'object' ? (p.classification || p.category || "") : ""
+                }))
+              : []
+          };
+        })
       : [];
 
     const logoUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/nafdac_logo2-removebg-preview.png`;
@@ -157,6 +177,7 @@ export async function POST(request: Request) {
          * PATHWAY 2: ABSOLUTE FINAL GMP CERTIFICATION APPROVAL
          */
         console.log("🌟 Compliance Approved. Generating Digital Certification & Dispatching Approval Email...");
+        console.log("📦 Mapped Scope for PDF Render:", JSON.stringify(effectiveProductLines, null, 2));
 
         const certificateData = {
           appNumber: `NAFDAC/VMAP/GMP/${applicationId}`,
@@ -165,9 +186,14 @@ export async function POST(request: Request) {
           facilityAddress: effectiveAddress,
           productLines: effectiveProductLines,
           logoUrl,
+          effectiveCompanyName,
           signatoryName: "Divisional Deputy Director",
           signatoryTitle: "Divisional Deputy Director, Veterinary Medicine & Allied Products"
         };
+
+        console.log('Within route.ts, this is certificateData: ', certificateData);
+
+
 
         // Format HTML summary for Product Lines & Products in the email body
         const productLinesHtml = effectiveProductLines.length > 0
@@ -176,7 +202,7 @@ export async function POST(request: Request) {
                 <strong>${line.lineName}</strong> ${line.lineType ? `(${line.lineType})` : ""}
                 ${line.products && line.products.length > 0 ? `
                   <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
-                    ${line.products.map((p: any) => `<li>${p.name || p} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
+                    ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
                   </ul>
                 ` : ""}
               </li>

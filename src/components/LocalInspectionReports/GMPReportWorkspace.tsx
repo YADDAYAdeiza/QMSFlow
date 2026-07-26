@@ -270,11 +270,15 @@ export default function GMPReportWorkspace({
         const facilityAddress = 
           facilityAddressState || 
           checklistSnapshot?.inspected_site_address || 
-          checklistSnapshot?.facilityAddress ||
+          checklistSnapshot?.facilityAddress || companyName ||
           "";
 
         const productLines = 
           productLinesState.length > 0 ? productLinesState : (checklistSnapshot?.productLines || []);
+
+          console.log('This is productlines: ', productLines);
+          console.log('This is facilityAddress: ', facilityAddress);
+          console.log('This is companyName: ', companyName);
 
         const transitionRes = await fetch("/api/LocalInspectionReports", {
           method: "POST",
