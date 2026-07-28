@@ -46,7 +46,7 @@ const BASE_CHECKLIST_TEMPLATE = {
 
 interface CommentTrailItem {
   text: string;
-  action: "FORWARD" | "REWORK" | "RECALL";
+  action: "FORWARD" | "REWORK" | "RECALL" | "TARGETED_REWORK";
   fromStep: string;
   toStep: string;
   actorName: string;
@@ -86,7 +86,7 @@ export default function GMPReportWorkspace({
   companyId,
   companyName,
   activeUserId,
-  activeUserRole,
+  activeUserRole: initialActiveUserRole,
   activeUserName = "Roseline",
   globalStructuralRole = "",
   notificationEmail = "",
@@ -103,6 +103,7 @@ export default function GMPReportWorkspace({
 
   // Core workflow states
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
+  const [activeUserRole, setActiveUserRole] = useState<string>(initialActiveUserRole);
   const [remarks, setRemarks] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -116,60 +117,75 @@ export default function GMPReportWorkspace({
 
   // ⏱️ QMS Performance Tracking
   const [stepEntryTime, setStepEntryTime] = useState<number>(Date.now());
-  // Add state for staff members
 
-// Fetch real staff members from Supabase / API
+  // Staff directory state
+  const [staffDirectory, setStaffDirectory] = useState<any[]>([]);
+  const [selectedStaff, setSelectedStaff] = useState<string>("");
+  const [isLoadingStaff, setIsLoadingStaff] = useState<boolean>(false);
 
-// Add state hooks inside your workspace component
-const [staffDirectory, setStaffDirectory] = useState<any[]>([]);
-const [selectedStaff, setSelectedStaff] = useState<string>("");
-const [isLoadingStaff, setIsLoadingStaff] = useState<boolean>(false);
+  const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
+  const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
+  const [checklistSnapshot, setChecklistSnapshot] = useState<any>(() => {
+    return initialChecklistSnapshot || BASE_CHECKLIST_TEMPLATE;
+  });
 
-useEffect(() => {
-  async function fetchStaffMembers() {
-    if (!applicationId) return;
-    setIsLoadingStaff(true);
-    try {
-      const res = await fetch(`/api/LocalInspectionReports/VettingInspectors?application_id=${applicationId}`);
-      if (!res.ok) throw new Error("Failed to load staff directory");
+  const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
-      const data = await res.json();
-      const rawList = data.inspectors || (Array.isArray(data) ? data : []);
+  // Manual simulation step switch handler
+  const handleStepSwitch = (nextStepKey: string) => {
+    const validKey = nextStepKey as keyof typeof inspectionReportWorkflow.steps;
+    if (!inspectionReportWorkflow.steps[validKey]) return;
 
-      // Division map normalization
-      const normalizeDivision = (div?: string) => {
-        if (!div) return "VMD";
-        if (div === "Biologics") return "VMD";
-        if (div === "Pharmacovigilance") return "PAD";
-        if (div === "Post-Registration") return "AFPD";
-        return div;
-      };
+    setCurrentStep(validKey);
+    setStepEntryTime(Date.now());
 
-      const mappedStaff = rawList.map((user: any) => ({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        division: normalizeDivision(user.division),
-        role: user.role,
-        isAvailable: user.is_available,
-        statusLabel: user.status_label,
-        availabilityStatus: user.availability_status
-      }));
-
-      setStaffDirectory(mappedStaff);
-    } catch (err) {
-      console.error("Error fetching live staff directory:", err);
-    } finally {
-      setIsLoadingStaff(false);
+    const targetStepConfig = inspectionReportWorkflow.steps[validKey];
+    if (targetStepConfig?.role) {
+      setActiveUserRole(targetStepConfig.role);
     }
-  }
+  };
 
-  fetchStaffMembers();
-}, [applicationId]);
+  useEffect(() => {
+    async function fetchStaffMembers() {
+      if (!applicationId) return;
+      setIsLoadingStaff(true);
+      try {
+        const res = await fetch(`/api/LocalInspectionReports/VettingInspectors?application_id=${applicationId}`);
+        if (!res.ok) throw new Error("Failed to load staff directory");
 
+        const data = await res.json();
+        const rawList = data.inspectors || (Array.isArray(data) ? data : []);
 
+        // Division map normalization
+        const normalizeDivision = (div?: string) => {
+          if (!div) return "VMD";
+          if (div === "Biologics") return "VMD";
+          if (div === "Pharmacovigilance") return "PAD";
+          if (div === "Post-Registration") return "AFPD";
+          return div;
+        };
 
+        const mappedStaff = rawList.map((user: any) => ({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          division: normalizeDivision(user.division),
+          role: user.role,
+          isAvailable: user.is_available,
+          statusLabel: user.status_label,
+          availabilityStatus: user.availability_status
+        }));
 
+        setStaffDirectory(mappedStaff);
+      } catch (err) {
+        console.error("Error fetching live staff directory:", err);
+      } finally {
+        setIsLoadingStaff(false);
+      }
+    }
+
+    fetchStaffMembers();
+  }, [applicationId]);
 
   useEffect(() => {
     setStepEntryTime(Date.now());
@@ -185,14 +201,6 @@ useEffect(() => {
       userName: expectedUserRaw
     });
   }, [activeUserId, activeUserRole, globalStructuralRole, expectedUserRaw]);
-
-  const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
-  const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
-  const [checklistSnapshot, setChecklistSnapshot] = useState<any>(() => {
-    return initialChecklistSnapshot || BASE_CHECKLIST_TEMPLATE;
-  });
-
-  const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
   // Primary Email Resolution with Fallback Cascade
   const resolvedNotificationEmail = 
@@ -215,13 +223,7 @@ useEffect(() => {
 
   const canDispatchForward = isAuthorizedToForward && isAuthorizedRole;
 
-  const availableDivisions = ["Biologics", "Pharmacovigilance", "Post-Registration"];
-
-  // const staffDirectory = [
-  //   { id: "usr_201", name: "Aliyu Ahmed", division: "IRSD", role: "Technical Staff Reviewer" },
-  //   { id: "usr_202", name: "Chidi Okafor", division: "Biologics", role: "Technical Staff Reviewer" },
-  //   { id: "usr_203", name: "Fatima Umar", division: "VMD", role: "PV Staff Reviewer" }
-  // ];
+  const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
   const handleSaveDraft = async (draftPayload: any) => {
     if (!draftPayload) return;
@@ -311,72 +313,72 @@ useEffect(() => {
     }
   };
 
-
-const handleCommitPdfToStorage = async () => {
-  if (!reportHtml) {
-    alert("No compiled report content available to commit to PDF.");
-    return;
-  }
-
-  setIsRenderingPdf(true);
-  try {
-    const docNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
-
-    const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        reportHtml: reportHtml,
-        applicationId: applicationId,
-        docNumber: docNo
-      })
-    });
-
-    if (!pdfRes.ok) {
-      const errorData = await pdfRes.json().catch(() => ({}));
-      throw new Error(errorData.error || "Failed to render official PDF binary from current report HTML.");
+  const handleCommitPdfToStorage = async () => {
+    if (!reportHtml) {
+      alert("No compiled report content available to commit to PDF.");
+      return;
     }
 
-    const pdfBlob = await pdfRes.blob();
-    const fileName = `Local_Inspection_Report_${docNo}.pdf`;
-    const pdfFile = new File([pdfBlob], fileName, {
-      type: "application/pdf"
-    });
+    setIsRenderingPdf(true);
+    try {
+      const docNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
 
-    // 1. Resolve company identifier (fallback to applicationId or RC number if available)
-    const targetCompanyId = checklistSnapshot?.company_id || checklistSnapshot?.company_rc_number || applicationId;
+      const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reportHtml: reportHtml,
+          applicationId: applicationId,
+          docNumber: docNo
+        })
+      });
 
-    // 2. Build the standardized path matching your new type definition
-    const storagePath = buildCompanyFilePath(
-      targetCompanyId,
-      '01_Local_Inspection_Reports', // Matches exact type in supabaseUpload.ts
-      fileName
-    );
+      if (!pdfRes.ok) {
+        const errorData = await pdfRes.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to render official PDF binary from current report HTML.");
+      }
 
-    // 3. Upload to storage
-    const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
+      const pdfBlob = await pdfRes.blob();
+      const fileName = `Local_Inspection_Report_${docNo}.pdf`;
+      const pdfFile = new File([pdfBlob], fileName, {
+        type: "application/pdf"
+      });
 
-    if (!uploadedUrl) {
-      throw new Error("Failed to retrieve public storage URL after upload.");
+      const targetCompanyId = checklistSnapshot?.company_id || checklistSnapshot?.company_rc_number || applicationId;
+
+      const storagePath = buildCompanyFilePath(
+        targetCompanyId,
+        '01_Local_Inspection_Reports',
+        fileName
+      );
+
+      const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
+
+      if (!uploadedUrl) {
+        throw new Error("Failed to retrieve public storage URL after upload.");
+      }
+
+      setPdfStorageUrl(uploadedUrl);
+
+      const updatedSnapshot = {
+        ...checklistSnapshot,
+        pdfStorageUrl: uploadedUrl
+      };
+      setChecklistSnapshot(updatedSnapshot);
+      await handleSaveDraft(updatedSnapshot);
+
+      alert("PDF successfully compiled and committed to Supabase 'Documents' bucket!");
+    } catch (err: any) {
+      alert(`PDF Storage Error: ${err.message}`);
+    } finally {
+      setIsRenderingPdf(false);
     }
+  };
 
-    setPdfStorageUrl(uploadedUrl);
-
-    const updatedSnapshot = {
-      ...checklistSnapshot,
-      pdfStorageUrl: uploadedUrl
-    };
-    setChecklistSnapshot(updatedSnapshot);
-    await handleSaveDraft(updatedSnapshot);
-
-    alert("PDF successfully compiled and committed to Supabase 'documents' bucket!");
-  } catch (err: any) {
-    alert(`PDF Storage Error: ${err.message}`);
-  } finally {
-    setIsRenderingPdf(false);
-  }
-};
-  const handleTransition = async (direction: "FORWARD" | "REWORK") => {
+const handleTransition = async (
+    direction: "FORWARD" | "REWORK" | "TARGETED_REWORK", 
+    targetStepOverride?: keyof typeof inspectionReportWorkflow.steps
+  ) => {
     if (direction === "FORWARD" && !canDispatchForward) {
       alert("Unauthorized Operation: Forward transitions require appropriate leadership or assigned role authority.");
       return;
@@ -392,7 +394,8 @@ const handleCommitPdfToStorage = async () => {
 
     setIsSubmitting(true);
     try {
-      if (currentStep === "DIRECTOR_FINAL_SIGN_OFF") {
+      // 1. Maintain official notification & certificate dispatch on Director Final Sign-Off
+      if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
         const facilityAddress = 
           facilityAddressState || 
           checklistSnapshot?.inspected_site_address || 
@@ -401,10 +404,6 @@ const handleCommitPdfToStorage = async () => {
 
         const productLines = 
           productLinesState.length > 0 ? productLinesState : (checklistSnapshot?.productLines || []);
-
-        console.log('This is productlines: ', productLines);
-        console.log('This is facilityAddress: ', facilityAddress);
-        console.log('This is companyName: ', companyName);
 
         const transitionRes = await fetch("/api/LocalInspectionReports", {
           method: "POST",
@@ -433,16 +432,34 @@ const handleCommitPdfToStorage = async () => {
 
       const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division)
         ? activeStepConfig.division
-        : "Biologics";
+        : "VMD"; // Fallback division
 
+      // 2. Define explicit target step for direct targeted rework jumps
+      const targetStepKey = direction === "TARGETED_REWORK" 
+        ? (targetStepOverride || "STAFF_TECHNICAL_REVIEW") 
+        : undefined;
+
+      // 💡 Resolve assignedTeam directly from checklistSnapshot (where your data actually lives)
+      const assignedTeam = 
+        checklistSnapshot?.inspectionWorkflowMeta?.assignedTeam || 
+        checklistSnapshot?.assignedTeam;
+
+      const teamLeaderId = assignedTeam?.teamLeaderId;
+
+      const resolvedTargetUserId = direction === "FORWARD" 
+        ? (selectedStaff || "next-desk-holder-id") 
+        : (teamLeaderId || "return-desk-holder-id");
+
+      // 3. Execute DB Transition Engine call
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
         direction,
+        targetStepKey,
         actingUserId: activeUserId,
         actingUserRole: activeUserRole,
         actingUserName: `${expectedUserRaw} (${activeDivision})`,
-        targetUserId: direction === "FORWARD" ? (selectedStaff || "next-desk-holder-id") : "return-desk-holder-id",
+        targetUserId: resolvedTargetUserId,
         remarks
       });
 
@@ -460,7 +477,7 @@ const handleCommitPdfToStorage = async () => {
 
         const newMinute: CommentTrailItem = {
           text: remarks,
-          action: direction,
+          action: direction as any,
           fromStep: formatDeskTitle(sourceStepTitle),
           toStep: formatDeskTitle(targetStepTitle),
           actorName: `${expectedUserRaw} (${activeDivision})`,
@@ -475,7 +492,9 @@ const handleCommitPdfToStorage = async () => {
 
         setRemarks("");
         setSelectedStaff("");
-        setCurrentStep(nextStepKey);
+        
+        // Synchronize state with new desk
+        handleStepSwitch(nextStepKey);
         router.refresh();
       } else {
         const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing sequence breakdown";
@@ -501,8 +520,15 @@ return (
         <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
         <select
           value={currentStep}
-          onChange={(e) => setCurrentStep(e.target.value as any)}
-          className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500"
+          onChange={(e) => {
+            const nextKey = e.target.value;
+            if (typeof handleStepSwitch === "function") {
+              handleStepSwitch(nextKey);
+            } else {
+              setCurrentStep(nextKey as any);
+            }
+          }}
+          className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
         >
           {Object.keys(inspectionReportWorkflow.steps).map((key) => (
             <option key={key} value={key}>
@@ -679,7 +705,7 @@ return (
             </div>
           </div>
 
-          {/* Checklist Matrix Form Component */}
+          {/* Checklist Matrix Form Component - UNTOUCHED PROPS */}
           <InspectionChecklistForm
             initialData={checklistSnapshot}
             notificationEmail={resolvedNotificationEmail}
@@ -700,7 +726,7 @@ return (
             ) : (
               <div className="relative border-l border-slate-200 pl-4 space-y-4 ml-2 mt-2">
                 {commentsList.map((item, index) => {
-                  const isRework = item.action === "REWORK";
+                  const isRework = item.action === "REWORK" || item.action === "TARGETED_REWORK";
                   const durationText = item.processingDurationSeconds
                     ? `${Math.floor(item.processingDurationSeconds / 60)}m ${item.processingDurationSeconds % 60}s`
                     : "N/A";
@@ -935,6 +961,35 @@ return (
                 </>
               )}
             </div>
+
+            {/* Targeted Rework Direct Dispatch (Available on Senior Desks) */}
+            {["DDD_TECHNICAL_REVIEW", "DDD_IRSD_INTAKE", "IRSD_STAFF_VETTING", "DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF"].includes(currentStep) && (
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <label className="block text-[11px] font-bold text-rose-800 mb-1.5 uppercase tracking-wide">
+                  🚨 Direct Rework Assignment
+                </label>
+                <p className="text-[10px] text-slate-500 mb-2 leading-tight">
+                  Bypass intermediate steps and return this report directly to the field inspection team for corrections.
+                </p>
+
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    if (!remarks.trim()) {
+                      alert("Please provide official minutes/reasons for returning the report.");
+                      return;
+                    }
+                    if (window.confirm("Return dossier directly to the technical field inspection team (Team Leader & Co-Inspectors)?")) {
+                      handleTransition("TARGETED_REWORK", "STAFF_TECHNICAL_REVIEW");
+                    }
+                  }}
+                  className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                >
+                  ↩️ Direct Return to Technical Field Reviewers
+                </button>
+              </div>
+            )}
 
           </div>
         </div>

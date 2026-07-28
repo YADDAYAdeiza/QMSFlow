@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       role: 'TEAM_LEADER'
     });
 
-    // 4. Map Co-Inspectors tracking role entries (Fixed: changed hyphen to underscore to match CHECK constraint)
+    // 4. Map Co-Inspectors tracking role entries
     if (coInspectors && Array.isArray(coInspectors)) {
       coInspectors.forEach((id: string) => {
         arrayInsertions.push({
@@ -102,19 +102,28 @@ export async function POST(request: Request) {
     
     // Update inner tracking context parameters
     currentDetails.inspectionWorkflowMeta.lastAction = "FORWARD";
-    // Synchronized with master workflow engine config schemas to fix registry pool selection leaks
     currentDetails.inspectionWorkflowMeta.currentStepKey = "STAFF_TECHNICAL_REVIEW";
 
+    // 💡 Preserves full assigned team metadata for targeted rework routing & dashboard access rules
+    const coInspectorList = Array.isArray(coInspectors) ? coInspectors : [];
+    const traineeList = Array.isArray(traineeInspectors) ? traineeInspectors : [];
+
+    currentDetails.inspectionWorkflowMeta.assignedTeam = {
+      teamLeaderId: teamLeader,
+      coInspectorIds: coInspectorList,
+      traineeIds: traineeList,
+      allInspectorIds: [teamLeader, ...coInspectorList, ...traineeList]
+    };
+
     // 8. Commit changes back to the main file registry with correct step keys
-// 8. Commit changes back to the main file registry with correct step keys
-  const { error: updateError } = await supabase
-    .from('applications')
-    .update({ 
-      details: currentDetails,
-      current_point: "Staff Technical Field Review", 
-      status: "INSPECTION_SCHEDULED" // Changed from INSPECTION_PENDING to move it across tabs!
-  })
-  .eq('id', applicationId);
+    const { error: updateError } = await supabase
+      .from('applications')
+      .update({ 
+        details: currentDetails,
+        current_point: "Staff Technical Field Review", 
+        status: "INSPECTION_SCHEDULED"
+      })
+      .eq('id', applicationId);
 
     if (updateError) throw updateError;
 

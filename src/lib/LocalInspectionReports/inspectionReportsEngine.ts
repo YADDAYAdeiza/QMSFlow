@@ -10,7 +10,8 @@ import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWor
 interface TransitionPayload {
   applicationId: number;
   currentStepKey: keyof typeof inspectionReportWorkflow.steps;
-  direction: "FORWARD" | "REWORK" | "RECALL";
+  direction: "FORWARD" | "REWORK" | "RECALL" | "TARGETED_REWORK"; // 🎯 Added TARGETED_REWORK
+  targetStepKey?: keyof typeof inspectionReportWorkflow.steps; // 🎯 Added optional jump target
   actingUserId: string;
   actingUserRole: string;     // 🛡️ Added to track acting authority profile
   actingUserName: string;
@@ -23,6 +24,7 @@ export async function executeInspectionReportTransition({
   applicationId,
   currentStepKey,
   direction,
+  targetStepKey: customTargetStepKey, // 🎯 Destructured optional jump target
   actingUserId,
   actingUserRole,             // 📥 Destructured from incoming payload
   actingUserName,
@@ -41,6 +43,9 @@ export async function executeInspectionReportTransition({
       targetStepKey = activeStep.nextStepKey;
     } else if (direction === "REWORK") {
       targetStepKey = activeStep.prevStepKey;
+    } else if (direction === "TARGETED_REWORK") {
+      // 🎯 Direct bypass: Jumps directly to specified step or defaults to STAFF_TECHNICAL_REVIEW
+      targetStepKey = customTargetStepKey || "STAFF_TECHNICAL_REVIEW";
     } else {
       targetStepKey = currentStepKey; 
     }
@@ -110,6 +115,7 @@ export async function executeInspectionReportTransition({
             savedChecklistSnapshot: incomingSnapshot, 
             comments: [...(oldDetails.comments || []), systemLogEntry],
             inspectionWorkflowMeta: {
+              ...(oldDetails.inspectionWorkflowMeta || {}), // 💡 Preserves assignedTeam and other metadata
               currentStepKey: targetStepKey,
               currentOwnerId: targetUserId,
               lastAction: direction

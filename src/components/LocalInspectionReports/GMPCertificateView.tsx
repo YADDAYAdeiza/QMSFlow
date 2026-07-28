@@ -110,7 +110,7 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
           <Text style={{ fontWeight: "bold", marginBottom: 6 }}>
             Scope of Approved Manufacturing Lines & Approved Products:
           </Text>
-          {/* {productLines.length > 0 ? (
+          {productLines.length > 0 ? (
             productLines.map((line, i) => (
               <View key={i} style={styles.lineBlock}>
                 <Text style={styles.lineTitle}>
@@ -129,7 +129,7 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
             ))
           ) : (
             <Text style={{ marginLeft: 8 }}>• General Finished Product Manufacturing Line</Text>
-          )} */}
+          )}
         </View>
 
         <Text style={[styles.body, { marginTop: 8 }]}>

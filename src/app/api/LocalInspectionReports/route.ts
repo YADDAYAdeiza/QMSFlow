@@ -82,23 +82,24 @@ export async function POST(request: Request) {
 
     // Normalize manufacturing lines & nested products into a clean structure for React-PDF & HTML
 
+    //For now we pass extractedLines into GMPCertificateData
     console.log('This is extractedLines: ', extractedLines);
-    const effectiveProductLines = Array.isArray(extractedLines) 
-      ? extractedLines.map((line: any) => {
-          const rawProducts = line.products || line.productList || line.approvedProducts || [];
+    // const effectiveProductLines = Array.isArray(extractedLines) 
+    //   ? extractedLines.map((line: any) => {
+    //       const rawProducts = line.products || line.productList || line.approvedProducts || [];
           
-          return {
-            lineName: line.lineName || line.line_name || line.name || line.title || line || "Manufacturing Line",
-            lineType: line.lineType || line.line_type || line.type || "",
-            products: Array.isArray(rawProducts)
-              ? rawProducts.map((p: any) => ({
-                  name: typeof p === 'string' ? p : (p.name || p.productName || p.product_name || "Unnamed Product"),
-                  classification: typeof p === 'object' ? (p.classification || p.category || "") : ""
-                }))
-              : []
-          };
-        })
-      : [];
+    //       return {
+    //         lineName: line.lineName || line.line_name || line.name || line.title || line || "Manufacturing Line",
+    //         lineType: line.lineType || line.line_type || line.type || "",
+    //         products: Array.isArray(rawProducts)
+    //           ? rawProducts.map((p: any) => ({
+    //               name: typeof p === 'string' ? p : (p.name || p.productName || p.product_name || "Unnamed Product"),
+    //               classification: typeof p === 'object' ? (p.classification || p.category || "") : ""
+    //             }))
+    //           : []
+    //       };
+    //     })
+    //   : [];
 
     const logoUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/nafdac_logo2-removebg-preview.png`;
 
@@ -177,14 +178,14 @@ export async function POST(request: Request) {
          * PATHWAY 2: ABSOLUTE FINAL GMP CERTIFICATION APPROVAL
          */
         console.log("🌟 Compliance Approved. Generating Digital Certification & Dispatching Approval Email...");
-        console.log("📦 Mapped Scope for PDF Render:", JSON.stringify(effectiveProductLines, null, 2));
+        // console.log("📦 Mapped Scope for PDF Render:", JSON.stringify(effectiveProductLines, null, 2));
 
         const certificateData = {
           appNumber: `NAFDAC/VMAP/GMP/${applicationId}`,
           date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
           facilityName: effectiveCompanyName,
           facilityAddress: effectiveAddress,
-          productLines: effectiveProductLines,
+          productLines: extractedLines, //effectiveProductLines, -for now we leave this out.
           logoUrl,
           effectiveCompanyName,
           signatoryName: "Divisional Deputy Director",
@@ -196,19 +197,39 @@ export async function POST(request: Request) {
 
 
         // Format HTML summary for Product Lines & Products in the email body
-        const productLinesHtml = effectiveProductLines.length > 0
-          ? effectiveProductLines.map((line: any) => `
+        // const productLinesHtml = effectiveProductLines.length > 0
+        //   ? effectiveProductLines.map((line: any) => `
+        //       <li style="margin-bottom: 8px;">
+        //         <strong>${line.lineName}</strong> ${line.lineType ? `(${line.lineType})` : ""}
+        //         ${line.products && line.products.length > 0 ? `
+        //           <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
+        //             ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
+        //           </ul>
+        //         ` : ""}
+        //       </li>
+        //     `).join("")
+        //   : "<li>General Finished Product Manufacturing Line</li>";
+        
+        // const productLinesHtml = extractedLines.length > 0
+        //   ? extractedLines.map((line: any) => `
+        //       <li style="margin-bottom: 8px;">
+        //         <strong>${line.lineName}</strong> ${line.lineType ? `(${line.lineType})` : ""}
+        //         ${line.products && line.products.length > 0 ? `
+        //           <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
+        //             ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
+        //           </ul>
+        //         ` : ""}
+        //       </li>
+        //     `).join("")
+        //   : "<li>General Finished Product Manufacturing Line</li>";
+        const productLinesHtml = extractedLines.length > 0
+          ? extractedLines.map((line: any) => `
               <li style="margin-bottom: 8px;">
-                <strong>${line.lineName}</strong> ${line.lineType ? `(${line.lineType})` : ""}
-                ${line.products && line.products.length > 0 ? `
-                  <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
-                    ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
-                  </ul>
-                ` : ""}
+                <strong>${line.lineName}</strong>
+                
               </li>
             `).join("")
           : "<li>General Finished Product Manufacturing Line</li>";
-
         let pdfBuffer: Buffer | null = null;
         try {
           pdfBuffer = await renderToBuffer(
