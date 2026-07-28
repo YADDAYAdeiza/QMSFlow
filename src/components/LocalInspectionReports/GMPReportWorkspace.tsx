@@ -7,7 +7,7 @@ import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWor
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
 import InspectionChecklistForm from "./InspectionChecklistForm";
 import ReportRichTextEditor from "./ReportRichTextEditor";
-import { uploadDossierPdf } from '@/lib/utils/supabaseUpload';
+import { uploadDossierPdf, buildCompanyFilePath } from '@/lib/utils/supabaseUpload';
 
 const BASE_CHECKLIST_TEMPLATE = {
   report_doc_number: "OKL-LA-PRI-01-2026",
@@ -104,7 +104,6 @@ export default function GMPReportWorkspace({
   // Core workflow states
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [remarks, setRemarks] = useState("");
-  const [selectedStaff, setSelectedStaff] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   
@@ -117,6 +116,60 @@ export default function GMPReportWorkspace({
 
   // ⏱️ QMS Performance Tracking
   const [stepEntryTime, setStepEntryTime] = useState<number>(Date.now());
+  // Add state for staff members
+
+// Fetch real staff members from Supabase / API
+
+// Add state hooks inside your workspace component
+const [staffDirectory, setStaffDirectory] = useState<any[]>([]);
+const [selectedStaff, setSelectedStaff] = useState<string>("");
+const [isLoadingStaff, setIsLoadingStaff] = useState<boolean>(false);
+
+useEffect(() => {
+  async function fetchStaffMembers() {
+    if (!applicationId) return;
+    setIsLoadingStaff(true);
+    try {
+      const res = await fetch(`/api/LocalInspectionReports/VettingInspectors?application_id=${applicationId}`);
+      if (!res.ok) throw new Error("Failed to load staff directory");
+
+      const data = await res.json();
+      const rawList = data.inspectors || (Array.isArray(data) ? data : []);
+
+      // Division map normalization
+      const normalizeDivision = (div?: string) => {
+        if (!div) return "VMD";
+        if (div === "Biologics") return "VMD";
+        if (div === "Pharmacovigilance") return "PAD";
+        if (div === "Post-Registration") return "AFPD";
+        return div;
+      };
+
+      const mappedStaff = rawList.map((user: any) => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        division: normalizeDivision(user.division),
+        role: user.role,
+        isAvailable: user.is_available,
+        statusLabel: user.status_label,
+        availabilityStatus: user.availability_status
+      }));
+
+      setStaffDirectory(mappedStaff);
+    } catch (err) {
+      console.error("Error fetching live staff directory:", err);
+    } finally {
+      setIsLoadingStaff(false);
+    }
+  }
+
+  fetchStaffMembers();
+}, [applicationId]);
+
+
+
+
 
   useEffect(() => {
     setStepEntryTime(Date.now());
@@ -164,11 +217,11 @@ export default function GMPReportWorkspace({
 
   const availableDivisions = ["Biologics", "Pharmacovigilance", "Post-Registration"];
 
-  const staffDirectory = [
-    { id: "usr_201", name: "Aliyu Ahmed", division: "Biologics", role: "Technical Staff Reviewer" },
-    { id: "usr_202", name: "Chidi Okafor", division: "Biologics", role: "Technical Staff Reviewer" },
-    { id: "usr_203", name: "Fatima Umar", division: "Pharmacovigilance", role: "PV Staff Reviewer" }
-  ];
+  // const staffDirectory = [
+  //   { id: "usr_201", name: "Aliyu Ahmed", division: "IRSD", role: "Technical Staff Reviewer" },
+  //   { id: "usr_202", name: "Chidi Okafor", division: "Biologics", role: "Technical Staff Reviewer" },
+  //   { id: "usr_203", name: "Fatima Umar", division: "VMD", role: "PV Staff Reviewer" }
+  // ];
 
   const handleSaveDraft = async (draftPayload: any) => {
     if (!draftPayload) return;
@@ -258,57 +311,70 @@ export default function GMPReportWorkspace({
     }
   };
 
-  const handleCommitPdfToStorage = async () => {
+
+const handleCommitPdfToStorage = async () => {
   if (!reportHtml) {
     alert("No compiled report content available to commit to PDF.");
     return;
   }
 
   setIsRenderingPdf(true);
-      try {
-        const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            // Fixed: Use "reportHtml" to match the API Route Handler expectation
-            reportHtml: reportHtml,
-            applicationId: applicationId,
-            docNumber: checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`
-          })
-        });
+  try {
+    const docNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
 
-        if (!pdfRes.ok) {
-          const errorData = await pdfRes.json().catch(() => ({}));
-          throw new Error(errorData.error || "Failed to render official PDF binary from current report HTML.");
-        }
+    const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reportHtml: reportHtml,
+        applicationId: applicationId,
+        docNumber: docNo
+      })
+    });
 
-        const pdfBlob = await pdfRes.blob();
-        const pdfFile = new File([pdfBlob], `GMP_Inspection_Report_${applicationId}.pdf`, {
-          type: "application/pdf"
-        });
+    if (!pdfRes.ok) {
+      const errorData = await pdfRes.json().catch(() => ({}));
+      throw new Error(errorData.error || "Failed to render official PDF binary from current report HTML.");
+    }
 
-        // Ensure uploadDossierPdf inside targets the lowercase 'documents' bucket
-        const uploadedUrl = await uploadDossierPdf(pdfFile, applicationId);
+    const pdfBlob = await pdfRes.blob();
+    const fileName = `Local_Inspection_Report_${docNo}.pdf`;
+    const pdfFile = new File([pdfBlob], fileName, {
+      type: "application/pdf"
+    });
 
-        if (!uploadedUrl) {
-          throw new Error("Failed to retrieve public storage URL after upload.");
-        }
+    // 1. Resolve company identifier (fallback to applicationId or RC number if available)
+    const targetCompanyId = checklistSnapshot?.company_id || checklistSnapshot?.company_rc_number || applicationId;
 
-        setPdfStorageUrl(uploadedUrl);
+    // 2. Build the standardized path matching your new type definition
+    const storagePath = buildCompanyFilePath(
+      targetCompanyId,
+      '01_Local_Inspection_Reports', // Matches exact type in supabaseUpload.ts
+      fileName
+    );
 
-        const updatedSnapshot = {
-          ...checklistSnapshot,
-          pdfStorageUrl: uploadedUrl
-        };
-        setChecklistSnapshot(updatedSnapshot);
-        await handleSaveDraft(updatedSnapshot);
+    // 3. Upload to storage
+    const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
 
-        alert("PDF successfully compiled and committed to Supabase 'documents' bucket!");
-      } catch (err: any) {
-        alert(`PDF Storage Error: ${err.message}`);
-      } finally {
-        setIsRenderingPdf(false);
-      }
+    if (!uploadedUrl) {
+      throw new Error("Failed to retrieve public storage URL after upload.");
+    }
+
+    setPdfStorageUrl(uploadedUrl);
+
+    const updatedSnapshot = {
+      ...checklistSnapshot,
+      pdfStorageUrl: uploadedUrl
+    };
+    setChecklistSnapshot(updatedSnapshot);
+    await handleSaveDraft(updatedSnapshot);
+
+    alert("PDF successfully compiled and committed to Supabase 'documents' bucket!");
+  } catch (err: any) {
+    alert(`PDF Storage Error: ${err.message}`);
+  } finally {
+    setIsRenderingPdf(false);
+  }
 };
   const handleTransition = async (direction: "FORWARD" | "REWORK") => {
     if (direction === "FORWARD" && !canDispatchForward) {
@@ -576,18 +642,16 @@ return (
                 </div>
               )}
 
-              {/* TAB 2: PDF Regulatory Document Viewer (Dynamic Bucket Flow) */}
+              {/* TAB 2: PDF Regulatory Document Viewer */}
               {activeDocTab === 'PDF' && (
                 <div className="min-h-[650px] w-full bg-slate-100 rounded-lg overflow-hidden border border-slate-200 animate-fadeIn relative flex flex-col">
                   {pdfStorageUrl ? (
-                    /* Render stored bucket object when available */
                     <iframe
                       src={`${pdfStorageUrl}#toolbar=0`}
                       className="w-full h-[650px] border-none"
                       title="Primary Inspection Report PDF"
                     />
                   ) : (
-                    /* Fallback state when file has not been committed to storage */
                     <div className="p-8 my-auto flex flex-col items-center justify-center bg-white text-center">
                       <div className="w-16 h-16 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl mb-4 shadow-sm">
                         📄
@@ -596,7 +660,7 @@ return (
                         No Committed PDF Document Found
                       </h3>
                       <p className="text-xs text-slate-500 max-w-md mb-6 leading-relaxed">
-                        The primary report PDF for dossier <span className="font-mono font-semibold text-slate-700">#{applicationId}</span> has not been generated and saved to the <span className="font-mono text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">documents</span> storage bucket yet.
+                        The primary report PDF for dossier <span className="font-mono font-semibold text-slate-700">#{applicationId}</span> has not been generated and saved to the <span className="font-mono text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">Documents</span> storage bucket yet.
                       </p>
 
                       <button
@@ -729,19 +793,38 @@ return (
 
             {currentStep === "DDD_IRSD_INTAKE" && (
               <div className="mb-4 animate-fadeIn">
-                <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
-                  Assign Compliance Vetter
-                </label>
-                <select
-                  value={selectedStaff}
-                  onChange={(e) => setSelectedStaff(e.target.value)}
-                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800"
-                >
-                  <option value="">-- Choose IRSD Officer --</option>
-                  {staffDirectory.filter(s => s.division === "IRSD").map(staff => (
-                    <option key={staff.id} value={staff.id}>{staff.name} ({staff.role})</option>
-                  ))}
-                </select>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                    Assign Vetting Inspector
+                  </label>
+                  <select
+                    value={selectedStaff}
+                    onChange={(e) => setSelectedStaff(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    disabled={isLoadingStaff}
+                  >
+                    <option value="">
+                      {isLoadingStaff ? "Checking inspector availability..." : "-- Select IRSD Vetting Inspector --"}
+                    </option>
+                    {staffDirectory
+                      .filter((staff) => staff.division === "IRSD")
+                      .map((staff) => {
+                        const isConflict = staff.availabilityStatus === "WORKED_ON_INSPECTION";
+                        const isBusy = staff.availabilityStatus === "ON_ANOTHER_INSPECTION";
+
+                        return (
+                          <option
+                            key={staff.id}
+                            value={staff.id}
+                            disabled={isConflict} // Prevent self-vetting completely
+                            className={isConflict ? "text-red-500 bg-red-50" : isBusy ? "text-amber-600" : "text-slate-900"}
+                          >
+                            {staff.name} — {staff.division} {staff.isAvailable ? " [Available]" : ` [⚠️ ${staff.statusLabel}]`}
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
               </div>
             )}
 
