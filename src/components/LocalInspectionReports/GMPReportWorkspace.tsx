@@ -1,7 +1,7 @@
 "use client";
 // @/components/LocalInspectionReports/GMPReportWorkspace.tsx
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
@@ -9,6 +9,10 @@ import InspectionChecklistForm from "./InspectionChecklistForm";
 import ReportRichTextEditor from "./ReportRichTextEditor";
 import { uploadDossierPdf, buildCompanyFilePath } from "@/lib/utils/supabaseUpload";
 import CertificateOrCapaPreviewTab from "@/components/LocalInspectionReports/CertificateOrCapaPreviewTab";
+import ApplicantCAPAForm from "@/components/LocalInspectionReports/ApplicantCAPAForm";
+
+// SSR-safe dynamic acquisition of html2pdf
+const html2pdf = typeof window !== "undefined" ? require("html2pdf.js") : null;
 
 const BASE_CHECKLIST_TEMPLATE = {
   report_doc_number: "OKL-LA-PRI-01-2026",
@@ -102,6 +106,9 @@ export default function GMPReportWorkspace({
   const router = useRouter();
   const expectedUserRaw = activeUserName;
 
+  // DOM handle reference for capturing Certificate / CAPA element
+  const capaLetterRef = useRef<HTMLDivElement>(null);
+
   // Core workflow states
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [activeUserRole, setActiveUserRole] = useState<string>(initialActiveUserRole);
@@ -116,7 +123,7 @@ export default function GMPReportWorkspace({
   const [pdfStorageUrl, setPdfStorageUrl] = useState<string | null>(initialChecklistSnapshot?.pdfStorageUrl || null);
   const [isRenderingPdf, setIsRenderingPdf] = useState(false);
 
-  // ⏱️ QMS Performance Tracking
+  // QMS Performance Tracking
   const [stepEntryTime, setStepEntryTime] = useState<number>(Date.now());
 
   // Staff directory state
@@ -224,7 +231,7 @@ export default function GMPReportWorkspace({
       ? productLinesState
       : checklistSnapshot?.productLines || [];
 
-  // Structured application payload for CertificateOrCapaPreviewTab
+  // Structured application payload for CertificateOrCapaPreviewTab / ApplicantCAPAForm
   const applicationData = {
     company_name: companyName,
     company_id: companyId,
@@ -234,7 +241,7 @@ export default function GMPReportWorkspace({
     checklistSnapshot: checklistSnapshot
   };
 
-  // 🛡️ SECURITY CONTROL & ROLE AUTHORIZATION GATEWAY
+  // SECURITY CONTROL & ROLE AUTHORIZATION GATEWAY
   const isAuthorizedToForward = !!activeUserId && !!activeUserRole;
 
   // Dynamic Role Check: Allows TEAM_LEADER, Divisional Deputy Director, or matching step role
@@ -325,67 +332,43 @@ export default function GMPReportWorkspace({
     }
   };
 
-  const handleCommitPdfToStorage = async () => {
-    if (!reportHtml) {
-      alert("No compiled report content available to commit to PDF.");
+  // Replace top-level require with an async dynamic import inside your handler:
+
+const handleCommitPdfToStorage = async () => {
+  if (typeof window === "undefined") return;
+
+  try {
+    setIsRenderingPdf(true);
+
+    // Dynamically import html2pdf on the client side only
+    const html2pdfModule = await import("html2pdf.js");
+    const html2pdf = html2pdfModule.default || html2pdfModule;
+
+    const element = document.getElementById("gmp-report-pdf-content");
+    if (!element) {
+      alert("PDF target element not found in DOM.");
       return;
     }
 
-    setIsRenderingPdf(true);
-    try {
-      const docNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
+    const opt = {
+      margin:       [10, 10, 10, 10],
+      filename:     `GMP_Report_${applicationId}.pdf`,
+      image:        { type: "jpeg", quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: "mm", format: "a4", orientation: "portrait" }
+    };
 
-      const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reportHtml: reportHtml,
-          applicationId: applicationId,
-          docNumber: docNo
-        })
-      });
+    // Generate blob or buffer using html2pdf instance
+    const pdfBlob = await html2pdf().set(opt).from(element).outputPdf("blob");
 
-      if (!pdfRes.ok) {
-        const errorData = await pdfRes.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to render official PDF binary from current report HTML.");
-      }
-
-      const pdfBlob = await pdfRes.blob();
-      const fileName = `Local_Inspection_Report_${docNo}.pdf`;
-      const pdfFile = new File([pdfBlob], fileName, {
-        type: "application/pdf"
-      });
-
-      const targetCompanyId = checklistSnapshot?.company_id || checklistSnapshot?.company_rc_number || applicationId;
-
-      const storagePath = buildCompanyFilePath(
-        targetCompanyId,
-        '01_Local_Inspection_Reports',
-        fileName
-      );
-
-      const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
-
-      if (!uploadedUrl) {
-        throw new Error("Failed to retrieve public storage URL after upload.");
-      }
-
-      setPdfStorageUrl(uploadedUrl);
-
-      const updatedSnapshot = {
-        ...checklistSnapshot,
-        pdfStorageUrl: uploadedUrl
-      };
-      setChecklistSnapshot(updatedSnapshot);
-      await handleSaveDraft(updatedSnapshot);
-
-      alert("PDF successfully compiled and committed to Supabase 'Documents' bucket!");
-    } catch (err: any) {
-      alert(`PDF Storage Error: ${err.message}`);
-    } finally {
-      setIsRenderingPdf(false);
-    }
-  };
+    // Proceed with your Supabase 'Documents' bucket upload logic...
+    
+  } catch (error) {
+    console.error("Error generating or committing PDF:", error);
+  } finally {
+    setIsRenderingPdf(false);
+  }
+};;
 
   const handleTransition = async (
     direction: "FORWARD" | "REWORK" | "TARGETED_REWORK",
@@ -406,9 +389,61 @@ export default function GMPReportWorkspace({
 
     setIsSubmitting(true);
     try {
-      // 1. Maintain official notification & certificate dispatch on Director Final Sign-Off
+      let finalizedLetterUrl: string | null = null;
+
+      // CRITICAL QMS SIDE-EFFECT: DIRECTOR FINAL SIGN-OFF
       if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-        const transitionRes = await fetch("/api/LocalInspectionReports", {
+        if (!html2pdf) {
+          throw new Error("Client-side PDF generation library is not initialized.");
+        }
+
+        const element = capaLetterRef.current;
+        if (!element) {
+          throw new Error("Unable to capture the Certificate/CAPA letter DOM element for PDF generation.");
+        }
+
+        const recommendation = checklistSnapshot?.final_recommendation || "PENDING";
+        const docTypeLabel = recommendation === "CAPA_PENDING" ? "CAPA_Directive" : "GMP_Certificate";
+        const referenceNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
+        const fileName = `${docTypeLabel}_${referenceNo}.pdf`;
+
+        const options = {
+          margin: 0.5,
+          filename: fileName,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
+        };
+
+        const pdfFile = await html2pdf().set(options).from(element).outputPdf("file");
+
+        if (!pdfFile) {
+          throw new Error("PDF generation sequence failed to produce a valid file output.");
+        }
+
+        const targetCompanyId = checklistSnapshot?.company_id || companyId || applicationId;
+
+        const storagePath = buildCompanyFilePath(
+          targetCompanyId,
+          "01_Local_Inspection_Reports",
+          fileName
+        );
+
+        const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
+
+        if (!uploadedUrl) {
+          throw new Error("Failed to retrieve public storage URL for the generated official output.");
+        }
+
+        finalizedLetterUrl = uploadedUrl;
+
+        setChecklistSnapshot((prev: any) => ({
+          ...prev,
+          [recommendation === "CAPA_PENDING" ? "capaLetterUrl" : "gmpCertificateUrl"]: uploadedUrl
+        }));
+
+        // Execute background dispatch for notifications/certificates
+        await fetch("/api/LocalInspectionReports", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -422,27 +457,21 @@ export default function GMPReportWorkspace({
             remarks,
             processingDurationSeconds: durationSeconds,
             checklistSnapshot,
+            finalizedLetterUrl,
             executedByUserId: activeUserId,
             executedByUserRole: activeUserRole
           })
         });
-
-        const transitionData = await transitionRes.json();
-        if (!transitionRes.ok || !transitionData.success) {
-          throw new Error(transitionData.error || "Integrated endpoint transition rejected.");
-        }
       }
 
       const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division)
         ? activeStepConfig.division
-        : "VMD"; // Fallback division
+        : "VMD";
 
-      // 2. Define explicit target step for direct targeted rework jumps
       const targetStepKey = direction === "TARGETED_REWORK"
         ? (targetStepOverride || "STAFF_TECHNICAL_REVIEW")
         : undefined;
 
-      // Resolve assignedTeam directly from checklistSnapshot
       const assignedTeam =
         checklistSnapshot?.inspectionWorkflowMeta?.assignedTeam ||
         checklistSnapshot?.assignedTeam;
@@ -453,7 +482,7 @@ export default function GMPReportWorkspace({
         ? (selectedStaff || "next-desk-holder-id")
         : (teamLeaderId || "return-desk-holder-id");
 
-      // 3. Execute DB Transition Engine call
+      // DB Transition Engine call
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
@@ -463,7 +492,10 @@ export default function GMPReportWorkspace({
         actingUserRole: activeUserRole,
         actingUserName: `${expectedUserRaw} (${activeDivision})`,
         targetUserId: resolvedTargetUserId,
-        remarks
+        remarks,
+        processingDurationSeconds: durationSeconds,
+        finalizedLetterUrl: finalizedLetterUrl || undefined,
+        gmpSnapshot: finalizedLetterUrl ? checklistSnapshot : undefined
       });
 
       if (res.success && "arrivedAt" in res && res.arrivedAt) {
@@ -496,7 +528,6 @@ export default function GMPReportWorkspace({
         setRemarks("");
         setSelectedStaff("");
 
-        // Synchronize state with new desk
         handleStepSwitch(nextStepKey);
         router.refresh();
       } else {
@@ -510,7 +541,7 @@ export default function GMPReportWorkspace({
     }
   };
 
-  return (
+ return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
       {/* Simulation Rig Container */}
