@@ -4,6 +4,7 @@ import nodemailer from "nodemailer";
 import { renderToBuffer } from "@react-pdf/renderer";
 import React from "react";
 import GMPCertificateView from "@/components/LocalInspectionReports/GMPCertificateView";
+import { extractInspectionData } from "@/lib/inspectionReportUtils";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
@@ -22,104 +23,33 @@ const transporter = nodemailer.createTransport({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { 
-      applicationId, 
-      currentStepKey, 
-      direction, 
-      checklistSnapshot, 
-      companyName, 
-      facilityAddress,
-      productLines: rawProductLines,
-      notificationEmail 
-    } = body;
+    const { applicationId, currentStepKey, direction } = body;
 
-    console.log('This is rawProductLines: ', rawProductLines);
-    console.log('This is the body: ', body);
-    // 1. Comprehensive Fallback Extraction for Establishment & Site Metadata
-    const effectiveCompanyName = 
-      companyName || 
-      checklistSnapshot?.inspected_site_name || 
-      checklistSnapshot?.company_name ||
-      body?.details?.savedChecklistSnapshot?.inspected_site_name ||
-      body?.details?.savedChecklistSnapshot?.company_name ||
-      body?.details?.companyName || 
-      "Registered Establishment";
-
-    const effectiveAddress = 
-      facilityAddress || 
-      checklistSnapshot?.facility_address || 
-      checklistSnapshot?.facilityAddress || 
-      checklistSnapshot?.inspected_site_address ||
-      body?.details?.savedChecklistSnapshot?.facility_address || 
-      body?.details?.savedChecklistSnapshot?.facilityAddress || 
-      body?.details?.facilityAddress || 
-      "Registered Facility Address";
-
-    const effectiveRecipientEmail = 
-      notificationEmail || 
-      checklistSnapshot?.applicant_email ||
-      body?.details?.savedChecklistSnapshot?.applicant_email ||
-      body?.details?.notificationEmail || 
-      "managing_director@globalorganics.com";
-
-    // 2. Comprehensive Product Lines & Products Extraction (Skipping empty [] arrays)
-    const rawLinesArray = [
-      rawProductLines,
-      body?.productLines,
-      body?.product_lines,
-      checklistSnapshot?.productLines,
-      checklistSnapshot?.product_lines,
-      body?.details?.productLines,
-      body?.details?.product_lines,
-      body?.details?.savedChecklistSnapshot?.productLines,
-      body?.details?.savedChecklistSnapshot?.product_lines,
-    ];
-
-    // Pick the first entry that is an array and contains elements
-    const extractedLines = rawLinesArray.find(
-      (arr) => Array.isArray(arr) && arr.length > 0
-    ) || [];
-
-    // Normalize manufacturing lines & nested products into a clean structure for React-PDF & HTML
-
-    //For now we pass extractedLines into GMPCertificateData
-    console.log('This is extractedLines: ', extractedLines);
-    // const effectiveProductLines = Array.isArray(extractedLines) 
-    //   ? extractedLines.map((line: any) => {
-    //       const rawProducts = line.products || line.productList || line.approvedProducts || [];
-          
-    //       return {
-    //         lineName: line.lineName || line.line_name || line.name || line.title || line || "Manufacturing Line",
-    //         lineType: line.lineType || line.line_type || line.type || "",
-    //         products: Array.isArray(rawProducts)
-    //           ? rawProducts.map((p: any) => ({
-    //               name: typeof p === 'string' ? p : (p.name || p.productName || p.product_name || "Unnamed Product"),
-    //               classification: typeof p === 'object' ? (p.classification || p.category || "") : ""
-    //             }))
-    //           : []
-    //       };
-    //     })
-    //   : [];
-
-    const logoUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/nafdac_logo2-removebg-preview.png`;
+    const {
+      effectiveCompanyName,
+      effectiveAddress,
+      effectiveRecipientEmail,
+      extractedLines,
+      finalRecommendation,
+      observations,
+      certificateData
+    } = extractInspectionData(body, applicationId);
 
     console.log(`[QMS] Processing routing transition for App ID: ${applicationId} from Desk: ${currentStepKey}`);
 
     if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-      const recommendation = checklistSnapshot?.final_recommendation || "PENDING";
 
-      if (recommendation === "PENDING") {
+      if (finalRecommendation === "PENDING" || finalRecommendation === "CAPA_PENDING") {
         /**
          * PATHWAY 1: ISSUING A CAPA DIRECTIVE
          */
         console.log("🚨 CAPA Requirement detected. Preparing email dispatch...");
 
-        const structuralObservations = checklistSnapshot?.observations || [];
         const applicantPortalUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/LocalInspectionReports/applicant/applications/${applicationId}/capa`;
 
-        const observationListHtml = structuralObservations.length > 0
+        const observationListHtml = observations.length > 0
           ? `<ul style="padding-left: 20px; color: #334155; font-size: 13px; line-height: 1.6;">
-              ${structuralObservations.map((obs: any) => `<li><strong>[${obs.severity || "DEFICIENCY"}]</strong> ${obs.text || obs.description || obs}</li>`).join("")}
+              ${observations.map((obs: any) => `<li><strong>[${obs.severity || "DEFICIENCY"}]</strong> ${obs.text || obs.description || obs}</li>`).join("")}
              </ul>`
           : `<p style="font-size: 13px; color: #64748b; font-style: italic;">Please log into the compliance tracking panel to review mapped observations.</p>`;
 
@@ -178,58 +108,15 @@ export async function POST(request: Request) {
          * PATHWAY 2: ABSOLUTE FINAL GMP CERTIFICATION APPROVAL
          */
         console.log("🌟 Compliance Approved. Generating Digital Certification & Dispatching Approval Email...");
-        // console.log("📦 Mapped Scope for PDF Render:", JSON.stringify(effectiveProductLines, null, 2));
 
-        const certificateData = {
-          appNumber: `NAFDAC/VMAP/GMP/${applicationId}`,
-          date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-          facilityName: effectiveCompanyName,
-          facilityAddress: effectiveAddress,
-          productLines: extractedLines, //effectiveProductLines, -for now we leave this out.
-          logoUrl,
-          effectiveCompanyName,
-          signatoryName: "Divisional Deputy Director",
-          signatoryTitle: "Divisional Deputy Director, Veterinary Medicine & Allied Products"
-        };
-
-        console.log('Within route.ts, this is certificateData: ', certificateData);
-
-
-
-        // Format HTML summary for Product Lines & Products in the email body
-        // const productLinesHtml = effectiveProductLines.length > 0
-        //   ? effectiveProductLines.map((line: any) => `
-        //       <li style="margin-bottom: 8px;">
-        //         <strong>${line.lineName}</strong> ${line.lineType ? `(${line.lineType})` : ""}
-        //         ${line.products && line.products.length > 0 ? `
-        //           <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
-        //             ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
-        //           </ul>
-        //         ` : ""}
-        //       </li>
-        //     `).join("")
-        //   : "<li>General Finished Product Manufacturing Line</li>";
-        
-        // const productLinesHtml = extractedLines.length > 0
-        //   ? extractedLines.map((line: any) => `
-        //       <li style="margin-bottom: 8px;">
-        //         <strong>${line.lineName}</strong> ${line.lineType ? `(${line.lineType})` : ""}
-        //         ${line.products && line.products.length > 0 ? `
-        //           <ul style="margin-top: 4px; padding-left: 16px; color: #475569;">
-        //             ${line.products.map((p: any) => `<li>${p.name} ${p.classification ? `[${p.classification}]` : ""}</li>`).join("")}
-        //           </ul>
-        //         ` : ""}
-        //       </li>
-        //     `).join("")
-        //   : "<li>General Finished Product Manufacturing Line</li>";
         const productLinesHtml = extractedLines.length > 0
           ? extractedLines.map((line: any) => `
               <li style="margin-bottom: 8px;">
-                <strong>${line.lineName}</strong>
-                
+                <strong>${line.lineName || line.name || line}</strong>
               </li>
             `).join("")
           : "<li>General Finished Product Manufacturing Line</li>";
+
         let pdfBuffer: Buffer | null = null;
         try {
           pdfBuffer = await renderToBuffer(

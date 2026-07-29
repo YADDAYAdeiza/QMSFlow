@@ -1,36 +1,26 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import ApplicantCAPAForm, { CAPALineItem } from "@/components/LocalInspectionReports/ApplicantCAPAForm";
+import React, { useEffect, useState, use } from "react";
+import { createClient } from '@/lib/supabase';
+import ApplicantCAPAForm, {CAPALineItem}  from "@/components/LocalInspectionReports/ApplicantCAPAForm";
+const supabase = createClient();
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
 export default function DynamicCapaPage({ params }: PageProps) {
-  const [applicationId, setApplicationId] = useState<string | null>(null);
+  // Direct promise resolution for Next.js 15
+  const resolvedParams = use(params);
+  const applicationId = resolvedParams.id;
+
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reportSnapshot, setReportSnapshot] = useState<any>(null);
   const [capaSubmissionData, setCapaSubmissionData] = useState<any>(null);
 
-  // 1. Resolve the asynchronous route parameters
-  useEffect(() => {
-    async function resolveParams() {
-      try {
-        const unwrappedParams = await params;
-        setApplicationId(unwrappedParams.id);
-      } catch (err: any) {
-        console.error("Failed to unwrap route parameters:", err);
-        setErrorMsg("Routing error: Unable to resolve application parameters.");
-        setLoading(false);
-      }
-    }
-    resolveParams();
-  }, [params]);
-
-  // 2. Fetch both the application data AND existing CAPA submissions if present
+  // Fetch both the application data AND existing CAPA submissions
+  // Fetch both the application data AND existing CAPA submissions
   useEffect(() => {
     async function fetchInspectionData() {
       if (!applicationId) return;
@@ -54,7 +44,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
         }
         setReportSnapshot(appData);
 
-        // Fetch existing CAPA submission if it exists
+        // Fetch existing CAPA submission if present
         const { data: capaData, error: capaError } = await supabase
           .from("capa_submissions")
           .select("*")
@@ -75,6 +65,24 @@ export default function DynamicCapaPage({ params }: PageProps) {
     fetchInspectionData();
   }, [applicationId]);
 
+  // Extract snapshot details safely for render and handlers
+  const snapshotDetails = reportSnapshot?.details || {};
+  const checklistSnapshot = snapshotDetails.savedChecklistSnapshot || {};
+  
+  const refNumber = checklistSnapshot.report_doc_number || reportSnapshot?.application_number || "PENDING-REF";
+  const companyName = checklistSnapshot.inspected_site_name || "Orange Kalbe Limited";
+  const companyAddress = checklistSnapshot.vicinity_assessment 
+    ? `${checklistSnapshot.vicinity_assessment}, Nigeria` 
+    : "Registered Manufacturing Facility Site, Nigeria";
+
+  // Dynamic email extraction with fallback checks across JSON snapshot and master record
+  const companyEmail = 
+    checklistSnapshot.company_email || 
+    checklistSnapshot.applicant_email || 
+    reportSnapshot?.company_email || 
+    reportSnapshot?.applicant_email || 
+    reportSnapshot?.email;
+
   const handleCapaSubmit = async (payload: {
     applicationId: string;
     refNumber: string;
@@ -91,7 +99,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
         throw new Error("Invalid Application ID format. Must be a numeric value.");
       }
 
-      // Check if an entry already exists for this application lifecycle
+      // Check for existing entry
       const { data: existingSubmission, error: fetchError } = await supabase
         .from("capa_submissions")
         .select("id")
@@ -126,9 +134,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
 
       if (resultError) throw resultError;
 
-      // ==========================================
-      // SYNCHRONIZE MASTER APPLICATIONS TABLE
-      // ==========================================
+      // Synchronize Master Applications Table using exact official designation
       const { error: masterUpdateError } = await supabase
         .from("applications")
         .update({
@@ -142,16 +148,17 @@ export default function DynamicCapaPage({ params }: PageProps) {
         console.error("Warning: CAPA logged but Master Application Tracker failed to sync:", masterUpdateError);
       }
 
-      // ==========================================
-      // DISPATCH MAIL NOTIFICATION TO VALIDATION DESK
-      // ==========================================
+      // Ensure a recipient email exists before sending
+      const recipientEmail = companyEmail || "adeiza.yusuf@nafdac.gov.ng";
+
+      // Dispatch mail notification
       try {
         await fetch("/api/LocalInspectionReports/send-email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            to: "adeiza.yusuf@nafdac.gov.ng", // Adjust to target administrative email
-            cc:"adeiza.nafdac.gov.ng",
+            to: recipientEmail,
+            cc: "adeiza.yusuf@nafdac.gov.ng",
             subject: `🚨 Action Required: CAPA Submission for Application ID ${payload.applicationId}`,
             html: `
               <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
@@ -204,16 +211,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
       </div>
     );
   }
-
-  const snapshotDetails = reportSnapshot.details || {};
-  const checklistSnapshot = snapshotDetails.savedChecklistSnapshot || {};
-  
-  const refNumber = checklistSnapshot.report_doc_number || reportSnapshot.application_number || "PENDING-REF";
-  const companyName = checklistSnapshot.inspected_site_name || "Orange Kalbe Limited";
-  
-  const companyAddress = checklistSnapshot.vicinity_assessment 
-    ? `${checklistSnapshot.vicinity_assessment}, Nigeria` 
-    : "Registered Manufacturing Facility Site, Nigeria";
 
   const isReworkMode = reportSnapshot.status === "CAPA_REWORK_REQUIRED" || capaSubmissionData?.status === "REJECTED_REWORK";
   const isPendingVerification = capaSubmissionData?.status === "PENDING_VERIFICATION";

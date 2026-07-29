@@ -1,5 +1,5 @@
 // utils/supabaseUpload.ts
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/lib/supabase';
 
 export type CompanySubFolder = 
   | '01_Local_Inspection_Reports'
@@ -8,8 +8,8 @@ export type CompanySubFolder =
   | '04_Correspondence';
 
 /**
- * Helper to construct standardized, safe storage paths inside the Documents bucket.
- * Example output: "companies/COMP-2026-0042/01_Inspection_Reports/Local_Inspection_Report_DER80006.pdf"
+ * Helper to construct standardized, safe storage paths inside the documents bucket.
+ * Example output: "companies/COMP-2026-0042/01_Local_Inspection_Reports/Local_Inspection_Report_DER80006.pdf"
  */
 export function buildCompanyFilePath(
   companyId: string,
@@ -24,25 +24,31 @@ export function buildCompanyFilePath(
 }
 
 /**
- * Uploads a file to the unified 'Documents' bucket and returns its public URL.
+ * Returns the public access URL for a file stored in a Supabase storage bucket.
  */
-export async function uploadDossierPdf(file: File, path: string) {
+export function getStoragePublicUrl(bucketName: string, path: string): string {
+  const supabase = createClient();
+  const { data } = supabase.storage.from(bucketName).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/**
+ * Uploads a file to the 'documents' bucket and returns its public URL.
+ */
+export async function uploadDossierPdf(file: File | Blob, path: string): Promise<string> {
   const supabase = createClient();
 
   const { data, error } = await supabase.storage
-    .from('documents')
+    .from('documents') // Updated to lowercase 'documents'
     .upload(path, file, {
       cacheControl: '3600',
       upsert: true,
+      contentType: 'application/pdf'
     });
 
   if (error) {
     throw error;
   }
 
-  const { data: publicUrlData } = supabase.storage
-    .from('documents')
-    .getPublicUrl(data.path);
-
-  return publicUrlData.publicUrl;
+  return getStoragePublicUrl('documents', data.path);
 }
