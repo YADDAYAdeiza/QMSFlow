@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/client";
+
+const supabase = await createClient();
 
 interface PageProps {
   params: Promise<{ id: string }>;

@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState, use } from "react";
 import { createClient } from '@/lib/supabase';
-import ApplicantCAPAForm, {CAPALineItem}  from "@/components/LocalInspectionReports/ApplicantCAPAForm";
+import ApplicantCAPAForm, { CapaItem } from "@/components/LocalInspectionReports/ApplicantCAPAForm";
+
 const supabase = createClient();
 
 interface PageProps {
@@ -19,7 +20,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
   const [reportSnapshot, setReportSnapshot] = useState<any>(null);
   const [capaSubmissionData, setCapaSubmissionData] = useState<any>(null);
 
-  // Fetch both the application data AND existing CAPA submissions
   // Fetch both the application data AND existing CAPA submissions
   useEffect(() => {
     async function fetchInspectionData() {
@@ -83,56 +83,83 @@ export default function DynamicCapaPage({ params }: PageProps) {
     reportSnapshot?.applicant_email || 
     reportSnapshot?.email;
 
-  const handleCapaSubmit = async (payload: {
-    applicationId: string;
-    refNumber: string;
-    capaItems: any[];
-    signatures: {
+  // --- SAVE DRAFT HANDLER ---
+  const handleCapaSaveDraft = async (data: { items: any[]; summary?: any }) => {
+    try {
+      if (!applicationId) {
+        throw new Error("Missing Application ID.");
+      }
+
+      const appIdNum = parseInt(applicationId, 10);
+      if (isNaN(appIdNum)) {
+        throw new Error("Invalid Application ID format.");
+      }
+
+      const savedAt = new Date().toISOString();
+
+      const rowData = {
+        application_id: appIdNum,
+        ref_number: refNumber,
+        capa_items: data.items,
+        signatures: data.summary?.signatures || {},
+        submitted_at: savedAt,
+        status: "DRAFT"
+      };
+
+      const { error } = await supabase
+        .from("capa_submissions")
+        .upsert(rowData, { onConflict: "application_id" });
+
+      if (error) throw error;
+
+      // Local state update to reflect saved draft
+      setCapaSubmissionData((prev: any) => ({
+        ...prev,
+        ...rowData
+      }));
+
+      alert("💾 CAPA draft saved successfully!");
+    } catch (err: any) {
+      console.error("Draft save failed:", err);
+      alert(`Draft Save Failure: ${err.message || "Could not write draft state."}`);
+    }
+  };
+
+  // --- SUBMIT HANDLER ---
+  const handleCapaSubmit = async (data: {
+    items: any[];
+    summary?: any;
+    signatures?: {
       managingDirector: { name: string; date: string };
       responsiblePerson: { name: string; date: string };
     };
-    submittedAt: string;
   }) => {
     try {
-      const appIdNum = parseInt(payload.applicationId, 10);
+      if (!applicationId) {
+        throw new Error("Missing Application ID.");
+      }
+
+      const appIdNum = parseInt(applicationId, 10);
       if (isNaN(appIdNum)) {
         throw new Error("Invalid Application ID format. Must be a numeric value.");
       }
 
-      // Check for existing entry
-      const { data: existingSubmission, error: fetchError } = await supabase
-        .from("capa_submissions")
-        .select("id")
-        .eq("application_id", appIdNum)
-        .maybeSingle();
-
-      if (fetchError) throw fetchError;
-
-      let resultError;
+      const submittedAt = new Date().toISOString();
 
       const rowData = {
         application_id: appIdNum,
-        ref_number: payload.refNumber,
-        capa_items: payload.capaItems,
-        signatures: payload.signatures,
-        submitted_at: payload.submittedAt,
+        ref_number: refNumber,
+        capa_items: data.items,
+        signatures: data.signatures || data.summary?.signatures || {},
+        submitted_at: submittedAt,
         status: "PENDING_VERIFICATION" 
       };
 
-      if (existingSubmission) {
-        const { error } = await supabase
-          .from("capa_submissions")
-          .update(rowData)
-          .eq("application_id", appIdNum);
-        resultError = error;
-      } else {
-        const { error } = await supabase
-          .from("capa_submissions")
-          .insert(rowData);
-        resultError = error;
-      }
+      const { error: upsertError } = await supabase
+        .from("capa_submissions")
+        .upsert(rowData, { onConflict: "application_id" });
 
-      if (resultError) throw resultError;
+      if (upsertError) throw upsertError;
 
       // Synchronize Master Applications Table using exact official designation
       const { error: masterUpdateError } = await supabase
@@ -159,18 +186,18 @@ export default function DynamicCapaPage({ params }: PageProps) {
           body: JSON.stringify({
             to: recipientEmail,
             cc: "adeiza.yusuf@nafdac.gov.ng",
-            subject: `🚨 Action Required: CAPA Submission for Application ID ${payload.applicationId}`,
+            subject: `🚨 Action Required: CAPA Submission for Application ID ${applicationId}`,
             html: `
               <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
                 <h2 style="color: #047857; margin-top: 0;">New CAPA Ledger Submitted</h2>
                 <p>A Corrective and Preventive Action (CAPA) framework has been locked and securely uploaded to the VMAP infrastructure for audit validation.</p>
                 <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-                <p><strong>Application ID:</strong> ${payload.applicationId}</p>
-                <p><strong>Reference Number:</strong> ${payload.refNumber}</p>
+                <p><strong>Application ID:</strong> ${applicationId}</p>
+                <p><strong>Reference Number:</strong> ${refNumber}</p>
                 <p><strong>Company Name:</strong> ${companyName}</p>
-                <p><strong>Submission Time:</strong> ${new Date(payload.submittedAt).toLocaleString()}</p>
+                <p><strong>Submission Time:</strong> ${new Date(submittedAt).toLocaleString()}</p>
                 <br />
-                <a href="${window.location.origin}/LocalInspectionReports/admin/applications/${payload.applicationId}/capa-verify" 
+                <a href="${window.location.origin}/LocalInspectionReports/admin/applications/${applicationId}/capa-verify" 
                    style="background-color: #047857; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
                    Open Adjudication Module
                 </a>
@@ -217,8 +244,8 @@ export default function DynamicCapaPage({ params }: PageProps) {
   const isPassed = capaSubmissionData?.status === "VERIFIED_PASSED";
   const shouldLockForm = isPendingVerification || isPassed;
 
-  let finalObservations: { severity: "Critical" | "Major" | "Other"; text: string }[] | undefined = undefined;
-  let finalItems: CAPALineItem[] | undefined = undefined;
+  let finalObservations: any[] | undefined = undefined;
+  let finalItems: CapaItem[] | undefined = undefined;
 
   if (capaSubmissionData?.capa_items) {
     const rawCapaItems = capaSubmissionData.capa_items;
@@ -241,9 +268,12 @@ export default function DynamicCapaPage({ params }: PageProps) {
     }));
   } else {
     const rawObservations = checklistSnapshot.observations || [];
-    finalObservations = rawObservations.map((obs: any) => ({
+    finalObservations = rawObservations.map((obs: any, index: number) => ({
+      id: obs.id || `obs_${index}`,
+      deficiencyCategory: (obs.severity === "critical" ? "Critical" : obs.severity === "major" ? "Major" : "Other") as "Critical" | "Major" | "Other",
       severity: (obs.severity === "critical" ? "Critical" : obs.severity === "major" ? "Major" : "Other") as "Critical" | "Major" | "Other",
-      text: obs.text || "No descriptive text provided in field inspection."
+      deficiency: obs.text || obs.deficiency || "No descriptive text provided in field inspection.",
+      text: obs.text || obs.deficiency || "No descriptive text provided in field inspection."
     }));
   }
 
@@ -278,14 +308,13 @@ export default function DynamicCapaPage({ params }: PageProps) {
 
       <fieldset disabled={shouldLockForm} className="disabled:opacity-85 disabled:pointer-events-none">
         <ApplicantCAPAForm
-          applicationId={applicationId}
-          refNumber={refNumber}
+          referenceNumber={refNumber}
           companyName={companyName}
-          companyAddress={companyAddress}
+          facilityAddress={companyAddress}
           initialObservations={finalObservations}
           initialItems={finalItems}
-          isReadOnly={shouldLockForm}
-          onSave={handleCapaSubmit}
+          onSaveDraft={handleCapaSaveDraft}
+          onSubmit={handleCapaSubmit}
         />
       </fieldset>
     </div>

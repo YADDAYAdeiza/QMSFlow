@@ -85,6 +85,7 @@ export function extractInspectionData(
 
   // 3. Recommendation & Audit Observations
   const finalRecommendation = checklistSnapshot?.final_recommendation || data?.final_recommendation || "PENDING";
+//   const finalRecommendation = "APPROVED";
   const observations = checklistSnapshot?.observations || data?.observations || [];
 
   // 4. Logo & Signatory Details
