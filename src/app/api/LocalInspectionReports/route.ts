@@ -4,7 +4,7 @@ import nodemailer from "nodemailer";
 import { renderToBuffer } from "@react-pdf/renderer";
 import React from "react";
 import GMPCertificateView from "@/components/LocalInspectionReports/GMPCertificateView";
-import { extractInspectionData } from "@/lib/inspectionReportUtils";
+import { extractInspectionData } from "@/lib/utils/inspectionReportUtils";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",

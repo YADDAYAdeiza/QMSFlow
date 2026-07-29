@@ -11,9 +11,11 @@ import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
 import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS";
 import { GmpCertificate } from "@/components/documents/GmpCertificate";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/client";
 import RejectionModal from "@/components/RejectionModal";
 import { RiskExecutiveSummary } from "@/components/analytics/RiskExecutiveSummary";
+
+const supabase = await createClient();
 
 export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUserId }: any) {
   const [remarks, setRemarks] = useState("");

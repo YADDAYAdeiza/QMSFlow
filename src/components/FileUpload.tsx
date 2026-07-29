@@ -1,8 +1,10 @@
 "use client"
 
 import React, { useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/utils/supabase/client'
 import { Upload, CheckCircle2, Loader2, FileText } from 'lucide-react'
+
+const supabase = await createClient();
 
 interface FileUploadProps {
   label: string

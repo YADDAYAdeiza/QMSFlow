@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/client";
 import type { GMPCertificateData } from "@/components/LocalInspectionReports/GMPCertificateView";
+
+const supabase = await createClient();
 
 export default function DynamicGmpCertificatePage({ params }: { params: Promise<{ id: string }> }) {
   const [certData, setCertData] = useState<GMPCertificateData | null>(null);

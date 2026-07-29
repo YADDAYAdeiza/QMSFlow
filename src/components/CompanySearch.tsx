@@ -17,7 +17,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/utils/supabase/client"
+
+const supabase = await createClient();
 
 interface CompanySearchProps {
   onSelect: (company: any) => void;
