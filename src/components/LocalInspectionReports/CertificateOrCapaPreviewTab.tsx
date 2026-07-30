@@ -35,6 +35,8 @@ export default function CertificateOrCapaPreviewTab({
   // Replace this href string once you locate the exact route in your project
   const capaPortalHref = `/LocalInspectionReports/applicant/applications/${applicationId}/capa`;
 
+console.log('This is certificateData: ', certificateData);
+
   if (isCapaPending) {
     return (
       <div className="mx-auto max-w-4xl rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden my-4">

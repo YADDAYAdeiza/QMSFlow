@@ -434,7 +434,7 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                 <div className="flex justify-between items-center">
                   <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Action Items</h3>
                   <Button variant="ghost" size="sm" onClick={handleAddItem} className="text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 text-xs">
-                    <Plus className="h-3.5 w-3.5 mr-1" /> Add Defect
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Add Deficiency
                   </Button>
                 </div>
 

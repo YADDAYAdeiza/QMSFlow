@@ -35,6 +35,8 @@ export async function POST(request: Request) {
       certificateData
     } = extractInspectionData(body, applicationId);
 
+    console.log('This is certificateData: ', certificateData);
+
     console.log(`[QMS] Processing routing transition for App ID: ${applicationId} from Desk: ${currentStepKey}`);
 
     if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
