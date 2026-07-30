@@ -4,11 +4,14 @@ import { Page, Text, View, Document, StyleSheet, Image } from "@react-pdf/render
 
 const styles = StyleSheet.create({
   page: { 
-    padding: 50, 
+    paddingTop: 50,
+    paddingBottom: 50,
+    paddingHorizontal: 50, 
     fontSize: 10, 
     fontFamily: "Helvetica", 
     lineHeight: 1.5,
-    backgroundColor: "#F4E8C1" // Classic straw/parchment tone
+    backgroundColor: "#F4E8C1", // Classic straw/parchment tone
+    position: "relative"
   },
   logo: { width: 65, height: 65, marginBottom: 8 },
   header: { marginBottom: 15, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" },
@@ -27,17 +30,65 @@ const styles = StyleSheet.create({
   lineBlock: { marginBottom: 6, marginLeft: 8 },
   lineTitle: { fontWeight: "bold", fontSize: 10, color: "#1e293b" },
   productItem: { marginLeft: 14, fontSize: 9, color: "#334155" },
-  footer: { 
-    position: "absolute", 
+
+  // ==================== TWO-COLUMN FOOTER SYSTEM ====================
+  footerWrapper: {
+    position: "absolute",
     bottom: 25, 
-    left: 50, 
+    left: 50,   
     right: 50, 
-    borderTopWidth: 1, 
-    borderTopColor: "#D8CBB0", 
-    paddingTop: 6, 
-    fontSize: 7, 
-    textAlign: "center", 
-    color: "#524836" 
+    display: "flex",
+    flexDirection: "column"
+  },
+  footerLine: {
+    width: "100%",
+    borderBottomWidth: 2,
+    borderBottomColor: "#006600",
+    marginBottom: 6
+  },
+  footerContainer: {
+    display: "flex",
+    flexDirection: "row",
+    justify: "space-between",
+    alignItems: "stretch"
+  },
+  footerColumn: {
+    width: "46%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center", 
+    justifyContent: "center"
+  },
+  footerPartition: {
+    borderRightWidth: 1,
+    borderRightColor: "#333333",
+    marginHorizontal: 5
+  },
+  hqTextContainer: {
+    lineHeight: 0.45, 
+    textAlign: "left" 
+  },
+  officeTextContainer: {
+    lineHeight: 0.45, 
+    textAlign: "left" 
+  },
+  hqLabel: {
+    color: "#CC0000", 
+    fontWeight: "bold",
+    fontSize: 8
+  },
+  officeLabel: {
+    color: "#CC0000", 
+    fontWeight: "bold",
+    fontSize: 8
+  },
+  standardFooterText: {
+    fontSize: 7.5,
+    color: "#111111"
+  },
+  smallFooterText: {
+    fontSize: 6.5, 
+    color: "#333333"
   }
 });
 
@@ -136,18 +187,43 @@ export function GMPCertificateView({ data }: { data: GMPCertificateData }) {
             style={styles.signatureImage} 
           />
           <Text style={styles.signatureName}>
-            {/* {data?.signatoryName || "Divisional Deputy Director"} */}
             {"Mudashir, I. A"}
           </Text>
-          {/* <Text>{data?.signatoryTitle || "Divisional Deputy Director, Veterinary Medicine & Allied Products"}</Text> */}
           <Text>{"Deputy Director i/c, Veterinary Medicine & Allied Products"}</Text>
           <Text>For: Director-General (NAFDAC)</Text>
         </View>
 
-        <View style={styles.footer}>
-          <Text>NAFDAC CORPORATE HQ: Plot 2932 Olusegun Obasanjo Way, Wuse Zone 7, Abuja, Nigeria.</Text>
-          <Text>www.nafdac.gov.ng</Text>
+        {/* 🏛️ Two-Column Footer */}
+        <View style={styles.footerWrapper}>
+          <View style={styles.footerLine} />
+          
+          <View style={styles.footerContainer}>
+            {/* Column Left: Corporate HQ */}
+            <View style={styles.footerColumn}>
+              <Text style={styles.hqTextContainer}>
+                <Text style={styles.hqLabel}>NAFDAC CORPORATE HQ:{"\n"}</Text>
+                <Text style={styles.standardFooterText}>Plot 2932 Olusegun Obasanjo Way,{"\n"}</Text>
+                <Text style={styles.standardFooterText}>Wuse Zone 7, Abuja{"\n"}</Text>
+                <Text style={styles.smallFooterText}>Tel: +234-9-2905701, E-mail: nafdac@nafdac.gov.ng{"\n"}</Text>
+                <Text style={styles.smallFooterText}>Website: www.nafdac.gov.ng</Text>
+              </Text>
+            </View>
+
+            {/* Separator Line */}
+            <View style={styles.footerPartition} />
+
+            {/* Column Right: Lagos Liaison Office */}
+            <View style={styles.footerColumn}>
+              <Text style={styles.officeTextContainer}>
+                <Text style={styles.officeLabel}>LAGOS LIAISON OFFICE:{"\n"}</Text>
+                <Text style={styles.standardFooterText}>Plot 1, Industrial Estate{"\n"}</Text>
+                <Text style={styles.standardFooterText}>Oshodi - Apapa Expressway, Isolo, Lagos{"\n"}</Text>
+                <Text style={styles.smallFooterText}>Tel: +234-9-2905701</Text>
+              </Text>
+            </View>
+          </View>
         </View>
+
       </Page>
     </Document>
   );

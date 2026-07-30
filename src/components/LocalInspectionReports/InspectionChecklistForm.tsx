@@ -44,6 +44,8 @@ export interface ChecklistData {
 
 interface ChecklistFormProps {
   initialData?: Partial<ChecklistData> & Record<string, any> | null;
+  scheduledDate?: string; 
+  leadInspectorName?: string;
   currentInspector?: string;
   onSave: (data: ChecklistData) => void | Promise<void>;
   onSaveDraft?: (data: ChecklistData) => void | Promise<void>; 
@@ -63,7 +65,8 @@ interface QualitySystemConfig {
 
 export default function InspectionChecklistForm({ 
   initialData, 
-  currentInspector,
+  scheduledDate,
+  leadInspectorName,
   onSave, 
   onSaveDraft, 
   onChange,
@@ -95,13 +98,15 @@ export default function InspectionChecklistForm({
     );
   };
 
+  console.log('This is initialData: ', initialData)
+
   const [formData, setFormData] = useState<ChecklistData>(() => {
     const resolvedEmail = resolveInitialEmail(initialData);
 
     return {
       report_doc_number: initialData?.report_doc_number || "OKL-LA-PRI-01-2026",
       inspection_dates: initialData?.inspection_dates || "",
-      type_of_inspection: initialData?.type_of_inspection || "PRI",
+      type_of_inspection: initialData?.inspectionTypeMeta || "PRI",
       inspected_site_name: initialData?.inspected_site_name || initialData?.company_name || "Orange Kalbe Limited",
       notificationEmail: resolvedEmail,
       site_contact_details: {
@@ -111,7 +116,7 @@ export default function InspectionChecklistForm({
       },
       activities_carried_out: Array.isArray(initialData?.activities_carried_out) ? initialData.activities_carried_out : [],
       vicinity_assessment: initialData?.vicinity_assessment || "",
-      lead_inspector: resolveInitialInspector(initialData, currentInspector),
+      lead_inspector: resolveInitialInspector(initialData, leadInspectorName),
       co_inspectors: initialData?.co_inspectors || "",
       historical_baseline: initialData?.historical_baseline || { prev_date_type: "", prev_team: "", past_capa_status: "", major_changes: "" },
       
@@ -130,14 +135,16 @@ export default function InspectionChecklistForm({
     };
   });
 
+  console.log('This is formData.type_of_inspection: ', formData.type_of_inspection);
+
   const lastEmittedDataRef = useRef<ChecklistData | null>(null);
 
-  // Sync if currentInspector updates after mount
+  // Sync if leadInspectorName updates after mount
   useEffect(() => {
-    if (currentInspector && !formData.lead_inspector) {
-      setFormData(prev => ({ ...prev, lead_inspector: currentInspector }));
+    if (leadInspectorName && !formData.lead_inspector) {
+      setFormData(prev => ({ ...prev, lead_inspector: leadInspectorName }));
     }
-  }, [currentInspector, formData.lead_inspector]);
+  }, [leadInspectorName, formData.lead_inspector]);
 
   // Re-hydrate formData whenever initialData changes from parent state/API payload
   useEffect(() => {
@@ -152,7 +159,7 @@ export default function InspectionChecklistForm({
           ...prev,
           ...initialData,
           inspected_site_name: initialData.inspected_site_name || initialData.company_name || prev.inspected_site_name,
-          lead_inspector: resolveInitialInspector(initialData, currentInspector) || prev.lead_inspector,
+          lead_inspector: resolveInitialInspector(initialData, leadInspectorName) || prev.lead_inspector,
           notificationEmail: resolvedEmail || prev.notificationEmail,
           site_contact_details: {
             phone: initialData.site_contact_details?.phone ?? initialData.phone ?? prev.site_contact_details.phone,
@@ -170,7 +177,7 @@ export default function InspectionChecklistForm({
         }));
       }
     }
-  }, [initialData, currentInspector]);
+  }, [initialData, leadInspectorName]);
 
   useEffect(() => {
     if (onChange) {
@@ -285,7 +292,7 @@ export default function InspectionChecklistForm({
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Inspection Date(s)</label>
-                  <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.inspection_dates} onChange={e => setFormData({...formData, inspection_dates: e.target.value})} />
+                  <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={scheduledDate} onChange={e => setFormData({...formData, inspection_dates: e.target.value})} />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Inspection Type</label>
@@ -294,6 +301,7 @@ export default function InspectionChecklistForm({
                     <option value="PRI">Pre-Registration Inspection (PRI)</option>
                     <option value="RI">Routine Inspection (RI)</option>
                     <option value="FUI">Follow-Up / CAPA Verification (FUI)</option>
+                    <option value="REN">Renewal (REN)</option>
                   </select>
                 </div>
               </div>

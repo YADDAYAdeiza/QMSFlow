@@ -1,31 +1,27 @@
-// utils/supabaseUpload.ts
+// src/lib/utils/supabaseUpload.ts
 import { createClient } from '@/lib/supabase';
 
 export type CompanySubFolder = 
   | '01_Local_Inspection_Reports'
   | '02_Dossiers'
   | '03_Certificates'
-  | '04_Correspondence';
+  | '04_Correspondence'
+  | '05_CAPA_Evidence'; // Added dedicated folder
 
 /**
- * Helper to construct standardized, safe storage paths inside the documents bucket.
- * Example output: "companies/COMP-2026-0042/01_Local_Inspection_Reports/Local_Inspection_Report_DER80006.pdf"
+ * Constructs standardized, safe storage paths inside the documents bucket.
  */
 export function buildCompanyFilePath(
   companyId: string,
   folder: CompanySubFolder,
   fileName: string
 ): string {
-  // Sanitize companyId and fileName to prevent path traversal issues
   const cleanCompanyId = companyId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
   const cleanFileName = fileName.trim().replace(/[^a-zA-Z0-9_.-]/g, '_');
   
   return `companies/${cleanCompanyId}/${folder}/${cleanFileName}`;
 }
 
-/**
- * Returns the public access URL for a file stored in a Supabase storage bucket.
- */
 export function getStoragePublicUrl(bucketName: string, path: string): string {
   const supabase = createClient();
   const { data } = supabase.storage.from(bucketName).getPublicUrl(path);
@@ -33,17 +29,17 @@ export function getStoragePublicUrl(bucketName: string, path: string): string {
 }
 
 /**
- * Uploads a file to the 'documents' bucket and returns its public URL.
+ * Primary function for uploading any file/document to the 'documents' bucket.
  */
-export async function uploadDossierPdf(file: File | Blob, path: string): Promise<string> {
+export async function uploadDossierFile(file: File | Blob, path: string): Promise<string> {
   const supabase = createClient();
 
   const { data, error } = await supabase.storage
-    .from('documents') // Updated to lowercase 'documents'
+    .from('documents')
     .upload(path, file, {
       cacheControl: '3600',
       upsert: true,
-      contentType: 'application/pdf'
+      contentType: file.type || 'application/pdf'
     });
 
   if (error) {
@@ -52,3 +48,8 @@ export async function uploadDossierPdf(file: File | Blob, path: string): Promise
 
   return getStoragePublicUrl('documents', data.path);
 }
+
+/**
+ * Alias export to support existing components like GMPReportWorkspace.tsx
+ */
+export const uploadDossierPdf = uploadDossierFile;

@@ -68,6 +68,8 @@ interface WorkspaceProps {
   globalStructuralRole?: string; // Organizational base role passed from parent page
   notificationEmail?: string;     // Passed from parent JSX call
   applicantEmail?: string;        // Fallback/Alias
+  scheduledDate?: string;         // Scheduled inspection date passed from parent page
+  leadInspectorName?: string;     // Lead Inspector name passed from parent page
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps;
   initialReportHtml?: string | null;
   initialChecklistSnapshot?: any;
@@ -92,6 +94,8 @@ export default function GMPReportWorkspace({
   globalStructuralRole = "",
   notificationEmail = "",
   applicantEmail = "",
+  scheduledDate = "",
+  leadInspectorName = "",
   initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
   initialReportHtml = null,
   initialChecklistSnapshot = null,
@@ -738,7 +742,9 @@ export default function GMPReportWorkspace({
             {/* Checklist Matrix Form Component */}
             <InspectionChecklistForm
               initialData={checklistSnapshot}
+              scheduledDate={scheduledDate}
               notificationEmail={resolvedNotificationEmail}
+              leadInspectorName
               onSave={handleAICorrelationCompile}
               onSaveDraft={handleSaveDraft}
               onChange={(updatedData: any) => setChecklistSnapshot(updatedData)}

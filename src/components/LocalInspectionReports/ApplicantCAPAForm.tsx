@@ -25,6 +25,39 @@ import {
   Loader2,
   Printer,
 } from "lucide-react";
+import { buildCompanyFilePath, uploadDossierFile } from "@/lib/utils/supabaseUpload";
+
+// Place this outside or inside ApplicantCAPAForm
+const getCategoryBadge = (category?: string) => {
+  const cat = category?.toUpperCase();
+
+  switch (cat) {
+    case "CRITICAL":
+      return (
+        <span className="px-2 py-0.5 text-xs font-semibold rounded bg-red-100 text-red-800 border border-red-200">
+          Critical
+        </span>
+      );
+    case "MAJOR":
+      return (
+        <span className="px-2 py-0.5 text-xs font-semibold rounded bg-amber-100 text-amber-800 border border-amber-200">
+          Major
+        </span>
+      );
+    case "MINOR":
+      return (
+        <span className="px-2 py-0.5 text-xs font-semibold rounded bg-blue-100 text-blue-800 border border-blue-200">
+          Minor
+        </span>
+      );
+    default:
+      return (
+        <span className="px-2 py-0.5 text-xs font-medium rounded bg-slate-100 text-slate-600 border border-slate-200">
+          {category || "Unassigned"}
+        </span>
+      );
+  }
+};
 
 // --- TYPES & INTERFACES ---
 
@@ -74,10 +107,10 @@ export interface ApplicantCAPAFormProps {
   inspectionTitle?: string;
   inspectionDate?: string;
   initialObservations?: InspectionObservation[];
-  initialItems?: CAPAItem[];
-  onSaveDraft?: (data: { items: CAPAItem[]; summary: CAPASummary }) => Promise<void> | void;
-  onSubmit?: (data: { items: CAPAItem[]; summary: CAPASummary }) => Promise<void> | void;
-  onApproveAndSign?: (data: { items: CAPAItem[]; summary: CAPASummary }) => Promise<void> | void;
+  initialItems?: CAPAItem[] | string; // Accepts array or raw JSON string from Supabase
+  onSaveDraft?: (data: { items: CAPAItem[]; summary: CAPASummary; jsonPayload: string }) => Promise<void> | void;
+  onSubmit?: (data: { items: CAPAItem[]; summary: CAPASummary; jsonPayload: string }) => Promise<void> | void;
+  onApproveAndSign?: (data: { items: CAPAItem[]; summary: CAPASummary; jsonPayload: string }) => Promise<void> | void;
   onFileUpload?: (file: File, itemId: string) => Promise<EvidenceFile>;
   onBack?: () => void;
   isSubmitting?: boolean;
@@ -104,11 +137,24 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
     },
     ref
   ) => {
-    // 1. DYNAMIC INITIAL STATE MAPPER
+    // 1. DYNAMIC INITIAL STATE MAPPER (Handles String JSON from Supabase)
     const [items, setItems] = useState<CAPAItem[]>(() => {
-      // If full pre-populated CAPA items exist, use them
-      if (initialItems && initialItems.length > 0) {
-        return initialItems;
+      let parsedItems: CAPAItem[] = [];
+
+      // Parse initial JSON from Supabase if it arrives as a string
+      if (typeof initialItems === "string") {
+        try {
+          parsedItems = JSON.parse(initialItems);
+        } catch (e) {
+          console.error("Failed to parse initialItems JSON string:", e);
+        }
+      } else if (Array.isArray(initialItems)) {
+        parsedItems = initialItems;
+      }
+
+      // If valid pre-populated CAPA items exist, return them
+      if (parsedItems && parsedItems.length > 0) {
+        return parsedItems;
       }
 
       // Map incoming raw observations to CAPA items
@@ -128,12 +174,12 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
         }));
       }
 
-      // Default fallback if no observations are passed in
+      // Default fallback if no observations or items exist
       return [
         {
-          id: "default-1",
+          id: `obs_${Date.now()}`,
           deficiency: "",
-          deficiencyCategory: "Major",
+          deficiencyCategory: "Minor",
           rootCause: "",
           proposedCorrection: "",
           preventiveAction: "",
@@ -149,7 +195,56 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
     const [activeItemIndex, setActiveItemIndex] = useState<number>(0);
     const [activeTab, setActiveTab] = useState<string>("editor");
     const [isApproving, setIsApproving] = useState<boolean>(false);
+    const [isSavingLocal, setIsSavingLocal] = useState<boolean>(false);
     const [uploadingId, setUploadingId] = useState<string | null>(null);
+    const [isSubmittingLocal, setIsSubmittingLocal] = useState<boolean>(false);
+
+    const activeSubmitting = isSubmitting || isSubmittingLocal;
+
+
+    
+    // --- FILE UPLOAD HANDLER ---
+     const handleFileUpload = async (
+        itemId: string, 
+        event: React.ChangeEvent<HTMLInputElement>
+      ) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+          setUploadingId(itemId);
+
+          const fileExt = file.name.split('.').pop() || 'pdf';
+          const cleanFileName = `capa_evidence_${itemId}_${Date.now()}.${fileExt}`;
+          
+          // Routed to the dedicated 05_CAPA_Evidence folder
+          const storagePath = buildCompanyFilePath(
+            referenceNumber || "GENERAL_CAPA", 
+            "05_CAPA_Evidence", 
+            cleanFileName
+          );
+
+          // Uploads directly to the lowercase 'documents' bucket
+          const publicUrl = await uploadDossierFile(file, storagePath);
+
+          setItems((prevItems) =>
+            prevItems.map((item) =>
+              item.id === itemId
+                ? { ...item, uploadedEvidenceUrl: publicUrl }
+                : item
+            )
+          );
+
+          alert("✅ CAPA evidence document uploaded successfully!");
+        } catch (error: any) {
+          console.error("CAPA evidence upload failed:", error);
+          alert(`Upload Error: ${error.message || "Failed to upload file to storage."}`);
+        } finally {
+          setUploadingId(null);
+          event.target.value = "";
+        }
+      };
+
 
     const currentFormattedDate = useMemo(() => {
       return new Date().toLocaleDateString("en-GB", {
@@ -195,18 +290,19 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
     // Add new blank item
     const handleAddItem = () => {
       const newItem: CAPAItem = {
-        id: `custom-${Date.now()}`,
+        id: `obs_${Date.now()}`,
         deficiency: "",
-        deficiencyCategory: "Major",
+        deficiencyCategory: "Minor",
         rootCause: "",
         proposedCorrection: "",
         preventiveAction: "",
         indicatorsForCompletion: "",
-        timeline: "30 Days",
-        responsiblePerson: "QA Manager",
+        timeline: "",
+        responsiblePerson: "",
         status: "Pending",
         evidenceFiles: [],
       };
+
       setItems((prev) => [...prev, newItem]);
       setActiveItemIndex(items.length);
     };
@@ -217,61 +313,31 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
       setItems((prev) => prev.filter((item) => item.id !== id));
     };
 
-    // File upload handler
-    const handleFileUpload = async (itemId: string, e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-
-      setUploadingId(itemId);
+    // SAVE DRAFT HANDLER (Passes stringified JSON for Supabase UPDATE)
+    const handleSaveDraft = async () => {
+      if (!onSaveDraft) return;
+      setIsSavingLocal(true);
       try {
-        const fileList = Array.from(files);
-        for (const file of fileList) {
-          let uploadedFile: EvidenceFile;
-
-          if (onFileUpload) {
-            uploadedFile = await onFileUpload(file, itemId);
-          } else {
-            // Local fallback simulation if no remote handler provided
-            uploadedFile = {
-              name: file.name,
-              url: URL.createObjectURL(file),
-              size: file.size,
-              uploadedAt: new Date().toISOString(),
-            };
-          }
-
-          setItems((prev) =>
-            prev.map((item) => {
-              if (item.id === itemId) {
-                return {
-                  ...item,
-                  evidenceFiles: [...(item.evidenceFiles || []), uploadedFile],
-                };
-              }
-              return item;
-            })
-          );
-        }
-      } catch (err) {
-        console.error("Error uploading evidence document:", err);
+        const jsonPayload = JSON.stringify(items);
+        await onSaveDraft({ items, summary: internalSummary, jsonPayload });
       } finally {
-        setUploadingId(null);
-        e.target.value = "";
+        setIsSavingLocal(false);
       }
     };
 
-    // Remove file handle
-    const handleRemoveFile = (itemId: string, fileIdx: number) => {
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.id === itemId) {
-            const nextFiles = [...(item.evidenceFiles || [])];
-            nextFiles.splice(fileIdx, 1);
-            return { ...item, evidenceFiles: nextFiles };
-          }
-          return item;
-        })
-      );
+    // SUBMIT HANDLER (Passes stringified JSON for Supabase UPDATE)
+    const handleSubmitForm = async () => {
+      if (!onSubmit || activeSubmitting) return;
+
+      setIsSubmittingLocal(true);
+      try {
+        const jsonPayload = JSON.stringify(items);
+        await onSubmit({ items, summary: internalSummary, jsonPayload });
+      } catch (err) {
+        console.error("Error submitting CAPA plan:", err);
+      } finally {
+        setIsSubmittingLocal(false);
+      }
     };
 
     // Final Approval Handler
@@ -279,25 +345,10 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
       if (!onApproveAndSign) return;
       setIsApproving(true);
       try {
-        await onApproveAndSign({ items, summary: internalSummary });
+        const jsonPayload = JSON.stringify(items);
+        await onApproveAndSign({ items, summary: internalSummary, jsonPayload });
       } finally {
         setIsApproving(false);
-      }
-    };
-
-    // Badge styling helper
-    const categoryBadge = (cat: DeficiencyCategory) => {
-      switch (cat) {
-        case "Critical":
-          return <Badge className="bg-red-600 text-white hover:bg-red-700">Critical</Badge>;
-        case "Major":
-          return <Badge className="bg-amber-600 text-white hover:bg-amber-700">Major</Badge>;
-        case "Minor":
-          return <Badge className="bg-blue-600 text-white hover:bg-blue-700">Minor</Badge>;
-        case "Recommendation":
-          return <Badge className="bg-slate-600 text-white hover:bg-slate-700">Recommendation</Badge>;
-        default:
-          return <Badge variant="outline">{cat}</Badge>;
       }
     };
 
@@ -332,11 +383,11 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
             {onSubmit && (
               <Button 
-                onClick={() => onSubmit({ items, summary: internalSummary })}
-                disabled={isSubmitting || isApproving}
+                onClick={handleSubmitForm}
+                disabled={activeSubmitting || isApproving || isSavingLocal}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
               >
-                {isSubmitting ? (
+                {activeSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     Submitting...
@@ -451,7 +502,8 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                     >
                       <div className="flex justify-between items-start mb-1.5">
                         <span className="text-xs font-bold text-slate-500">Item #{index + 1}</span>
-                        {categoryBadge(item.deficiencyCategory)}
+                        <span className="text-xs font-bold text-slate-500">Item #{index + 1}</span>
+                          {getCategoryBadge(item.deficiencyCategory)}
                       </div>
                       <p className="text-sm font-medium text-slate-800 line-clamp-2">
                         {item.deficiency || <span className="text-slate-400 italic">No deficiency specified...</span>}

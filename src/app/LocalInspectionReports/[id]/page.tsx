@@ -1,7 +1,7 @@
 // @/app/dashboard/local-reports/[id]/page.tsx
 import { db } from "@/db";
-import { applications, companies, qmsTimelines, inspectionSchedules, inspectionTeamAssignments } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { applications, companies, qmsTimelines, inspectionSchedules, inspectionTeamAssignments, users as dbUsers } from "@/db/schema";
+import { eq, desc, and, or, inArray } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import GMPReportWorkspace from "@/components/LocalInspectionReports/GMPReportWorkspace";
@@ -62,7 +62,7 @@ export default async function LocalReportPage({ params }: PageProps) {
     notFound();
   }
 
-  // 1. Fetch baseline tracking parameters and the details JSON config
+  // 1. Fetch baseline tracking parameters, company details, AND scheduled_date from inspectionSchedules
   const appData = await db
     .select({
       id: applications.id,
@@ -70,13 +70,16 @@ export default async function LocalReportPage({ params }: PageProps) {
       type: applications.type,
       companyId: applications.companyId,
       companyName: companies.name,
-      companyAddress: companies.address, // Added as secondary safety net
+      companyAddress: companies.address,
       details: applications.details,
       currentPoint: applications.currentPoint,
       status: applications.status,
+      scheduledDate: inspectionSchedules.scheduledDate,
+      scheduleId: inspectionSchedules.id, // Needed for team query below
     })
     .from(applications)
     .leftJoin(companies, eq(applications.companyId, companies.id))
+    .leftJoin(inspectionSchedules, eq(inspectionSchedules.applicationId, applications.id))
     .where(eq(applications.id, numericId))
     .limit(1);
 
@@ -86,30 +89,45 @@ export default async function LocalReportPage({ params }: PageProps) {
     notFound();
   }
 
-  // 🛡️ 2. Dynamic Assignment Role Retrieval
-  const assignmentData = await db
+  // Format scheduled_date if present (e.g., "2026-07-27")
+  const scheduledDate = application.scheduledDate 
+    ? new Date(application.scheduledDate).toISOString().split("T")[0] 
+    : "";
+
+  // 🛡️ 2. Dynamic Assignment Role Retrieval & Team Lead Fetching
+  const teamAssignments = await db
     .select({
       role: inspectionTeamAssignments.role,
+      inspectorId: inspectionTeamAssignments.inspectorId,
     })
     .from(inspectionTeamAssignments)
     .innerJoin(
       inspectionSchedules, 
       eq(inspectionTeamAssignments.scheduleId, inspectionSchedules.id)
     )
-    .where(
-      and(
-        eq(inspectionSchedules.applicationId, numericId),
-        eq(inspectionTeamAssignments.inspectorId, user.id)
-      )
-    )
-    .limit(1);
+    .where(eq(inspectionSchedules.applicationId, numericId));
 
-  console.log('This is applications: ', application);
+  // Determine current user's role on this active schedule
+  const currentUserAssignment = teamAssignments.find(t => t.inspectorId === user.id);
+  const dynamicAssignmentRole = currentUserAssignment?.role || "CO_INSPECTOR";
 
-  // Fallback to "CO_INSPECTOR" if no explicit schedule assignment is found in the ledger yet
-  const dynamicAssignmentRole = assignmentData[0]?.role || "CO_INSPECTOR";
+  // Identify the Lead Inspector from team assignments
+  const leadAssignment = teamAssignments.find(
+    t => t.role === "LEAD_INSPECTOR" || t.role === "TEAM_LEADER"
+  );
 
-  // 3. Fetch public global user configuration from your public.users table for names
+  let leadInspectorName = "";
+  if (leadAssignment?.inspectorId) {
+    const leadUserData = await supabase
+      .from("users")
+      .select("name, email")
+      .eq("id", leadAssignment.inspectorId)
+      .single();
+
+    leadInspectorName = leadUserData.data?.name || leadUserData.data?.email || "";
+  }
+
+  // 3. Fetch public global user configuration from public.users table for current active user
   const userData = await supabase
     .from("users")
     .select("name, role")
@@ -162,6 +180,7 @@ export default async function LocalReportPage({ params }: PageProps) {
   const initialComments = appDetails.comments || [];
   const initialReportHtml = appDetails.compiledReportHtml || null;
   const notificationEmail = appDetails.notificationEmail || "";
+  const inspectionTypeMeta = appDetails.inspectionTypeMeta || "";
   
   const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey 
     || application.currentPoint 
@@ -187,12 +206,15 @@ export default async function LocalReportPage({ params }: PageProps) {
     return productNames ? `${lineName} (${productNames})` : lineName;
   });
 
-  // 📦 Bundling notificationEmail neatly into the snapshot construct
+  // 📦 Bundling notificationEmail, scheduled_date, & lead_inspector into initial snapshot
   const initialChecklistSnapshot = activeSnapshot 
     ? {
         ...BASE_CHECKLIST_TEMPLATE,
+        inspection_dates: activeSnapshot.inspection_dates || scheduledDate,
+        lead_inspector: activeSnapshot.lead_inspector || leadInspectorName, // 👈 Pre-fills Lead Inspector
         ...activeSnapshot,
         notificationEmail: activeSnapshot.notificationEmail || notificationEmail,
+        inspectionTypeMeta,
         site_contact_details: {
           ...BASE_CHECKLIST_TEMPLATE.site_contact_details,
           email: notificationEmail,
@@ -205,7 +227,10 @@ export default async function LocalReportPage({ params }: PageProps) {
       }
     : {
         ...BASE_CHECKLIST_TEMPLATE,
+        inspection_dates: scheduledDate,
+        lead_inspector: leadInspectorName, // 👈 Pre-fills Lead Inspector
         notificationEmail,
+        inspectionTypeMeta,
         site_contact_details: {
           ...BASE_CHECKLIST_TEMPLATE.site_contact_details,
           email: notificationEmail
@@ -215,8 +240,6 @@ export default async function LocalReportPage({ params }: PageProps) {
         report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`,
         final_recommendation: "PENDING"
       };
-
-  // console.log('This is appdetails: ', appDetails);
 
   return (
     <div className="bg-slate-50 min-h-screen py-6">
@@ -229,6 +252,8 @@ export default async function LocalReportPage({ params }: PageProps) {
         activeUserRole={dynamicAssignmentRole} 
         globalStructuralRole={structuralBaseRole} 
         notificationEmail={notificationEmail}
+        scheduledDate={scheduledDate}
+        leadInspectorName={leadInspectorName} // 👈 Passed down directly here
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}
         initialChecklistSnapshot={initialChecklistSnapshot}
