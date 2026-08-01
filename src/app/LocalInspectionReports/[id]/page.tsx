@@ -83,6 +83,7 @@ export default async function LocalReportPage({ params }: PageProps) {
     .where(eq(applications.id, numericId))
     .limit(1);
 
+    console.log('This is appData[0] ', appData[0]);
   const application = appData[0];
 
   if (!application) {

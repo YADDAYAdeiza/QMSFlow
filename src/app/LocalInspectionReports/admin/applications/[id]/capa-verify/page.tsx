@@ -184,117 +184,129 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
     setCapaItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
   };
 
-  const handleFinalAdjudication = async (finalLifecycleStatus: "VERIFIED_PASSED" | "REJECTED_REWORK") => {
-    if (!applicationId) return;
-    
-    const appStatusMap = {
-      VERIFIED_PASSED: "CAPA_APPROVED",
-      REJECTED_REWORK: "CAPA_REWORK_REQUIRED"
-    };
+const handleFinalAdjudication = async (finalLifecycleStatus: "VERIFIED_PASSED" | "REJECTED_REWORK") => {
+  if (!applicationId) return;
 
-    const currentAction = finalLifecycleStatus === "VERIFIED_PASSED" ? "APPROVING" : "REJECTING";
+  const appStatusMap = {
+    VERIFIED_PASSED: "CAPA_APPROVED",
+    REJECTED_REWORK: "CAPA_REWORK_REQUIRED",
+  };
+
+  const currentAction = finalLifecycleStatus === "VERIFIED_PASSED" ? "APPROVING" : "REJECTING";
+
+  try {
+    setSubmittingAction(currentAction);
+
+    // Build updated items payload while explicitly preserving field states (including deficiencyCategory)
+    const updatedCapaItems = capaItems.map((item) => {
+      // Safely compute cycle increment
+      const safeHistory = item.history || [];
+      const lastCycle = safeHistory.length > 0 
+        ? safeHistory.reduce((max, h) => Math.max(max, h.cycle || 1), 1) 
+        : 1;
+
+      const currentRuling = item.inspectorStatus || "Acceptable";
+      const currentRemarks = item.inspectorRemarks || "No additional commentary provided.";
+
+      const newInspectorEntry: AuditHistoryEntry = {
+        cycle: lastCycle,
+        timestamp: new Date().toISOString(),
+        authorRole: "INSPECTOR",
+        authorName: "Divisional Deputy Director",
+        statusRuling: currentRuling,
+        remarks: currentRemarks,
+      };
+
+      // Safeguard against snake_case vs camelCase key loss
+      const category = item.deficiencyCategory || (item as any).deficiency_category || "Minor";
+
+      return {
+        ...item,
+        deficiencyCategory: category,
+        history: [...safeHistory, newInspectorEntry],
+      };
+    });
+
+    // Debug check: verify payload prior to transmission
+    console.log("Transmitting updated capa_items:", updatedCapaItems);
+
+    // 1. Update the ledger entry in database
+    const { error: capaError } = await supabase
+      .from("capa_submissions")
+      .update({
+        capa_items: updatedCapaItems,
+        status: finalLifecycleStatus,
+      })
+      .eq("application_id", parseInt(applicationId, 10));
+
+    if (capaError) throw capaError;
+
+    // 2. Synchronize core Application status
+    const { error: appError } = await supabase
+      .from("applications")
+      .update({
+        status: appStatusMap[finalLifecycleStatus],
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", parseInt(applicationId, 10));
+
+    if (appError) throw appError;
+
+    // 3. Dispatch outbound mail notification
+    const targetEmail = applicantEmail || "hiscript@gmail.com";
 
     try {
-      setSubmittingAction(currentAction);
+      const isPassed = finalLifecycleStatus === "VERIFIED_PASSED";
+      const emailSubject = isPassed 
+        ? `✅ CAPA Approved & Closed — Application ID: ${applicationId}`
+        : `⚠️ CAPA Rework Required — Application ID: ${applicationId}`;
 
-      // Append current evaluation session to the item's audit timeline
-      const updatedCapaItems = capaItems.map((item) => {
-        const lastCycle = item.history.reduce((max, h) => Math.max(max, h.cycle), 1);
-        const currentRuling = item.inspectorStatus || "Acceptable";
-        const currentRemarks = item.inspectorRemarks || "No additional commentary provided.";
+      const emailBody = isPassed 
+        ? `
+            <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
+              <h2 style="color: #047857; margin-top: 0;">CAPA Verification Complete</h2>
+              <p>Dear Stakeholder,</p>
+              <p>We are pleased to inform you that your Corrective and Preventive Action (CAPA) framework has been fully verified and passed by the Directorate.</p>
+              <p><strong>Reference File:</strong> ${submissionData?.ref_number || "—"}</p>
+              <p>The ledger is now officially closed, and your application workflow has progressed into the next operational phase.</p>
+            </div>
+          `
+        : `
+            <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
+              <h2 style="color: #be123c; margin-top: 0;">CAPA Rework Required</h2>
+              <p>Dear Stakeholder,</p>
+              <p>Your CAPA checklist has been reviewed by the Divisional Deputy Director and returned for mandatory corrections.</p>
+              <p><strong>Reference File:</strong> ${submissionData?.ref_number || "—"}</p>
+              <p>Please log back into your dashboard workspace to review specific line-item inspector remarks, update your structural remedies, and re-transmit your ledger for review.</p>
+              <br />
+              <a href="${window.location.origin}/LocalInspectionReports/applicant/applications/${applicationId}/capa" 
+                style="background-color: #be123c; color: white; padding: 12px 20px; text-decoration: none; font-weight: bold; display: inline-block; border-radius: 6px;">
+                Open CAPA Workspace
+              </a>
+            </div>
+          `;
 
-        const newInspectorEntry: AuditHistoryEntry = {
-          cycle: lastCycle,
-          timestamp: new Date().toISOString(),
-          authorRole: "INSPECTOR",
-          authorName: "Divisional Deputy Director",
-          statusRuling: currentRuling,
-          remarks: currentRemarks,
-        };
-
-        return {
-          ...item,
-          history: [...item.history, newInspectorEntry],
-        };
+      await fetch("/api/LocalInspectionReports/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: targetEmail,
+          subject: emailSubject,
+          html: emailBody,
+        }),
       });
-
-      // 1. Update the ledger entry in database (removed updated_at)
-      const { error: capaError } = await supabase
-        .from("capa_submissions")
-        .update({
-          capa_items: updatedCapaItems,
-          status: finalLifecycleStatus,
-        })
-        .eq("application_id", parseInt(applicationId, 10));
-
-      if (capaError) throw capaError;
-
-      // 2. Synchronize core Application status (assuming applications table HAS updated_at)
-      const { error: appError } = await supabase
-        .from("applications")
-        .update({
-          status: appStatusMap[finalLifecycleStatus],
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", parseInt(applicationId, 10));
-
-      if (appError) throw appError;
-
-      // 3. Dispatch outbound mail using fetched email
-      const targetEmail = applicantEmail || "hiscript@gmail.com";
-
-      try {
-        const isPassed = finalLifecycleStatus === "VERIFIED_PASSED";
-        const emailSubject = isPassed 
-          ? `✅ CAPA Approved & Closed — Application ID: ${applicationId}`
-          : `⚠️ CAPA Rework Required — Application ID: ${applicationId}`;
-
-        const emailBody = isPassed 
-          ? `
-              <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
-                <h2 style="color: #047857; margin-top: 0;">CAPA Verification Complete</h2>
-                <p>Dear Stakeholder,</p>
-                <p>We are pleased to inform you that your Corrective and Preventive Action (CAPA) framework has been fully verified and passed by the Directorate.</p>
-                <p><strong>Reference File:</strong> ${submissionData?.ref_number || "—"}</p>
-                <p>The ledger is now officially closed, and your application workflow has progressed into the next operational phase.</p>
-              </div>
-            `
-          : `
-              <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
-                <h2 style="color: #be123c; margin-top: 0;">CAPA Rework Required</h2>
-                <p>Dear Stakeholder,</p>
-                <p>Your CAPA checklist has been reviewed by the Divisional Deputy Director and returned for mandatory corrections.</p>
-                <p><strong>Reference File:</strong> ${submissionData?.ref_number || "—"}</p>
-                <p>Please log back into your dashboard workspace to review specific line-item inspector remarks, update your structural remedies, and re-transmit your ledger for review.</p>
-                <br />
-                <a href="${window.location.origin}/LocalInspectionReports/applicant/applications/${applicationId}/capa" 
-                  style="background-color: #be123c; color: white; padding: 12px 20px; text-decoration: none; font-weight: bold; display: inline-block; border-radius: 6px;">
-                  Open CAPA Workspace
-                </a>
-              </div>
-            `;
-
-        await fetch("/api/LocalInspectionReports/send-email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            to: targetEmail,
-            subject: emailSubject,
-            html: emailBody,
-          }),
-        });
-      } catch (emailErr) {
-        console.error("Outbound notification failure:", emailErr);
-      }
-
-      alert(`⚖️ Adjudication finalized! Systems synchronized to: ${finalLifecycleStatus}`);
-      setCapaItems(updatedCapaItems);
-    } catch (err: any) {
-      console.error("Transmission error:", err);
-      alert(`Adjudication Sync Failed: ${err.message}`);
-    } finally {
-      setSubmittingAction(null);
+    } catch (emailErr) {
+      console.error("Outbound notification failure:", emailErr);
     }
+
+    alert(`⚖️ Adjudication finalized! Systems synchronized to: ${finalLifecycleStatus}`);
+    setCapaItems(updatedCapaItems);
+  } catch (err: any) {
+    console.error("Transmission error:", err);
+    alert(`Adjudication Sync Failed: ${err.message}`);
+  } finally {
+    setSubmittingAction(null);
+  }
 };
 
   if (loading) {

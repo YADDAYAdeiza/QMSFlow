@@ -365,13 +365,14 @@ export default function GMPReportWorkspace({
       const pdfFile = new File([pdfBlob], fileName, {
         type: "application/pdf"
       });
-
-      const targetCompanyId = checklistSnapshot?.company_id || checklistSnapshot?.company_rc_number || applicationId;
+      console.log('This is applicationId: ', applicationId);
+      console.log('This is companyId: ', companyId);
 
       const storagePath = buildCompanyFilePath(
-        targetCompanyId,
-        '01_Local_Inspection_Reports',
-        fileName
+        companyId,                         // 1st arg: companyId
+        '01_Local_Inspection_Reports',    // 2nd arg: folder
+        fileName,                          // 3rd arg: fileName
+        applicationId                    // 4th arg: applicationId
       );
 
       const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);

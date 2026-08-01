@@ -6,20 +6,35 @@ export type CompanySubFolder =
   | '02_Dossiers'
   | '03_Certificates'
   | '04_Correspondence'
-  | '05_CAPA_Evidence'; // Added dedicated folder
+  | '05_CAPA_Evidence';
 
 /**
  * Constructs standardized, safe storage paths inside the documents bucket.
+ * 
+ * Path structure:
+ * - If companyId exists:     companies/{companyId}/{applicationId}/{folder}/{fileName}
+ * - If companyId is missing: companies/{applicationId}/{folder}/{fileName}
  */
 export function buildCompanyFilePath(
-  companyId: string,
+  companyId: string | null | undefined,
   folder: CompanySubFolder,
-  fileName: string
+  fileName: string,
+  applicationId?: string
 ): string {
-  const cleanCompanyId = companyId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  const sanitize = (val: string) => val.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
   const cleanFileName = fileName.trim().replace(/[^a-zA-Z0-9_.-]/g, '_');
-  
-  return `companies/${cleanCompanyId}/${folder}/${cleanFileName}`;
+
+  const cleanCompanyId = companyId ? sanitize(companyId) : '';
+  const cleanAppId = applicationId ? sanitize(applicationId) : '';
+
+  // If both companyId and applicationId exist
+  if (cleanCompanyId && cleanAppId) {
+    return `companies/${cleanCompanyId}/${cleanAppId}/${folder}/${cleanFileName}`;
+  }
+
+  // If only companyId exists (or only applicationId exists)
+  const fallbackId = cleanCompanyId || cleanAppId;
+  return `companies/${fallbackId}/${folder}/${cleanFileName}`;
 }
 
 export function getStoragePublicUrl(bucketName: string, path: string): string {

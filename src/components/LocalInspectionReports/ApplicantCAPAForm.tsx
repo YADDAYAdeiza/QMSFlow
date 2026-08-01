@@ -132,6 +132,8 @@ export interface CAPASummary {
 }
 
 export interface ApplicantCAPAFormProps {
+  applicationId?:string
+  companyId?:string
   referenceNumber?: string;
   companyName?: string;
   facilityAddress?: string;
@@ -188,6 +190,8 @@ const normalizeRawCAPAItem = (raw: any, index: number): CAPAItem => {
 export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormProps>(
   (
     {
+      applicationId,
+      companyId,
       referenceNumber = "NAFDAC/VMAP/CAPA/2026/001",
       companyName = "Facility / Company Name",
       facilityAddress = "Facility Address",
@@ -232,6 +236,7 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
       // If valid pre-populated CAPA items exist, map & normalize them
       if (parsedItems && parsedItems.length > 0) {
+
         return parsedItems.map((raw, idx) => normalizeRawCAPAItem(raw, idx));
       }
 
@@ -278,6 +283,8 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
       ];
     });
 
+    console.log('This is items: ',items);
+
     const [dossierFiles, setDossierFiles] = useState<UploadedFile[]>([]);
     const [documentFiles, setDocumentFiles] = useState<UploadedFile[]>([]);
 
@@ -303,13 +310,14 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
         const fileExt = file.name.split(".").pop() || "pdf";
         const cleanFileName = `capa_evidence_${itemId}_${Date.now()}.${fileExt}`;
-
-        // Routed to the dedicated 05_CAPA_Evidence folder
+        const compIdStr = companyId !== undefined && companyId !== null ? String(companyId) : "GENERAL";
+        // const appIdStr = referenceNumber !== undefined && referenceNumber !== null ? String(referenceNumber) : "GENERAL";
         const storagePath = buildCompanyFilePath(
-          referenceNumber || "GENERAL_CAPA",
-          "05_CAPA_Evidence",
-          cleanFileName
-        );
+                      compIdStr,                         // 1st arg: companyId
+                      '05_CAPA_Evidence',    // 2nd arg: folder
+                      cleanFileName,                          // 3rd arg: fileName
+                      applicationId                    // 4th arg: applicationId
+                    )
 
         // Uploads directly to the lowercase 'documents' bucket
         const publicUrl = await uploadDossierFile(file, storagePath);

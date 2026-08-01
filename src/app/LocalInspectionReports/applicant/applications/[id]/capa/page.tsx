@@ -85,6 +85,15 @@ export default function DynamicCapaPage({ params }: PageProps) {
   const snapshotDetails = reportSnapshot?.details || {};
   const checklistSnapshot = snapshotDetails.savedChecklistSnapshot || {};
 
+  // Extract companyId directly from master applications table or fallback to snapshot keys
+  const companyId = 
+    reportSnapshot?.company_id || 
+    checklistSnapshot.company_id || 
+    checklistSnapshot.company_rc_number || 
+    checklistSnapshot.companyId || 
+    reportSnapshot?.company_rc_number || 
+    reportSnapshot?.companyId;
+
   const refNumber = checklistSnapshot.report_doc_number || reportSnapshot?.application_number || "PENDING-REF";
   const companyName = checklistSnapshot.inspected_site_name || "Orange Kalbe Limited";
   const companyAddress = checklistSnapshot.vicinity_assessment 
@@ -345,6 +354,8 @@ export default function DynamicCapaPage({ params }: PageProps) {
 
       <fieldset disabled={shouldLockForm} className="disabled:opacity-85 disabled:pointer-events-none">
         <ApplicantCAPAForm
+          applicationId={applicationId}
+          companyId={companyId}
           referenceNumber={refNumber}
           companyName={companyName}
           facilityAddress={companyAddress}

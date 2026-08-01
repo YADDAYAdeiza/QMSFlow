@@ -109,7 +109,14 @@ export async function POST(request: Request) {
             if (capaBuffer) {
               // Upload to Supabase Storage in '03_Certificates'
               const fileName = `CAPA_Directive_Letter_${applicationId}.pdf`;
-              const storagePath = buildCompanyFilePath(companyId, '03_Certificates', fileName);
+              // const storagePath = buildCompanyFilePath(companyId, '', fileName);
+
+              const storagePath = buildCompanyFilePath(
+                      companyId,                         // 1st arg: companyId
+                      '03_Certificates',    // 2nd arg: folder
+                      fileName,                          // 3rd arg: fileName
+                      applicationId                    // 4th arg: applicationId
+                    );
               const blob = new Blob([capaBuffer], { type: 'application/pdf' });
               
               generatedCapaUrl = await uploadDossierFile(blob, storagePath);
@@ -226,7 +233,13 @@ export async function POST(request: Request) {
             if (certBuffer) {
               // Upload to Supabase Storage in '03_Certificates'
               const fileName = `GMP_Certificate_${applicationId}.pdf`;
-              const storagePath = buildCompanyFilePath(companyId, '03_Certificates', fileName);
+              // const storagePath = buildCompanyFilePath(companyId, '03_Certificates', fileName);
+              const storagePath = buildCompanyFilePath(
+                      companyId,                         // 1st arg: companyId
+                      '03_Certificates',    // 2nd arg: folder
+                      fileName,                          // 3rd arg: fileName
+                      applicationId                    // 4th arg: applicationId
+                    )
               const blob = new Blob([certBuffer], { type: 'application/pdf' });
 
               generatedCertUrl = await uploadDossierFile(blob, storagePath);
