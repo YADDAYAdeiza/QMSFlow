@@ -118,6 +118,7 @@ export default function GMPReportWorkspace({
 
   // PDF render & Supabase storage tracking
   const [pdfStorageUrl, setPdfStorageUrl] = useState<string | null>(initialChecklistSnapshot?.pdfStorageUrl || null);
+  const [pdfCertificateUrl, setPdfCertificateUrl] = useState<string | null>(initialChecklistSnapshot?.pdfCertificateUrl || null);
   const [isRenderingPdf, setIsRenderingPdf] = useState(false);
 
   // ⏱️ QMS Performance Tracking
@@ -135,6 +136,10 @@ export default function GMPReportWorkspace({
   });
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
+
+  // Steps at which the generated PDF view is authorized and active
+  const stepsWithPdfPreview = ["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "FINALIZED"];
+  const isPdfViewAuthorized = stepsWithPdfPreview.includes(currentStep);
 
   // Manual simulation step switch handler
   const handleStepSwitch = (nextStepKey: string) => {
@@ -229,6 +234,7 @@ export default function GMPReportWorkspace({
       : checklistSnapshot?.productLines || [];
 
   // Structured application payload for CertificateOrCapaPreviewTab
+  console.log('This is resolvedAddress: ', resolvedAddress);
   const applicationData = {
     company_name: companyName,
     company_id: companyId,
@@ -275,7 +281,7 @@ export default function GMPReportWorkspace({
           savedByRole: activeUserRole,
           inspectionWorkflowMeta: {
             lastAction: "DRAFT_SAVE",
-            currentStepKey: "STAFF_TECHNICAL_REVIEW"
+            currentStepKey: currentStep
           }
         }),
       });
@@ -329,10 +335,10 @@ export default function GMPReportWorkspace({
     }
   };
 
-  const handleCommitPdfToStorage = async () => {
+  const handleCommitPdfToStorage = async (): Promise<string | null> => {
     if (!reportHtml) {
       alert("No compiled report content available to commit to PDF.");
-      return;
+      return null;
     }
 
     setIsRenderingPdf(true);
@@ -384,8 +390,10 @@ export default function GMPReportWorkspace({
       await handleSaveDraft(updatedSnapshot);
 
       alert("PDF successfully compiled and committed to Supabase 'Documents' bucket!");
+      return uploadedUrl;
     } catch (err: any) {
       alert(`PDF Storage Error: ${err.message}`);
+      return null;
     } finally {
       setIsRenderingPdf(false);
     }
@@ -405,31 +413,56 @@ export default function GMPReportWorkspace({
       return;
     }
 
+    // Time tracking for QMS audit compliance
     const now = Date.now();
     const durationSeconds = Math.round((now - stepEntryTime) / 1000);
 
     setIsSubmitting(true);
     try {
-      // 1. Maintain official notification & certificate dispatch on Director Final Sign-Off
+      // ------------------------------------------------------------------
+      // 1. DIRECTOR FINAL SIGN-OFF (PDF COMMIT & INTEGRATED ENDPOINT DISPATCH)
+      // ------------------------------------------------------------------
       if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
-        const transitionRes = await fetch("/api/LocalInspectionReports", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            applicationId,
-            currentStepKey: currentStep,
-            direction,
-            companyName,
-            facilityAddress: resolvedAddress,
-            productLines: resolvedProductLines,
-            notificationEmail: resolvedNotificationEmail,
-            remarks,
-            processingDurationSeconds: durationSeconds,
-            checklistSnapshot,
-            executedByUserId: activeUserId,
-            executedByUserRole: activeUserRole
-          })
-        });
+        let finalReportPdfUrl = pdfStorageUrl;
+
+        // Commit latest PDF to Supabase if not yet generated
+        if (!finalReportPdfUrl && typeof handleCommitPdfToStorage === "function") {
+          finalReportPdfUrl = await handleCommitPdfToStorage();
+        }
+
+        if (!finalReportPdfUrl) {
+          throw new Error("Primary Inspection Report PDF is missing or could not be committed to storage.");
+        }
+
+        // Inside handleTransition -> DIRECTOR_FINAL_SIGN_OFF block:
+
+    const transitionRes = await fetch("/api/LocalInspectionReports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        applicationId,
+        companyId: companyId || applicationId, // Ensures clean directory pathing for Supabase
+        currentStepKey: currentStep,
+        direction,
+        companyName,
+        facilityAddress: resolvedAddress,
+        productLines: resolvedProductLines,
+        notificationEmail: resolvedNotificationEmail,
+        remarks,
+        processingDurationSeconds: durationSeconds,
+        checklistSnapshot,
+        // Pass recommendation & observations explicitly if not in checklistSnapshot root
+        finalRecommendation: checklistSnapshot?.final_recommendation || recommendation,
+        observations: checklistSnapshot?.observations || observations || [],
+        executedByUserId: activeUserId,
+        executedByUserRole: activeUserRole,
+        
+        // Explicitly pass both URL references to satisfy route extraction logic
+        pdfStorageUrl: finalReportPdfUrl,
+        pdfReportUrl: finalReportPdfUrl,
+        pdfCertificateUrl: pdfCertificateUrl || null,
+      }),
+    });
 
         const transitionData = await transitionRes.json();
         if (!transitionRes.ok || !transitionData.success) {
@@ -437,16 +470,17 @@ export default function GMPReportWorkspace({
         }
       }
 
+      // ------------------------------------------------------------------
+      // 2. DIVISION & REWORK TARGET RESOLUTION
+      // ------------------------------------------------------------------
       const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division)
         ? activeStepConfig.division
-        : "VMD"; // Fallback division
+        : "VMD"; // Default fallback division
 
-      // 2. Define explicit target step for direct targeted rework jumps
       const targetStepKey = direction === "TARGETED_REWORK"
         ? (targetStepOverride || "STAFF_TECHNICAL_REVIEW")
         : undefined;
 
-      // Resolve assignedTeam directly from checklistSnapshot
       const assignedTeam =
         checklistSnapshot?.inspectionWorkflowMeta?.assignedTeam ||
         checklistSnapshot?.assignedTeam;
@@ -457,7 +491,9 @@ export default function GMPReportWorkspace({
         ? (selectedStaff || "next-desk-holder-id")
         : (teamLeaderId || "return-desk-holder-id");
 
-      // 3. Execute DB Transition Engine call
+      // ------------------------------------------------------------------
+      // 3. EXECUTE DB TRANSITION ENGINE CALL
+      // ------------------------------------------------------------------
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
         currentStepKey: currentStep,
@@ -467,7 +503,7 @@ export default function GMPReportWorkspace({
         actingUserRole: activeUserRole,
         actingUserName: `${expectedUserRaw} (${activeDivision})`,
         targetUserId: resolvedTargetUserId,
-        remarks
+        remarks,
       });
 
       if (res.success && "arrivedAt" in res && res.arrivedAt) {
@@ -491,10 +527,10 @@ export default function GMPReportWorkspace({
           timestamp: new Date().toISOString(),
           processingDurationSeconds: durationSeconds,
           actorId: activeUserId,
-          actorRole: activeUserRole
+          actorRole: activeUserRole,
         };
 
-        setCommentsList(prev => [newMinute, ...prev]);
+        setCommentsList((prev) => [newMinute, ...prev]);
         alert(`Dossier successfully routed in ${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s to: ${formatDeskTitle(targetStepTitle)}`);
 
         setRemarks("");
@@ -514,7 +550,7 @@ export default function GMPReportWorkspace({
     }
   };
 
-  return (
+return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
       {/* Simulation Rig Container */}

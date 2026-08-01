@@ -43,7 +43,7 @@ export interface ChecklistData {
 }
 
 interface ChecklistFormProps {
-  initialData?: Partial<ChecklistData> & Record<string, any> | null;
+  initialData?: Partial<ChecklistData> & Record<string, any> | null;  
   scheduledDate?: string; 
   leadInspectorName?: string;
   currentInspector?: string;
@@ -299,6 +299,7 @@ export default function InspectionChecklistForm({
                   <select disabled={isReadOnly} className="w-full border p-2 rounded bg-white text-xs font-medium text-slate-800" value={formData.type_of_inspection} onChange={e => setFormData({...formData, type_of_inspection: e.target.value})}>
                     <option value="PPI">Pre-Production Inspection (PPI)</option>
                     <option value="PRI">Pre-Registration Inspection (PRI)</option>
+                    <option value="GMP">GMP-Reassessment Inspection (GMP)</option>
                     <option value="RI">Routine Inspection (RI)</option>
                     <option value="FUI">Follow-Up / CAPA Verification (FUI)</option>
                     <option value="REN">Renewal (REN)</option>

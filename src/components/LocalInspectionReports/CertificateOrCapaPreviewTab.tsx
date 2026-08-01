@@ -30,6 +30,8 @@ export default function CertificateOrCapaPreviewTab({
     certificateData,
   } = extractInspectionData(applicationData, applicationId);
 
+  console.log('This is effectiveAddress ', effectiveAddress);
+
   const isCapaPending = finalRecommendation === "PENDING" || finalRecommendation === "CAPA_PENDING";
 
   // Replace this href string once you locate the exact route in your project

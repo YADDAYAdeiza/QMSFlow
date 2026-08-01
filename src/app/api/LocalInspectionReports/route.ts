@@ -4,7 +4,9 @@ import nodemailer from "nodemailer";
 import { renderToBuffer } from "@react-pdf/renderer";
 import React from "react";
 import GMPCertificateView from "@/components/LocalInspectionReports/GMPCertificateView";
+import CAPALetterView from "@/components/LocalInspectionReports/CAPALetterView"; 
 import { extractInspectionData } from "@/lib/utils/inspectionReportUtils";
+import { buildCompanyFilePath, uploadDossierFile } from "@/lib/utils/supabaseUpload";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
@@ -20,10 +22,34 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+/**
+ * Helper utility to fetch a remote PDF from storage (Supabase) and convert to Buffer for Nodemailer
+ */
+async function fetchRemotePdfBuffer(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch remote PDF. Status: ${res.status}`);
+    const arrayBuffer = await res.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (err) {
+    console.error(`[PDF Fetch Error] Could not retrieve PDF from URL: ${url}`, err);
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { applicationId, currentStepKey, direction } = body;
+    const { 
+      applicationId, 
+      currentStepKey, 
+      direction, 
+      pdfStorageUrl, 
+      pdfReportUrl,
+      pdfCertificateUrl 
+    } = body;
+
+    console.log('This is pdfCertificateUrl: ', pdfCertificateUrl);
 
     const {
       effectiveCompanyName,
@@ -35,17 +61,21 @@ export async function POST(request: Request) {
       certificateData
     } = extractInspectionData(body, applicationId);
 
-    console.log('This is certificateData: ', certificateData);
+    // Standard company ID fallback for directory paths
+    const companyId = body.companyId || body.company_id || effectiveCompanyName || "UNKNOWN_COMPANY";
 
+    console.log('This is certificateData: ', certificateData);
     console.log(`[QMS] Processing routing transition for App ID: ${applicationId} from Desk: ${currentStepKey}`);
 
     if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
+
+      const reportPdfUrl = pdfReportUrl || pdfStorageUrl;
 
       if (finalRecommendation === "PENDING" || finalRecommendation === "CAPA_PENDING") {
         /**
          * PATHWAY 1: ISSUING A CAPA DIRECTIVE
          */
-        console.log("🚨 CAPA Requirement detected. Preparing email dispatch...");
+        console.log("🚨 CAPA Requirement detected. Preparing dual-document email dispatch...");
 
         const applicantPortalUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/LocalInspectionReports/applicant/applications/${applicationId}/capa`;
 
@@ -54,6 +84,59 @@ export async function POST(request: Request) {
               ${observations.map((obs: any) => `<li><strong>[${obs.severity || "DEFICIENCY"}]</strong> ${obs.text || obs.description || obs}</li>`).join("")}
              </ul>`
           : `<p style="font-size: 13px; color: #64748b; font-style: italic;">Please log into the compliance tracking panel to review mapped observations.</p>`;
+
+        const attachments: any[] = [];
+        let generatedCapaUrl = pdfCertificateUrl;
+
+        // 1. Handle CAPA Letter Generation & Supabase Upload
+        if (pdfCertificateUrl) {
+          const capaRemoteBuffer = await fetchRemotePdfBuffer(pdfCertificateUrl);
+          if (capaRemoteBuffer) {
+            attachments.push({
+              filename: `CAPA_Directive_Letter_${applicationId}.pdf`,
+              content: capaRemoteBuffer,
+              contentType: "application/pdf"
+            });
+          }
+          console.log('Using first option...');
+        } else {
+          console.log('Using second option...');
+          try {
+            const capaBuffer = await renderToBuffer(
+              React.createElement(CAPALetterView, { data: { ...body, certificateData, observations } }) as any
+            );
+
+            if (capaBuffer) {
+              // Upload to Supabase Storage in '03_Certificates'
+              const fileName = `CAPA_Directive_Letter_${applicationId}.pdf`;
+              const storagePath = buildCompanyFilePath(companyId, '03_Certificates', fileName);
+              const blob = new Blob([capaBuffer], { type: 'application/pdf' });
+              
+              generatedCapaUrl = await uploadDossierFile(blob, storagePath);
+              console.log(`[Supabase Storage] CAPA Letter saved to: ${generatedCapaUrl}`);
+
+              attachments.push({
+                filename: fileName,
+                content: capaBuffer,
+                contentType: "application/pdf"
+              });
+            }
+          } catch (pdfErr) {
+            console.error("CAPA Letter PDF Buffer / Upload Warning:", pdfErr);
+          }
+        }
+
+        // 2. Fetch and attach Primary Inspection Report PDF
+        if (reportPdfUrl) {
+          const reportBuffer = await fetchRemotePdfBuffer(reportPdfUrl);
+          if (reportBuffer) {
+            attachments.push({
+              filename: `Inspection_Report_${applicationId}.pdf`,
+              content: reportBuffer,
+              contentType: "application/pdf"
+            });
+          }
+        }
 
         const mailOptions = {
           from: `"NAFDAC VMAP Directorate" <${process.env.SMTP_USER}>`,
@@ -79,7 +162,7 @@ export async function POST(request: Request) {
                   ${observationListHtml}
                 </div>
                 <p style="font-size: 13px; color: #334155; line-height: 1.6; margin-bottom: 24px;">
-                  You are hereby directed to compile and submit a comprehensive <strong>Corrective and Preventive Action (CAPA)</strong> response addressing these items within <strong>thirty (30) calendar days</strong>.
+                  You are hereby directed to compile and submit a comprehensive <strong>Corrective and Preventive Action (CAPA)</strong> response addressing these items within <strong>thirty (30) calendar days</strong>. Your official CAPA Directive Letter and Primary Inspection Report are attached to this email.
                 </p>
                 <div style="text-align: center; margin-bottom: 32px;">
                   <a href="${applicantPortalUrl}" style="background-color: #d97706; color: #ffffff; text-decoration: none; padding: 12px 24px; font-size: 13px; font-weight: bold; border-radius: 6px; display: inline-block;">
@@ -94,15 +177,17 @@ export async function POST(request: Request) {
               </div>
             </div>
           `,
+          attachments,
         };
 
         const mailResult = await transporter.sendMail(mailOptions);
-        console.log(`[SMTP] CAPA email dispatched: ${mailResult.messageId}`);
+        console.log(`[SMTP] CAPA email with attachments dispatched: ${mailResult.messageId}`);
 
         return NextResponse.json({
           success: true,
           arrivedAt: "APPLICANT_HUB_CAPA",
-          message: "Dossier routed to CAPA hub and notification email dispatched."
+          capaUrl: generatedCapaUrl,
+          message: "Dossier routed to CAPA hub; CAPA directive letter saved to storage and dispatched."
         });
 
       } else {
@@ -114,18 +199,60 @@ export async function POST(request: Request) {
         const productLinesHtml = extractedLines.length > 0
           ? extractedLines.map((line: any) => `
               <li style="margin-bottom: 8px;">
-                <strong>${line.lineName || line.name || line}</strong>
+                <strong>${line}</strong>
               </li>
             `).join("")
           : "<li>General Finished Product Manufacturing Line</li>";
 
-        let pdfBuffer: Buffer | null = null;
-        try {
-          pdfBuffer = await renderToBuffer(
-            React.createElement(GMPCertificateView, { data: certificateData }) as any
-          );
-        } catch (pdfErr) {
-          console.error("PDF Buffer Rendering Warning:", pdfErr);
+        const attachments: any[] = [];
+        let generatedCertUrl = pdfCertificateUrl;
+
+        // 1. Handle GMP Certificate Generation & Supabase Upload
+        if (pdfCertificateUrl) {
+          const certRemoteBuffer = await fetchRemotePdfBuffer(pdfCertificateUrl);
+          if (certRemoteBuffer) {
+            attachments.push({
+              filename: `GMP_Certificate_${applicationId}.pdf`,
+              content: certRemoteBuffer,
+              contentType: "application/pdf"
+            });
+          }
+        } else {
+          try {
+            const certBuffer = await renderToBuffer(
+              React.createElement(GMPCertificateView, { data: certificateData }) as any
+            );
+
+            if (certBuffer) {
+              // Upload to Supabase Storage in '03_Certificates'
+              const fileName = `GMP_Certificate_${applicationId}.pdf`;
+              const storagePath = buildCompanyFilePath(companyId, '03_Certificates', fileName);
+              const blob = new Blob([certBuffer], { type: 'application/pdf' });
+
+              generatedCertUrl = await uploadDossierFile(blob, storagePath);
+              console.log(`[Supabase Storage] GMP Certificate saved to: ${generatedCertUrl}`);
+
+              attachments.push({
+                filename: fileName,
+                content: certBuffer,
+                contentType: "application/pdf"
+              });
+            }
+          } catch (pdfErr) {
+            console.error("GMP Certificate PDF Buffer / Upload Warning:", pdfErr);
+          }
+        }
+
+        // 2. Fetch and attach Primary Inspection Report PDF
+        if (reportPdfUrl) {
+          const reportBuffer = await fetchRemotePdfBuffer(reportPdfUrl);
+          if (reportBuffer) {
+            attachments.push({
+              filename: `Inspection_Report_${applicationId}.pdf`,
+              content: reportBuffer,
+              contentType: "application/pdf"
+            });
+          }
         }
 
         const mailOptions = {
@@ -150,7 +277,7 @@ export async function POST(request: Request) {
 
                 <div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; padding: 16px; margin-bottom: 20px;">
                   <h4 style="margin: 0 0 4px 0; font-size: 12px; font-weight: bold; color: #15803d; text-transform: uppercase;">Status: GMP Compliant Approved</h4>
-                  <p style="margin: 0; font-size: 12px; color: #166534;">Your official Notification of Outcome / Certificate is attached to this email and available on your portal dashboard.</p>
+                  <p style="margin: 0; font-size: 12px; color: #166534;">Your official Notification of Outcome / Certificate and Inspection Report are attached to this email and available on your portal dashboard.</p>
                 </div>
 
                 <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin-bottom: 24px;">
@@ -171,22 +298,17 @@ export async function POST(request: Request) {
               </div>
             </div>
           `,
-          attachments: pdfBuffer ? [
-            {
-              filename: `GMP_Certificate_${applicationId}.pdf`,
-              content: pdfBuffer,
-              contentType: "application/pdf"
-            }
-          ] : []
+          attachments,
         };
 
         const mailResult = await transporter.sendMail(mailOptions);
-        console.log(`[SMTP] Approval email dispatched: ${mailResult.messageId}`);
+        console.log(`[SMTP] Approval email with dual attachments dispatched: ${mailResult.messageId}`);
 
         return NextResponse.json({
           success: true,
           arrivedAt: "APPLICANT_HUB_CERTIFIED",
-          message: "Dossier approved and official notification dispatched to applicant."
+          certificateUrl: generatedCertUrl,
+          message: "Dossier approved; official certificate saved to storage and dispatched to applicant."
         });
       }
     }
