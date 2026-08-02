@@ -63,6 +63,34 @@ interface QualitySystemConfig {
   placeholder: string;
 }
 
+// Extracted outside the main component function body to prevent remount issues
+const Spinner = () => (
+  <svg className="animate-spin h-3.5 w-3.5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+  </svg>
+);
+
+// Helpers for payload normalization
+const resolveInitialEmail = (data?: Record<string, any> | null) => {
+  return (
+    data?.notificationEmail ||
+    data?.site_contact_details?.email ||
+    data?.applicant_email ||
+    ""
+  );
+};
+
+const resolveInitialInspector = (data?: Record<string, any> | null, fallbackInspector?: string) => {
+  return (
+    data?.lead_inspector ||
+    data?.leadInspector ||
+    data?.inspector_name ||
+    fallbackInspector ||
+    ""
+  );
+};
+
 export default function InspectionChecklistForm({ 
   initialData, 
   scheduledDate,
@@ -75,30 +103,6 @@ export default function InspectionChecklistForm({
   const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
-
-  // Helper function to resolve site email across payload schemas
-  const resolveInitialEmail = (data?: Record<string, any> | null) => {
-    console.log('Email should be here:', data);
-    return (
-      data?.notificationEmail ||
-      data?.site_contact_details?.email ||
-      data?.applicant_email ||
-      ""
-    );
-  };
-
-  // Helper function to resolve lead inspector across payload schemas
-  const resolveInitialInspector = (data?: Record<string, any> | null, fallbackInspector?: string) => {
-    return (
-      data?.lead_inspector ||
-      data?.leadInspector ||
-      data?.inspector_name ||
-      fallbackInspector ||
-      ""
-    );
-  };
-
-  console.log('This is initialData: ', initialData)
 
   const [formData, setFormData] = useState<ChecklistData>(() => {
     const resolvedEmail = resolveInitialEmail(initialData);
@@ -135,50 +139,49 @@ export default function InspectionChecklistForm({
     };
   });
 
-  console.log('This is formData.type_of_inspection: ', formData.type_of_inspection);
-
   const lastEmittedDataRef = useRef<ChecklistData | null>(null);
 
-  // Sync if leadInspectorName updates after mount
+  // Sync leadInspectorName if it becomes available after initial mount
   useEffect(() => {
     if (leadInspectorName && !formData.lead_inspector) {
       setFormData(prev => ({ ...prev, lead_inspector: leadInspectorName }));
     }
   }, [leadInspectorName, formData.lead_inspector]);
 
-  // Re-hydrate formData whenever initialData changes from parent state/API payload
+  // Safely re-hydrate formData only when switching to a completely new payload/record
   useEffect(() => {
-    if (initialData) {
-      const isEcho = lastEmittedDataRef.current && 
-        JSON.stringify(initialData) === JSON.stringify(lastEmittedDataRef.current);
+    if (!initialData) return;
 
-      if (!isEcho) {
-        const resolvedEmail = resolveInitialEmail(initialData);
+    // Check if initialData reference matches what was emitted back to parent
+    const isEcho = lastEmittedDataRef.current && initialData === lastEmittedDataRef.current;
 
-        setFormData(prev => ({
-          ...prev,
-          ...initialData,
-          inspected_site_name: initialData.inspected_site_name || initialData.company_name || prev.inspected_site_name,
-          lead_inspector: resolveInitialInspector(initialData, leadInspectorName) || prev.lead_inspector,
-          notificationEmail: resolvedEmail || prev.notificationEmail,
-          site_contact_details: {
-            phone: initialData.site_contact_details?.phone ?? initialData.phone ?? prev.site_contact_details.phone,
-            email: resolvedEmail || prev.site_contact_details.email,
-            website: initialData.site_contact_details?.website ?? initialData.website ?? prev.site_contact_details.website,
-          },
-          historical_baseline: {
-            prev_date_type: initialData.historical_baseline?.prev_date_type ?? prev.historical_baseline.prev_date_type,
-            prev_team: initialData.historical_baseline?.prev_team ?? prev.historical_baseline.prev_team,
-            past_capa_status: initialData.historical_baseline?.past_capa_status ?? prev.historical_baseline.past_capa_status,
-            major_changes: initialData.historical_baseline?.major_changes ?? prev.historical_baseline.major_changes,
-          },
-          activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
-          observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
-        }));
-      }
+    if (!isEcho) {
+      const resolvedEmail = resolveInitialEmail(initialData);
+
+      setFormData(prev => ({
+        ...prev,
+        ...initialData,
+        inspected_site_name: initialData.inspected_site_name || initialData.company_name || prev.inspected_site_name,
+        lead_inspector: resolveInitialInspector(initialData, leadInspectorName) || prev.lead_inspector,
+        notificationEmail: resolvedEmail || prev.notificationEmail,
+        site_contact_details: {
+          phone: initialData.site_contact_details?.phone ?? initialData.phone ?? prev.site_contact_details.phone,
+          email: resolvedEmail || prev.site_contact_details.email,
+          website: initialData.site_contact_details?.website ?? initialData.website ?? prev.site_contact_details.website,
+        },
+        historical_baseline: {
+          prev_date_type: initialData.historical_baseline?.prev_date_type ?? prev.historical_baseline.prev_date_type,
+          prev_team: initialData.historical_baseline?.prev_team ?? prev.historical_baseline.prev_team,
+          past_capa_status: initialData.historical_baseline?.past_capa_status ?? prev.historical_baseline.past_capa_status,
+          major_changes: initialData.historical_baseline?.major_changes ?? prev.historical_baseline.major_changes,
+        },
+        activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
+        observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
+      }));
     }
-  }, [initialData, leadInspectorName]);
+  }, [initialData?.report_doc_number, initialData?.inspected_site_name, leadInspectorName]);
 
+  // Notify parent of state changes
   useEffect(() => {
     if (onChange) {
       lastEmittedDataRef.current = formData;
@@ -191,13 +194,15 @@ export default function InspectionChecklistForm({
 
   const toggleActivity = (activity: string) => {
     if (isReadOnly) return;
-    const current = formData.activities_carried_out;
-    setFormData(prev => ({
-      ...prev,
-      activities_carried_out: current.includes(activity) 
-        ? current.filter(a => a !== activity) 
-        : [...current, activity]
-    }));
+    setFormData(prev => {
+      const current = prev.activities_carried_out;
+      return {
+        ...prev,
+        activities_carried_out: current.includes(activity) 
+          ? current.filter(a => a !== activity) 
+          : [...current, activity]
+      };
+    });
   };
 
   const addObservation = () => {
@@ -205,11 +210,10 @@ export default function InspectionChecklistForm({
 
     const uniqueId = crypto.randomUUID();
     const newObs: Observation = { id: uniqueId, severity: newObsSeverity, text: newObsText.trim() };
-    const updatedObs = [...formData.observations, newObs];
     
     setFormData(prev => ({
       ...prev,
-      observations: updatedObs,
+      observations: [...prev.observations, newObs],
       critical_count: newObsSeverity === "critical" ? prev.critical_count + 1 : prev.critical_count,
       major_count: newObsSeverity === "major" ? prev.major_count + 1 : prev.major_count,
       other_count: newObsSeverity === "other" ? prev.other_count + 1 : prev.other_count,
@@ -257,13 +261,6 @@ export default function InspectionChecklistForm({
     { key: "laboratory_control", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence..." },
   ];
 
-  const Spinner = () => (
-    <svg className="animate-spin h-3.5 w-3.5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-    </svg>
-  );
-
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       {/* WIZARD TABS HEADER */}
@@ -292,11 +289,11 @@ export default function InspectionChecklistForm({
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Inspection Date(s)</label>
-                  <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={scheduledDate} onChange={e => setFormData({...formData, inspection_dates: e.target.value})} />
+                  <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={scheduledDate || formData.inspection_dates} onChange={e => setFormData(prev => ({ ...prev, inspection_dates: e.target.value }))} />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Inspection Type</label>
-                  <select disabled={isReadOnly} className="w-full border p-2 rounded bg-white text-xs font-medium text-slate-800" value={formData.type_of_inspection} onChange={e => setFormData({...formData, type_of_inspection: e.target.value})}>
+                  <select disabled={isReadOnly} className="w-full border p-2 rounded bg-white text-xs font-medium text-slate-800" value={formData.type_of_inspection} onChange={e => setFormData(prev => ({ ...prev, type_of_inspection: e.target.value }))}>
                     <option value="PPI">Pre-Production Inspection (PPI)</option>
                     <option value="PRI">Pre-Registration Inspection (PRI)</option>
                     <option value="GMP">GMP-Reassessment Inspection (GMP)</option>
@@ -311,12 +308,12 @@ export default function InspectionChecklistForm({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Inspected Site Name</label>
-                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.inspected_site_name} onChange={e => setFormData({...formData, inspected_site_name: e.target.value})} />
+                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.inspected_site_name} onChange={e => setFormData(prev => ({ ...prev, inspected_site_name: e.target.value }))} />
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Site Phone</label>
-                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.phone} onChange={e => setFormData({...formData, site_contact_details: {...formData.site_contact_details, phone: e.target.value}})} />
+                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.phone} onChange={e => setFormData(prev => ({ ...prev, site_contact_details: { ...prev.site_contact_details, phone: e.target.value } }))} />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Site Email</label>
@@ -327,17 +324,17 @@ export default function InspectionChecklistForm({
                     value={formData.notificationEmail || formData.site_contact_details.email} 
                     onChange={e => {
                       const emailVal = e.target.value;
-                      setFormData({
-                        ...formData, 
+                      setFormData(prev => ({
+                        ...prev, 
                         notificationEmail: emailVal,
-                        site_contact_details: { ...formData.site_contact_details, email: emailVal }
-                      });
+                        site_contact_details: { ...prev.site_contact_details, email: emailVal }
+                      }));
                     }} 
                   />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Site Website</label>
-                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.website} onChange={e => setFormData({...formData, site_contact_details: {...formData.site_contact_details, website: e.target.value}})} />
+                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.website} onChange={e => setFormData(prev => ({ ...prev, site_contact_details: { ...prev.site_contact_details, website: e.target.value } }))} />
                 </div>
               </div>
             </div>
@@ -357,17 +354,17 @@ export default function InspectionChecklistForm({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Lead Inspector</label>
-                <input type="text" placeholder="Authorized Inspector Name" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.lead_inspector} onChange={e => setFormData({...formData, lead_inspector: e.target.value})} />
+                <input type="text" placeholder="Authorized Inspector Name" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.lead_inspector} onChange={e => setFormData(prev => ({ ...prev, lead_inspector: e.target.value }))} />
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Co-Inspectors / Trainees</label>
-                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.co_inspectors} onChange={e => setFormData({...formData, co_inspectors: e.target.value})} />
+                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.co_inspectors} onChange={e => setFormData(prev => ({ ...prev, co_inspectors: e.target.value }))} />
               </div>
             </div>
 
             <div className="text-xs">
               <label className="block font-bold text-slate-700 mb-1">Vicinity Assessment</label>
-              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" placeholder="Observe external physical features, surroundings, sanitation..." value={formData.vicinity_assessment} onChange={e => setFormData({...formData, vicinity_assessment: e.target.value})} />
+              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" placeholder="Observe external physical features, surroundings, sanitation..." value={formData.vicinity_assessment} onChange={e => setFormData(prev => ({ ...prev, vicinity_assessment: e.target.value }))} />
             </div>
 
             <div>
@@ -375,19 +372,19 @@ export default function InspectionChecklistForm({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Previous Inspection Date & Type</label>
-                  <input type="text" placeholder="e.g. 14th March 2024 (Routine)" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_date_type} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, prev_date_type: e.target.value}})} />
+                  <input type="text" placeholder="e.g. 14th March 2024 (Routine)" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_date_type} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, prev_date_type: e.target.value } }))} />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Previous Inspection Team</label>
-                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_team} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, prev_team: e.target.value}})} />
+                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_team} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, prev_team: e.target.value } }))} />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Past CAPA Status / Outstanding Items</label>
-                  <input type="text" placeholder="Fully implemented..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.past_capa_status} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, past_capa_status: e.target.value}})} />
+                  <input type="text" placeholder="Fully implemented..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.past_capa_status} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, past_capa_status: e.target.value } }))} />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Major Changes Since Last Intervention</label>
-                  <input type="text" placeholder="Facility upgrades, new lines..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.major_changes} onChange={e => setFormData({...formData, historical_baseline: {...formData.historical_baseline, major_changes: e.target.value}})} />
+                  <input type="text" placeholder="Facility upgrades, new lines..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.major_changes} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, major_changes: e.target.value } }))} />
                 </div>
               </div>
             </div>
@@ -412,7 +409,10 @@ export default function InspectionChecklistForm({
                       disabled={isReadOnly} 
                       className="w-16 p-1 border rounded text-center font-bold bg-white text-slate-800" 
                       value={formData[sys.scoreKey] as number} 
-                      onChange={e => setFormData({...formData, [sys.scoreKey]: Math.min(100, Math.max(0, Number(e.target.value)))})} 
+                      onChange={e => {
+                        const val = Math.min(100, Math.max(0, Number(e.target.value)));
+                        setFormData(prev => ({ ...prev, [sys.scoreKey]: val }));
+                      }} 
                     />
                     <span className="font-bold text-slate-600">%</span>
                   </div>
@@ -423,7 +423,10 @@ export default function InspectionChecklistForm({
                   placeholder={sys.placeholder} 
                   className="w-full border p-2 rounded bg-white text-slate-800 text-xs font-medium" 
                   value={formData[sys.notesKey] as string} 
-                  onChange={e => setFormData({...formData, [sys.notesKey]: e.target.value})} 
+                  onChange={e => {
+                    const val = e.target.value;
+                    setFormData(prev => ({ ...prev, [sys.notesKey]: val }));
+                  }} 
                 />
               </div>
             ))}
@@ -497,7 +500,7 @@ export default function InspectionChecklistForm({
             {/* FINAL ADJUDICATION DROPDOWN */}
             <div className="pt-2 border-t">
               <label className="block font-bold text-slate-800 mb-1 uppercase tracking-wide">Final Recommendation / Adjudication</label>
-              <select disabled={isReadOnly} className="w-full border p-2.5 rounded bg-white font-semibold text-slate-800 text-xs" value={formData.final_recommendation} onChange={e => setFormData({...formData, final_recommendation: e.target.value})}>
+              <select disabled={isReadOnly} className="w-full border p-2.5 rounded bg-white font-semibold text-slate-800 text-xs" value={formData.final_recommendation} onChange={e => setFormData(prev => ({ ...prev, final_recommendation: e.target.value }))}>
                 <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
                 <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
                 <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>

@@ -1,4 +1,3 @@
-// @/app/api/LocalInspectionReports/generate/route.ts
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai"; 
 import { db } from "@/db";
@@ -58,22 +57,74 @@ export async function POST(request: Request) {
         }).join(" | ")
       : "General Finished Product Manufacturing Line";
 
-    const systemPrompt = `
-You are an expert NAFDAC Drug Evaluation and Research (DER) Directorate AI Assistant. Your task is to process raw field inspection logs and synthesize them into a formal, narrative-style NAFDAC Pharmaceutical / Veterinary GMP Inspection Report adhering to SOP Ref. No. DER-800-06.
+    const docNo = report_doc_number || "NAFDAC/VMD/GMP/873821/2026";
+    const auditDate = inspection_dates || "2026-08-10";
 
-CRITICAL RULES:
-1. Maintain strict, objective, third-person legal-regulatory syntax.
-2. Never drop or fabricate metadata (SOP numbers, dates, scores, text observations, facility address, or product lines).
-3. Expand bullet points into beautifully formatted HTML prose using paragraphs, bullet lists, and clean styling classes. Do not wrap the output in a full <html> or <body> block—output raw, valid inner HTML snippets.
-4. Highlight technical vocabulary inline appropriately.
+    const systemPrompt = `
+You are an expert NAFDAC Veterinary Medicine and Allied Products (VMAP) / Drug Evaluation and Research (DER) Directorate AI Assistant.
+Your task is to process raw field inspection logs and synthesize them into a single, fully structured HTML master table document conforming strictly to SOP Ref. No. VMAP-800-03 / DER-800-06.
+
+CRITICAL MASTER STRUCTURAL RULE:
+EVERY SINGLE SECTION OF THIS DOCUMENT MUST BE CONTAINED INSIDE A SINGLE MASTER HTML TABLE:
+\`<table style="width:100%; border-collapse:collapse; border:1px solid #1e293b; font-family: Arial, sans-serif;">\`
+
+DOCUMENT LAYOUT STRUCTURE:
+
+1. COVER PAGE ROW (SINGLE CELL SPREAD TO FULL A4 HEIGHT - PAGE BREAK AFTER):
+Generate the first row cell (\`<td style="border:1px solid #1e293b; padding:40px 24px; min-height:1050px; height:1050px; vertical-align:space-between; page-break-after:always; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">\`) formatted as follows:
+
+   A. UPPER THIRD (TOP CENTERED BLOCK):
+      - NAFDAC Logo scaled to 1/10th size (4.8px height): \`<img src="/nafdac_logo2-removebg-preview.png" alt="NAFDAC Logo" style="height:4.8px; width:auto; margin:0 auto 8px auto; display:block;" />\`
+      - Exactly this centered bold header hierarchy:
+        <h2 style="font-size:13px; font-weight:bold; margin:4px 0; text-transform:uppercase; text-align:center;">NATIONAL AGENCY FOR FOOD AND DRUG ADMINISTRATION AND CONTROL (NAFDAC)</h2>
+        <h3 style="font-size:12px; font-weight:bold; margin:2px 0; text-transform:uppercase; text-align:center; color:#334155;">VETERINARY MEDICINE AND ALLIED PRODUCTS (VMAP) / DRUG EVALUATION AND RESEARCH (DER) DIRECTORATE</h3>
+        <h1 style="font-size:15px; font-weight:bold; margin:16px 0 0 0; text-transform:uppercase; text-align:center; text-decoration:underline;">GOOD MANUFACTURING PRACTICE (GMP) INSPECTION REPORT</h1>
+        <h2 style="font-size:14px; font-weight:bold; margin:8px 0; text-transform:uppercase; text-align:center; color:#0f766e;">${effectiveCompanyName}</h2>
+
+   B. MIDDLE THIRD (CENTERED BLOCK):
+      <div style="text-align:center; margin:120px 0;">
+        <p style="font-size:13px; font-weight:bold; margin:4px 0;">ANNEXURE IV: GMP INSPECTION REPORT</p>
+        <p style="font-size:12px; font-weight:bold; color:#475569; margin:2px 0;">SOP Ref. No. VMAP-800-03 / DER-800-06</p>
+      </div>
+
+   C. BOTTOM THIRD (FOOTER METADATA BLOCK):
+      <div style="width:100%; text-align:center; font-size:11px; line-height:1.6; border-top:1px solid #cbd5e1; padding-top:16px; margin-top:auto;">
+        <p style="margin:2px 0;"><strong>Doc No:</strong> ${docNo}</p>
+        <p style="margin:2px 0;"><strong>Inspection Date:</strong> ${auditDate}</p>
+        <p style="margin:2px 0;"><strong>Distribution List:</strong> NAFDAC DG, Director VMAP/DER, Director NDD, Director Enforcement, Inspectorate, Head of Establishment.</p>
+      </div>
+
+2. GENERAL INFORMATION BLOCK (LEFT-ALIGNED ROW):
+   - Internal table row summarizing Establishment details, Physical Address, Inspection Type, Product Lines evaluated, and Inspectors.
+
+3. DETAILED EVALUATED QUALITY SYSTEMS NARRATIVE (EXPANDED PROSE):
+   - DO NOT JUST LIST SCORES OR BULLETS. Expand each quality system into full, formal, multi-paragraph objective technical narratives:
+     * 1. Pharmaceutical Quality System (PQS)
+     * 2. Personnel & Training
+     * 3. Premises & Equipment
+     * 4. Qualification & Validation
+     * 5. Material Management & Production
+     * 6. Laboratory Control / Quality Control
+   - Fully articulate observed practices, regulatory compliance aspects, procedural gaps, equipment conditions, and quality oversight details based on the field notes.
+
+4. DEFICIENCIES MATRIX ROW (LEFT-ALIGNED ROW):
+   - Nested table detailing non-conformances split into Critical, Major, and Other categories with S/N, Observation, and Reference Standard.
+
+5. RECOMMENDATION & CONCLUSION ROW (INSIDE THE TABLE):
+   - Table row (\`<tr><td style="border:1px solid #1e293b; padding:16px; text-align:left;">...\`) detailing the exact adjudication stance, CAPA timeline requirement (14 working days), root cause mandate, and renewal terms.
+
+6. SIGN-OFF BLOCK ROW:
+   - A final table row featuring a 3-column signature table for Lead Inspector and Co-Inspectors.
+
+Output raw inner HTML snippets without <html>, <head>, or <body> tags.
 `;
 
     const userInstructions = `
-Generate the narrative report based on this raw checklist snapshot:
+Generate the detailed expanded tabular HTML report using this raw snapshot:
 
 [DOCUMENT & SITE METADATA]
-- Report Doc Number: ${report_doc_number}
-- Inspection Dates: ${inspection_dates || "As recorded in audit schedule"}
+- Report Doc Number: ${docNo}
+- Inspection Dates: ${auditDate}
 - Inspection Type: ${type_of_inspection || "Routine GMP Inspection"}
 - Establishment / Site Name: ${effectiveCompanyName}
 - Facility Physical Address: ${effectiveAddress}
@@ -83,7 +134,7 @@ Generate the narrative report based on this raw checklist snapshot:
 - Lead Inspector: ${lead_inspector || "Unassigned"}
 - Co-Inspectors: ${co_inspectors || "Unassigned"}
 
-[6 QUALITY SYSTEMS OBSERVATIONS]
+[6 QUALITY SYSTEMS OBSERVATIONS TO EXPAND IN DETAIL]
 1. Pharmaceutical Quality System (Score: ${pqs_score ?? "N/A"}%):
    - Notes/Observations: ${pqs_notes || "Compliant baseline parameters."}
 
@@ -107,9 +158,7 @@ Generate the narrative report based on this raw checklist snapshot:
 - Major Deficiencies: ${major_count ?? 0}
 - Other Deficiencies: ${other_count ?? 0}
 - Logged Non-Conformances: ${JSON.stringify(observations || [])}
-- Final Adjudication Stance: ${final_recommendation || "PENDING"}
-
-Structure the output cleanly with appropriate headings (<h3>), body text (<p class="text-slate-700 leading-relaxed mb-4">), and clear technical paragraphs detailing the findings for each system. Include an executive summary at the top explicitly citing the facility address and evaluated product lines, followed by a detailed review per quality system, and a formal conclusion block at the end.
+- Final Adjudication Stance: ${final_recommendation || "CAPA PENDING"}
 `;
 
     const response = await ai.models.generateContent({
@@ -132,7 +181,6 @@ Structure the output cleanly with appropriate headings (<h3>), body text (<p cla
 
     const currentDetails = (appRecord.details as any) || {};
 
-    // Standardize and persist updated snapshot with resolved address and product lines
     await db.update(applications)
       .set({
         updatedAt: new Date(),
@@ -140,7 +188,7 @@ Structure the output cleanly with appropriate headings (<h3>), body text (<p cla
           ...currentDetails,
           savedChecklistSnapshot: {
             ...payload,
-            report_doc_number,
+            report_doc_number: docNo,
             inspected_site_name: effectiveCompanyName,
             facility_address: effectiveAddress,
             product_lines: effectiveProductLines
@@ -149,7 +197,6 @@ Structure the output cleanly with appropriate headings (<h3>), body text (<p cla
       })
       .where(eq(applications.id, numericId));
 
-    // Return generated draft directly to client state for review
     return NextResponse.json({ 
       success: true, 
       report_html: generatedText 

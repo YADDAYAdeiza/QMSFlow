@@ -607,33 +607,59 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
               </div>
 
               <div className="space-y-2 max-h-[650px] overflow-y-auto pr-1">
-                {items.map((item, index) => (
-                  <div
-                    key={item.id}
-                    onClick={() => setActiveItemIndex(index)}
-                    className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
-                      activeItemIndex === index
-                        ? 'border-emerald-600 bg-emerald-50/40 shadow-sm ring-1 ring-emerald-600'
-                        : 'border-slate-200 hover:border-slate-300 bg-white'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-1.5">
-                      <span className="text-xs font-bold text-slate-500">Item #{index + 1}</span>
-                      {getCategoryBadge(item.deficiencyCategory)}
+               {items.map((item, index) => {
+                  // Determine if item was passed/accepted by the inspector
+                  const isItemAccepted = 
+                    item.status === "Acceptable" || 
+                    item.inspectorStatus === "Acceptable" || 
+                    item.status === "PASSED";
+
+                  const isActive = activeItemIndex === index;
+
+                  return (
+                    <div
+                      key={item.id || index}
+                      onClick={() => {
+                        // Still allow selection to view details, but styles will indicate read-only status
+                        setActiveItemIndex(index);
+                      }}
+                      className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
+                        isItemAccepted
+                          ? isActive
+                            ? 'border-emerald-500 bg-emerald-50/20 opacity-80 ring-1 ring-emerald-500'
+                            : 'border-slate-200 bg-slate-100/70 opacity-70 hover:bg-slate-100'
+                          : isActive
+                            ? 'border-emerald-600 bg-emerald-50/40 shadow-sm ring-1 ring-emerald-600'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-1.5">
+                        <span className="text-xs font-bold text-slate-500">Item #{index + 1}</span>
+                        <div className="flex items-center gap-1.5">
+                          {isItemAccepted && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-200">
+                              🔒 Accepted
+                            </span>
+                          )}
+                          {getCategoryBadge(item.deficiencyCategory)}
+                        </div>
+                      </div>
+
+                      <p className={`text-sm font-medium line-clamp-2 ${isItemAccepted ? 'text-slate-600' : 'text-slate-800'}`}>
+                        {item.deficiency || <span className="text-slate-400 italic">No deficiency specified...</span>}
+                      </p>
+
+                      <div className="flex justify-between items-center mt-2 text-xs text-slate-500">
+                        <span>Timeline: {item.timeline || 'Unassigned'}</span>
+                        {(item.evidenceFiles ?? []).length > 0 && (
+                          <span className="flex items-center gap-1 text-slate-600">
+                            <Paperclip className="h-3 w-3" /> {(item.evidenceFiles ?? []).length}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-sm font-medium text-slate-800 line-clamp-2">
-                      {item.deficiency || <span className="text-slate-400 italic">No deficiency specified...</span>}
-                    </p>
-                    <div className="flex justify-between items-center mt-2 text-xs text-slate-500">
-                      <span>Timeline: {item.timeline || 'Unassigned'}</span>
-                      {(item.evidenceFiles ?? []).length > 0 && (
-                        <span className="flex items-center gap-1 text-slate-600">
-                          <Paperclip className="h-3 w-3" /> {(item.evidenceFiles ?? []).length}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

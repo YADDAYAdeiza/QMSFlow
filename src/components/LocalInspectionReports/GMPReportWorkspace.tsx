@@ -137,9 +137,16 @@ export default function GMPReportWorkspace({
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
 
-  // Steps at which the generated PDF view is authorized and active
+  // 🔒 GATEKEEPING: PDF and Certificate/CAPA Preview tabs are ONLY authorized from DDD_IRSD_REVIEW downward
   const stepsWithPdfPreview = ["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "FINALIZED"];
   const isPdfViewAuthorized = stepsWithPdfPreview.includes(currentStep);
+
+  // Auto-fallback active tab to 'RTF' if the user moves to an unauthorized step
+  useEffect(() => {
+    if (!isPdfViewAuthorized && (activeDocTab === 'PDF' || activeDocTab === 'CERTIFICATE')) {
+      setActiveDocTab('RTF');
+    }
+  }, [isPdfViewAuthorized, activeDocTab]);
 
   // Manual simulation step switch handler
   const handleStepSwitch = (nextStepKey: string) => {
@@ -234,7 +241,6 @@ export default function GMPReportWorkspace({
       : checklistSnapshot?.productLines || [];
 
   // Structured application payload for CertificateOrCapaPreviewTab
-  console.log('This is resolvedAddress: ', resolvedAddress);
   const applicationData = {
     company_name: companyName,
     company_id: companyId,
@@ -345,13 +351,17 @@ export default function GMPReportWorkspace({
     try {
       const docNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
 
+      // Pass the absolute host origin so Puppeteer or server renderers can resolve relative logo image paths correctly
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+
       const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reportHtml: reportHtml,
           applicationId: applicationId,
-          docNumber: docNo
+          docNumber: docNo,
+          baseUrl: baseUrl // <-- Ensures relative image paths (like /nafdac-logo.png) resolve in the PDF renderer
         })
       });
 
@@ -365,14 +375,12 @@ export default function GMPReportWorkspace({
       const pdfFile = new File([pdfBlob], fileName, {
         type: "application/pdf"
       });
-      console.log('This is applicationId: ', applicationId);
-      console.log('This is companyId: ', companyId);
 
       const storagePath = buildCompanyFilePath(
-        companyId,                         // 1st arg: companyId
+        companyId,                        // 1st arg: companyId
         '01_Local_Inspection_Reports',    // 2nd arg: folder
-        fileName,                          // 3rd arg: fileName
-        applicationId                    // 4th arg: applicationId
+        fileName,                         // 3rd arg: fileName
+        applicationId                     // 4th arg: applicationId
       );
 
       const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
@@ -381,17 +389,19 @@ export default function GMPReportWorkspace({
         throw new Error("Failed to retrieve public storage URL after upload.");
       }
 
-      setPdfStorageUrl(uploadedUrl);
+      // Append cache-busting timestamp query param to force iframe refreshes upon re-generation
+      const cacheBustedUrl = `${uploadedUrl}?v=${Date.now()}`;
+      setPdfStorageUrl(cacheBustedUrl);
 
       const updatedSnapshot = {
         ...checklistSnapshot,
-        pdfStorageUrl: uploadedUrl
+        pdfStorageUrl: cacheBustedUrl
       };
       setChecklistSnapshot(updatedSnapshot);
       await handleSaveDraft(updatedSnapshot);
 
       alert("PDF successfully compiled and committed to Supabase 'Documents' bucket!");
-      return uploadedUrl;
+      return cacheBustedUrl;
     } catch (err: any) {
       alert(`PDF Storage Error: ${err.message}`);
       return null;
@@ -435,35 +445,31 @@ export default function GMPReportWorkspace({
           throw new Error("Primary Inspection Report PDF is missing or could not be committed to storage.");
         }
 
-        // Inside handleTransition -> DIRECTOR_FINAL_SIGN_OFF block:
-
-    const transitionRes = await fetch("/api/LocalInspectionReports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        applicationId,
-        companyId: companyId || applicationId, // Ensures clean directory pathing for Supabase
-        currentStepKey: currentStep,
-        direction,
-        companyName,
-        facilityAddress: resolvedAddress,
-        productLines: resolvedProductLines,
-        notificationEmail: resolvedNotificationEmail,
-        remarks,
-        processingDurationSeconds: durationSeconds,
-        checklistSnapshot,
-        // Pass recommendation & observations explicitly if not in checklistSnapshot root
-        finalRecommendation: checklistSnapshot?.final_recommendation || recommendation,
-        observations: checklistSnapshot?.observations || observations || [],
-        executedByUserId: activeUserId,
-        executedByUserRole: activeUserRole,
-        
-        // Explicitly pass both URL references to satisfy route extraction logic
-        pdfStorageUrl: finalReportPdfUrl,
-        pdfReportUrl: finalReportPdfUrl,
-        pdfCertificateUrl: pdfCertificateUrl || null,
-      }),
-    });
+        const transitionRes = await fetch("/api/LocalInspectionReports", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            applicationId,
+            companyId: companyId || applicationId,
+            currentStepKey: currentStep,
+            direction,
+            companyName,
+            facilityAddress: resolvedAddress,
+            productLines: resolvedProductLines,
+            notificationEmail: resolvedNotificationEmail,
+            remarks,
+            processingDurationSeconds: durationSeconds,
+            checklistSnapshot,
+            finalRecommendation: checklistSnapshot?.final_recommendation,
+            observations: checklistSnapshot?.observations || [],
+            executedByUserId: activeUserId,
+            executedByUserRole: activeUserRole,
+            
+            pdfStorageUrl: finalReportPdfUrl,
+            pdfReportUrl: finalReportPdfUrl,
+            pdfCertificateUrl: pdfCertificateUrl || null,
+          }),
+        });
 
         const transitionData = await transitionRes.json();
         if (!transitionRes.ok || !transitionData.success) {
@@ -476,7 +482,7 @@ export default function GMPReportWorkspace({
       // ------------------------------------------------------------------
       const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division)
         ? activeStepConfig.division
-        : "VMD"; // Default fallback division
+        : "VMD";
 
       const targetStepKey = direction === "TARGETED_REWORK"
         ? (targetStepOverride || "STAFF_TECHNICAL_REVIEW")
@@ -537,7 +543,6 @@ export default function GMPReportWorkspace({
         setRemarks("");
         setSelectedStaff("");
 
-        // Synchronize state with new desk
         handleStepSwitch(nextStepKey);
         router.refresh();
       } else {
@@ -552,76 +557,77 @@ export default function GMPReportWorkspace({
   };
 
 return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-      {/* Simulation Rig Container */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
-        <div>
-          <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
-          <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
-          <select
-            value={currentStep}
-            onChange={(e) => {
-              const nextKey = e.target.value;
-              if (typeof handleStepSwitch === "function") {
-                handleStepSwitch(nextKey);
-              } else {
-                setCurrentStep(nextKey as any);
-              }
-            }}
-            className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
-          >
-            {Object.keys(inspectionReportWorkflow.steps).map((key) => (
-              <option key={key} value={key}>
-                {key.replace(/DDD/g, "Divisional Deputy Director")} - {formatDeskTitle(inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title)}
-              </option>
-            ))}
-          </select>
-        </div>
+    {/* Simulation Rig Container */}
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
+      <div>
+        <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
+        <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
       </div>
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
+        <select
+          value={currentStep}
+          onChange={(e) => {
+            const nextKey = e.target.value;
+            if (typeof handleStepSwitch === "function") {
+              handleStepSwitch(nextKey);
+            } else {
+              setCurrentStep(nextKey as any);
+            }
+          }}
+          className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
+        >
+          {Object.keys(inspectionReportWorkflow.steps).map((key) => (
+            <option key={key} value={key}>
+              {key.replace(/DDD/g, "Divisional Deputy Director")} - {formatDeskTitle(inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title)}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
 
-      {/* Header Panel */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-        <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800 text-white">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white mb-2 shadow-sm uppercase tracking-wider">
-                ⚙️ Status: {activeStepConfig?.statusLabel || "Processing"}
-              </span>
-              <h1 className="text-2xl font-bold tracking-tight">{companyName}</h1>
-              <p className="text-slate-300 text-xs mt-1">
-                Dossier Tracking Number: <span className="font-mono bg-slate-700 px-1.5 py-0.5 rounded text-amber-300"># {applicationId}</span>
-                {" "}• Company Code: {companyId}
-              </p>
-            </div>
+    {/* Header Panel */}
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+      <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800 text-white">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white mb-2 shadow-sm uppercase tracking-wider">
+              ⚙️ Status: {activeStepConfig?.statusLabel || "Processing"}
+            </span>
+            <h1 className="text-2xl font-bold tracking-tight">{companyName}</h1>
+            <p className="text-slate-300 text-xs mt-1">
+              Dossier Tracking Number: <span className="font-mono bg-slate-700 px-1.5 py-0.5 rounded text-amber-300"># {applicationId}</span>
+              {" "}• Company Code: {companyId}
+            </p>
+          </div>
 
-            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 max-w-sm w-full">
-              <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Current Custody Desk</p>
-              <p className="text-sm font-bold text-emerald-400 mt-0.5 font-sans">
-                {formatDeskTitle(activeStepConfig?.title)}
-              </p>
-              <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
-                <p>Division: <span className="font-bold text-white">{activeStepConfig?.division || "VMD"}</span></p>
-                <p>Authorized Actor: <span className="italic text-white">{formatDeskTitle(activeStepConfig?.role) || "Reviewer"}</span></p>
-                <p>Role Parameter: <span className="font-bold text-sky-400 font-mono text-[10px]">{activeUserRole}</span></p>
-              </div>
+          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 max-w-sm w-full">
+            <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Current Custody Desk</p>
+            <p className="text-sm font-bold text-emerald-400 mt-0.5 font-sans">
+              {formatDeskTitle(activeStepConfig?.title)}
+            </p>
+            <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
+              <p>Division: <span className="font-bold text-white">{activeStepConfig?.division || "VMD"}</span></p>
+              <p>Authorized Actor: <span className="italic text-white">{formatDeskTitle(activeStepConfig?.role) || "Reviewer"}</span></p>
+              <p>Role Parameter: <span className="font-bold text-sky-400 font-mono text-[10px]">{activeUserRole}</span></p>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Content Layout Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
+      {/* Content Layout Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
+        
+        {/* Main Work Area (2 Columns on Large Screens) */}
+        <div className="lg:col-span-2 space-y-6">
           
-          {/* Main Work Area (2 Columns on Large Screens) */}
-          <div className="lg:col-span-2 space-y-6">
+          {/* Main Primary Documentation & Editor Panel (Tabbed Workspace) */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
             
-            {/* Main Primary Documentation & Editor Panel (Tabbed Workspace) */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-              
-              {/* Tab Navigation & Toolbar Header */}
+            {/* Tab Navigation & Toolbar Header - ONLY VISIBLE FROM DDD_IRSD_REVIEW ONWARD */}
+            {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF"].includes(currentStep) && (
               <div className="bg-slate-100 border-b border-slate-200 px-4 pt-3 flex flex-wrap items-center justify-between gap-2">
                 
                 {/* Tab Buttons */}
@@ -667,408 +673,423 @@ return (
                   </button>
                 </div>
 
-                {/* Header Actions / File Title */}
-                <div className="pb-2.5 flex items-center gap-2 text-[11px] text-slate-500 font-mono">
-                  {activeDocTab === 'PDF' ? (
-                    <>
-                      <span className="truncate max-w-[200px] sm:max-w-[300px]">
-                        {pdfStorageUrl ? `${applicationId}_Final.pdf` : "Draft_Compilation.pdf"}
+                {/* Header Actions & Permanent PDF Compilation Control */}
+                <div className="pb-2.5 flex flex-wrap items-center gap-2">
+                  {/* Persistent PDF Regenerate & Upload Action Button */}
+                  {reportHtml && (
+                    <button
+                      type="button"
+                      onClick={handleCommitPdfToStorage}
+                      disabled={isRenderingPdf}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-md shadow-sm transition-all cursor-pointer"
+                    >
+                      <span>🔄</span> {isRenderingPdf ? "Rendering PDF..." : "Reflect Changes...and Upload"}
+                    </button>
+                  )}
+
+                  <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono">
+                    {activeDocTab === 'PDF' ? (
+                      <>
+                        <span className="truncate max-w-[150px] sm:max-w-[200px]">
+                          {pdfStorageUrl ? `${applicationId}_Final.pdf` : "Draft_Compilation.pdf"}
+                        </span>
+                        {pdfStorageUrl && (
+                          <a
+                            href={pdfStorageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded bg-white text-slate-700 hover:bg-slate-50 transition-all border border-slate-300 shadow-sm"
+                          >
+                            ↗️ Pop Out Fullscreen
+                          </a>
+                        )}
+                      </>
+                    ) : activeDocTab === 'CERTIFICATE' ? (
+                      <span className="font-sans text-xs text-amber-700 font-semibold">
+                        📜 Certificate & CAPA Issuance Review
                       </span>
-                      {pdfStorageUrl && (
-                        <a
-                          href={pdfStorageUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded bg-white text-slate-700 hover:bg-slate-50 transition-all border border-slate-300 shadow-sm"
-                        >
-                          ↗️ Pop Out Fullscreen
-                        </a>
-                      )}
-                    </>
-                  ) : activeDocTab === 'CERTIFICATE' ? (
-                    <span className="font-sans text-xs text-amber-700 font-semibold">
-                      📜 Certificate & CAPA Issuance Review
-                    </span>
+                    ) : (
+                      <span className="font-sans text-xs text-slate-600 font-semibold">
+                        {currentStep === "STAFF_TECHNICAL_REVIEW"
+                          ? "✏️ Active Editing Mode"
+                          : "🔒 Read-Only Desk View"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab Content Body (Full-Width Workspace) */}
+            <div className="p-5 min-h-[600px] bg-white">
+              
+              {/* TAB 1: RTF Narrative Editor */}
+              {activeDocTab === 'RTF' && (
+                <div>
+                  {reportHtml ? (
+                    <div className="animate-fadeIn">
+                      <ReportRichTextEditor
+                        contentHtml={reportHtml}
+                        onChange={(updatedHtml) => setReportHtml(updatedHtml)}
+                        readOnly={currentStep !== "STAFF_TECHNICAL_REVIEW"}
+                      />
+                    </div>
                   ) : (
-                    <span className="font-sans text-xs text-slate-600 font-semibold">
-                      {currentStep === "STAFF_TECHNICAL_REVIEW"
-                        ? "✏️ Active Editing Mode"
-                        : "🔒 Read-Only Desk View"}
-                    </span>
+                    <div className="bg-slate-50 rounded-xl p-12 border border-dashed border-slate-300 flex flex-col items-center justify-center text-center my-6">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-xl mb-3">
+                        📝
+                      </div>
+                      <p className="text-sm font-bold text-slate-700 mb-1">
+                        No DER-800-06 Narrative Compiled Yet
+                      </p>
+                      <p className="text-xs text-slate-500 max-w-sm">
+                        Complete and save the inspection matrix checklist below to generate the initial automated narrative draft.
+                      </p>
+                    </div>
                   )}
                 </div>
-              </div>
+              )}
 
-              {/* Tab Content Body (Full-Width Workspace) */}
-              <div className="p-5 min-h-[600px] bg-white">
-                
-                {/* TAB 1: RTF Narrative Editor */}
-                {activeDocTab === 'RTF' && (
-                  <div>
-                    {reportHtml ? (
-                      <div className="animate-fadeIn">
-                        <ReportRichTextEditor
-                          contentHtml={reportHtml}
-                          onChange={(updatedHtml) => setReportHtml(updatedHtml)}
-                          readOnly={currentStep !== "STAFF_TECHNICAL_REVIEW"}
-                        />
-                      </div>
-                    ) : (
-                      <div className="bg-slate-50 rounded-xl p-12 border border-dashed border-slate-300 flex flex-col items-center justify-center text-center my-6">
-                        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-xl mb-3">
-                          📝
-                        </div>
-                        <p className="text-sm font-bold text-slate-700 mb-1">
-                          No DER-800-06 Narrative Compiled Yet
-                        </p>
-                        <p className="text-xs text-slate-500 max-w-sm">
-                          Complete and save the inspection matrix checklist below to generate the initial automated narrative draft.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 2: PDF Regulatory Document Viewer */}
-                {activeDocTab === 'PDF' && (
-                  <div className="min-h-[650px] w-full bg-slate-100 rounded-lg overflow-hidden border border-slate-200 animate-fadeIn relative flex flex-col">
-                    {pdfStorageUrl ? (
-                      <iframe
-                        src={`${pdfStorageUrl}#toolbar=0`}
-                        className="w-full h-[650px] border-none"
-                        title="Primary Inspection Report PDF"
-                      />
-                    ) : (
-                      <div className="p-8 my-auto flex flex-col items-center justify-center bg-white text-center">
-                        <div className="w-16 h-16 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl mb-4 shadow-sm">
-                          📄
-                        </div>
-                        <h3 className="text-base font-bold text-slate-800 mb-1">
-                          No Committed PDF Document Found
-                        </h3>
-                        <p className="text-xs text-slate-500 max-w-md mb-6 leading-relaxed">
-                          The primary report PDF for dossier <span className="font-mono font-semibold text-slate-700">#{applicationId}</span> has not been generated and saved to the <span className="font-mono text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">Documents</span> storage bucket yet.
-                        </p>
-
-                        <button
-                          type="button"
-                          onClick={handleCommitPdfToStorage}
-                          disabled={isRenderingPdf}
-                          className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all"
-                        >
-                          <span>💾</span> {isRenderingPdf ? "Rendering PDF..." : "Render & Commit PDF to Storage"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 3: Certificate / CAPA Preview */}
-                {activeDocTab === 'CERTIFICATE' && (
-                  <div className="animate-fadeIn min-h-[600px]">
-                    <CertificateOrCapaPreviewTab
-                      applicationData={applicationData}
-                      applicationId={applicationId}
+              {/* TAB 2: PDF Regulatory Document Viewer */}
+              {activeDocTab === 'PDF' && (
+                <div className="min-h-[650px] w-full bg-slate-100 rounded-lg overflow-hidden border border-slate-200 animate-fadeIn relative flex flex-col">
+                  {pdfStorageUrl ? (
+                    <iframe
+                      src={`${pdfStorageUrl}#toolbar=0`}
+                      className="w-full h-[650px] border-none"
+                      title="Primary Inspection Report PDF"
                     />
-                  </div>
-                )}
-
-              </div>
-            </div>
-
-            {/* Checklist Matrix Form Component */}
-            <InspectionChecklistForm
-              initialData={checklistSnapshot}
-              scheduledDate={scheduledDate}
-              notificationEmail={resolvedNotificationEmail}
-              leadInspectorName
-              onSave={handleAICorrelationCompile}
-              onSaveDraft={handleSaveDraft}
-              onChange={(updatedData: any) => setChecklistSnapshot(updatedData)}
-              isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"}
-            />
-
-            {/* Minute Sheet / Audit Trail Log */}
-            <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
-              <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
-                📋 Official QMS Minute Sheet Log
-              </h3>
-
-              {commentsList.length === 0 ? (
-                <p className="text-xs text-slate-400 italic py-2">No tracking entries found on this ledger yet.</p>
-              ) : (
-                <div className="relative border-l border-slate-200 pl-4 space-y-4 ml-2 mt-2">
-                  {commentsList.map((item, index) => {
-                    const isRework = item.action === "REWORK" || item.action === "TARGETED_REWORK";
-                    const durationText = item.processingDurationSeconds
-                      ? `${Math.floor(item.processingDurationSeconds / 60)}m ${item.processingDurationSeconds % 60}s`
-                      : "N/A";
-                    return (
-                      <div key={index} className="relative text-xs">
-                        <span className={`absolute -left-[21px] top-1 flex h-[13px] w-[13px] rounded-full border-2 bg-white ${isRework ? "border-rose-500" : "border-emerald-500"}`} />
-
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 shadow-sm">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-200/60 pb-1.5 mb-2">
-                            <div>
-                              <span className="font-bold text-slate-800">{item.actorName}</span>
-                              <span className={`ml-2 inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset ${isRework ? "bg-rose-50 text-rose-700 ring-rose-600/20" : "bg-emerald-50 text-emerald-700 ring-emerald-600/20"}`}>
-                                {item.action}
-                              </span>
-                            </div>
-                            <div className="flex flex-col items-end gap-0.5">
-                              <span className="text-[10px] font-mono text-slate-400">
-                                {new Date(item.timestamp).toLocaleString("en-GB")}
-                              </span>
-                              {item.processingDurationSeconds !== undefined && (
-                                <span className="text-[10px] text-slate-500 font-mono">
-                                  ⏱️ QMS Duration: <span className="font-semibold text-slate-700">{durationText}</span>
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <p className="text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{item.text}</p>
-
-                          <div className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[10px] text-slate-500 flex flex-wrap gap-x-3 text-ellipsis overflow-hidden">
-                            <p>From: <span className="font-semibold text-slate-600">{item.fromStep?.replace(/DDD/g, "Divisional Deputy Director")}</span></p>
-                            <p>➔ Destination: <span className="font-semibold text-slate-600">{item.toStep?.replace(/DDD/g, "Divisional Deputy Director")}</span></p>
-                            {item.actorRole && <p>Role: <span className="font-semibold text-sky-700">{item.actorRole}</span></p>}
-                          </div>
-                        </div>
+                  ) : (
+                    <div className="p-8 my-auto flex flex-col items-center justify-center bg-white text-center">
+                      <div className="w-16 h-16 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl mb-4 shadow-sm">
+                        📄
                       </div>
-                    );
-                  })}
+                      <h3 className="text-base font-bold text-slate-800 mb-1">
+                        No Committed PDF Document Found
+                      </h3>
+                      <p className="text-xs text-slate-500 max-w-md mb-6 leading-relaxed">
+                        The primary report PDF for dossier <span className="font-mono font-semibold text-slate-700">#{applicationId}</span> has not been generated and saved to the <span className="font-mono text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">Documents</span> storage bucket yet.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={handleCommitPdfToStorage}
+                        disabled={isRenderingPdf}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all"
+                      >
+                        <span>💾</span> {isRenderingPdf ? "Rendering PDF..." : "Reflect Changes...and Upload"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* TAB 3: Certificate / CAPA Preview */}
+              {activeDocTab === 'CERTIFICATE' && (
+                <div className="animate-fadeIn min-h-[600px]">
+                  <CertificateOrCapaPreviewTab
+                    applicationData={applicationData}
+                    applicationId={applicationId}
+                  />
+                </div>
+              )}
+
             </div>
           </div>
 
-          {/* Sidebar Operations Panel (1 Column) */}
-          <div className="space-y-6">
+          {/* Checklist Matrix Form Component */}
+          <InspectionChecklistForm
+            initialData={checklistSnapshot}
+            scheduledDate={scheduledDate}
+            notificationEmail={resolvedNotificationEmail}
+            leadInspectorName
+            onSave={handleAICorrelationCompile}
+            onSaveDraft={handleSaveDraft}
+            onChange={(updatedData: any) => setChecklistSnapshot(updatedData)}
+            isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"}
+          />
 
-            {/* Collaborative Draft Save Panel */}
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
-              <h3 className="text-xs font-bold mb-2 uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                💾 Team Draft Status
-              </h3>
-              <p className="text-[11px] text-slate-500 mb-3 leading-normal">
-                Working in a technical trio? Save continuous drafts to share field findings without forwarding ownership custody.
-              </p>
-              <button
-                type="button"
-                disabled={isSavingDraft || (currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE")}
-                onClick={() => handleSaveDraft(checklistSnapshot)}
-                className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-sm"
-              >
-                {isSavingDraft ? "Saving Draft Matrix..." : "💾 Save Collaborative Draft"}
-              </button>
-            </div>
+          {/* Minute Sheet / Audit Trail Log */}
+          <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+            <h3 className="text-sm font-bold border-b border-slate-100 pb-3 mb-4 uppercase tracking-wider text-slate-700">
+              📋 Official QMS Minute Sheet Log
+            </h3>
 
-            {/* Workflow Control Box */}
-            <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
-              <h3 className="text-sm font-bold mb-4 uppercase tracking-wider text-slate-700">
-                ⚡ Desk Operations Control
-              </h3>
+            {commentsList.length === 0 ? (
+              <p className="text-xs text-slate-400 italic py-2">No tracking entries found on this ledger yet.</p>
+            ) : (
+              <div className="relative border-l border-slate-200 pl-4 space-y-4 ml-2 mt-2">
+                {commentsList.map((item, index) => {
+                  const isRework = item.action === "REWORK" || item.action === "TARGETED_REWORK";
+                  const durationText = item.processingDurationSeconds
+                    ? `${Math.floor(item.processingDurationSeconds / 60)}m ${item.processingDurationSeconds % 60}s`
+                    : "N/A";
+                  return (
+                    <div key={index} className="relative text-xs">
+                      <span className={`absolute -left-[21px] top-1 flex h-[13px] w-[13px] rounded-full border-2 bg-white ${isRework ? "border-rose-500" : "border-emerald-500"}`} />
 
-              {currentStep === "DDD_TECHNICAL_ASSIGNMENT" && (
-                <div className="mb-4 animate-fadeIn">
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
-                    Assign Technical Desk Officer
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 shadow-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-200/60 pb-1.5 mb-2">
+                          <div>
+                            <span className="font-bold text-slate-800">{item.actorName}</span>
+                            <span className={`ml-2 inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset ${isRework ? "bg-rose-50 text-rose-700 ring-rose-600/20" : "bg-emerald-50 text-emerald-700 ring-emerald-600/20"}`}>
+                              {item.action}
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {new Date(item.timestamp).toLocaleString("en-GB")}
+                            </span>
+                            {item.processingDurationSeconds !== undefined && (
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                ⏱️ QMS Duration: <span className="font-semibold text-slate-700">{durationText}</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <p className="text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{item.text}</p>
+
+                        <div className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[10px] text-slate-500 flex flex-wrap gap-x-3 text-ellipsis overflow-hidden">
+                          <p>From: <span className="font-semibold text-slate-600">{item.fromStep?.replace(/DDD/g, "Divisional Deputy Director")}</span></p>
+                          <p>➔ Destination: <span className="font-semibold text-slate-600">{item.toStep?.replace(/DDD/g, "Divisional Deputy Director")}</span></p>
+                          {item.actorRole && <p>Role: <span className="font-semibold text-sky-700">{item.actorRole}</span></p>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sidebar Operations Panel (1 Column) */}
+        <div className="space-y-6">
+
+          {/* Collaborative Draft Save Panel */}
+          <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
+            <h3 className="text-xs font-bold mb-2 uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              💾 Team Draft Status
+            </h3>
+            <p className="text-[11px] text-slate-500 mb-3 leading-normal">
+              Working in a technical trio? Save continuous drafts to share field findings without forwarding ownership custody.
+            </p>
+            <button
+              type="button"
+              disabled={isSavingDraft || (currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE")}
+              onClick={() => handleSaveDraft(checklistSnapshot)}
+              className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-sm"
+            >
+              {isSavingDraft ? "Saving Draft Matrix..." : "💾 Save Collaborative Draft"}
+            </button>
+          </div>
+
+          {/* Workflow Control Box */}
+          <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
+            <h3 className="text-sm font-bold mb-4 uppercase tracking-wider text-slate-700">
+              ⚡ Desk Operations Control
+            </h3>
+
+            {currentStep === "DDD_TECHNICAL_ASSIGNMENT" && (
+              <div className="mb-4 animate-fadeIn">
+                <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                  Assign Technical Desk Officer
+                </label>
+                <select
+                  value={selectedStaff}
+                  onChange={(e) => setSelectedStaff(e.target.value)}
+                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800"
+                >
+                  <option value="">-- Choose VMD Officer --</option>
+                  {staffDirectory.filter(s => s.division === "VMD").map(staff => (
+                    <option key={staff.id} value={staff.id}>{staff.name} ({staff.role})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {currentStep === "DDD_IRSD_INTAKE" && (
+              <div className="mb-4 animate-fadeIn">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                    Assign Vetting Inspector
                   </label>
                   <select
                     value={selectedStaff}
                     onChange={(e) => setSelectedStaff(e.target.value)}
-                    className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800"
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    disabled={isLoadingStaff}
                   >
-                    <option value="">-- Choose VMD Officer --</option>
-                    {staffDirectory.filter(s => s.division === "VMD").map(staff => (
-                      <option key={staff.id} value={staff.id}>{staff.name} ({staff.role})</option>
-                    ))}
+                    <option value="">
+                      {isLoadingStaff ? "Checking inspector availability..." : "-- Select IRSD Vetting Inspector --"}
+                    </option>
+                    {staffDirectory
+                      .filter((staff) => staff.division === "IRSD")
+                      .map((staff) => {
+                        const isConflict = staff.availabilityStatus === "WORKED_ON_INSPECTION";
+                        const isBusy = staff.availabilityStatus === "ON_ANOTHER_INSPECTION";
+
+                        return (
+                          <option
+                            key={staff.id}
+                            value={staff.id}
+                            disabled={isConflict} // Prevent self-vetting completely
+                            className={isConflict ? "text-red-500 bg-red-50" : isBusy ? "text-amber-600" : "text-slate-900"}
+                          >
+                            {staff.name} — {staff.division} {staff.isAvailable ? " [Available]" : ` [⚠️ ${staff.statusLabel}]`}
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
-              )}
-
-              {currentStep === "DDD_IRSD_INTAKE" && (
-                <div className="mb-4 animate-fadeIn">
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold uppercase tracking-wider text-slate-600">
-                      Assign Vetting Inspector
-                    </label>
-                    <select
-                      value={selectedStaff}
-                      onChange={(e) => setSelectedStaff(e.target.value)}
-                      className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      disabled={isLoadingStaff}
-                    >
-                      <option value="">
-                        {isLoadingStaff ? "Checking inspector availability..." : "-- Select IRSD Vetting Inspector --"}
-                      </option>
-                      {staffDirectory
-                        .filter((staff) => staff.division === "IRSD")
-                        .map((staff) => {
-                          const isConflict = staff.availabilityStatus === "WORKED_ON_INSPECTION";
-                          const isBusy = staff.availabilityStatus === "ON_ANOTHER_INSPECTION";
-
-                          return (
-                            <option
-                              key={staff.id}
-                              value={staff.id}
-                              disabled={isConflict} // Prevent self-vetting completely
-                              className={isConflict ? "text-red-500 bg-red-50" : isBusy ? "text-amber-600" : "text-slate-900"}
-                            >
-                              {staff.name} — {staff.division} {staff.isAvailable ? " [Available]" : ` [⚠️ ${staff.statusLabel}]`}
-                            </option>
-                          );
-                        })}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {currentStep === "DIRECTOR_FINAL_SIGN_OFF" && (
-                <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed animate-fadeIn">
-                  <strong>📋 Adjudication Check:</strong> The checklist snapshot current recommendation reads:{" "}
-                  <span className="font-bold underline text-amber-800">
-                    {checklistSnapshot?.final_recommendation || "PENDING"}
-                  </span>.
-                </div>
-              )}
-
-              <div className="mb-4">
-                <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
-                  Official Minutes / Directives
-                </label>
-                <textarea
-                  rows={4}
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  placeholder={
-                    currentStep === "DIRECTOR_FINAL_SIGN_OFF"
-                      ? "Enter validation clearance minutes for final certified sign-off..."
-                      : `Provide dynamic feedback or instructions as ${formatDeskTitle(activeStepConfig?.role)}...`
-                  }
-                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
-                />
               </div>
+            )}
 
-              {/* Action Buttons */}
-              <div className="space-y-2">
-                {currentStep === "DIRECTOR_FINAL_SIGN_OFF" ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={isSubmitting || !isAuthorizedToForward}
-                      onClick={() => {
-                        const recommendation = checklistSnapshot?.final_recommendation || "PENDING";
-                        const msg = recommendation === "CAPA_PENDING"
-                          ? "Confirm sign-off on inspection report and dispatch CAPA Directive to applicant profile?"
-                          : "Confirm absolute final certification and release of official GMP Certificate?";
-                        if (window.confirm(msg)) handleTransition("FORWARD");
-                      }}
-                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed ${
-                        checklistSnapshot?.final_recommendation === "CAPA_PENDING"
-                          ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
-                          : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
-                      }`}
-                    >
-                      {isSubmitting
-                        ? "Processing Action..."
-                        : !isAuthorizedToForward
-                        ? "🔒 Forwarding Restricted"
-                        : checklistSnapshot?.final_recommendation === "CAPA_PENDING"
-                        ? "✍️ Approve & Issue CAPA Directive"
-                        : "✍️ Concur & Grant Final Approval"}
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => {
-                        if (window.confirm("Are you sure you want to revert this report to the technical pool desk for revision?")) {
-                          handleTransition("REWORK");
-                        }
-                      }}
-                      className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-lg transition-all text-center"
-                    >
-                      ↩️ Rework / Send Back to Technical Desk
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {activeStepConfig?.nextStepKey && (
-                      <button
-                        type="button"
-                        disabled={
-                          isSubmitting ||
-                          !canDispatchForward ||
-                          (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) ||
-                          (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)
-                        }
-                        onClick={() => handleTransition("FORWARD")}
-                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
-                      >
-                        {isSubmitting
-                          ? "Routing..."
-                          : !isAuthorizedToForward
-                          ? "🔒 Incomplete Session Context"
-                          : !canDispatchForward
-                          ? "🔒 Requires Desk Authority"
-                          : currentStep.includes("DDD")
-                          ? "✍️ Sign Minutes & Forward Desk"
-                          : "🚀 Dispatch Dossier Forward"}
-                      </button>
-                    )}
-
-                    {activeStepConfig?.prevStepKey && (
-                      <button
-                        type="button"
-                        disabled={isSubmitting}
-                        onClick={() => handleTransition("REWORK")}
-                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-xs font-bold rounded-lg transition-all text-center"
-                      >
-                        ↩️ Return to Previous Desk for Rework
-                      </button>
-                    )}
-                  </>
-                )}
+            {currentStep === "DIRECTOR_FINAL_SIGN_OFF" && (
+              <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed animate-fadeIn">
+                <strong>📋 Adjudication Check:</strong> The checklist snapshot current recommendation reads:{" "}
+                <span className="font-bold underline text-amber-800">
+                  {checklistSnapshot?.final_recommendation || "PENDING"}
+                </span>.
               </div>
+            )}
 
-              {/* Targeted Rework Direct Dispatch (Available on Senior Desks) */}
-              {["DDD_TECHNICAL_REVIEW", "DDD_IRSD_INTAKE", "IRSD_STAFF_VETTING", "DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF"].includes(currentStep) && (
-                <div className="mt-4 pt-4 border-t border-slate-200">
-                  <label className="block text-[11px] font-bold text-rose-800 mb-1.5 uppercase tracking-wide">
-                    🚨 Direct Rework Assignment
-                  </label>
-                  <p className="text-[10px] text-slate-500 mb-2 leading-tight">
-                    Bypass intermediate steps and return this report directly to the field inspection team for corrections.
-                  </p>
+            <div className="mb-4">
+              <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                Official Minutes / Directives
+              </label>
+              <textarea
+                rows={4}
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder={
+                  currentStep === "DIRECTOR_FINAL_SIGN_OFF"
+                    ? "Enter validation clearance minutes for final certified sign-off..."
+                    : `Provide dynamic feedback or instructions as ${formatDeskTitle(activeStepConfig?.role)}...`
+                }
+                className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2">
+              {currentStep === "DIRECTOR_FINAL_SIGN_OFF" ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={isSubmitting || !isAuthorizedToForward}
+                    onClick={() => {
+                      const recommendation = checklistSnapshot?.final_recommendation || "PENDING";
+                      const msg = recommendation === "CAPA_PENDING"
+                        ? "Confirm sign-off on inspection report and dispatch CAPA Directive to applicant profile?"
+                        : "Confirm absolute final certification and release of official GMP Certificate?";
+                      if (window.confirm(msg)) handleTransition("FORWARD");
+                    }}
+                    className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed ${
+                      checklistSnapshot?.final_recommendation === "CAPA_PENDING"
+                        ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
+                        : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
+                    }`}
+                  >
+                    {isSubmitting
+                      ? "Processing Action..."
+                      : !isAuthorizedToForward
+                      ? "🔒 Forwarding Restricted"
+                      : checklistSnapshot?.final_recommendation === "CAPA_PENDING"
+                      ? "✍️ Approve & Issue CAPA Directive"
+                      : "✍️ Concur & Grant Final Approval"}
+                  </button>
 
                   <button
                     type="button"
                     disabled={isSubmitting}
                     onClick={() => {
-                      if (!remarks.trim()) {
-                        alert("Please provide official minutes/reasons for returning the report.");
-                        return;
-                      }
-                      if (window.confirm("Return dossier directly to the technical field inspection team (Team Leader & Co-Inspectors)?")) {
-                        handleTransition("TARGETED_REWORK", "STAFF_TECHNICAL_REVIEW");
+                      if (window.confirm("Are you sure you want to revert this report to the technical pool desk for revision?")) {
+                        handleTransition("REWORK");
                       }
                     }}
-                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-lg transition-all text-center"
                   >
-                    ↩️ Direct Return to Technical Field Reviewers
+                    ↩️ Rework / Send Back to Technical Desk
                   </button>
-                </div>
+                </>
+              ) : (
+                <>
+                  {activeStepConfig?.nextStepKey && (
+                    <button
+                      type="button"
+                      disabled={
+                        isSubmitting ||
+                        !canDispatchForward ||
+                        (currentStep === "DDD_TECHNICAL_ASSIGNMENT" && !selectedStaff) ||
+                        (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)
+                      }
+                      onClick={() => handleTransition("FORWARD")}
+                      className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                    >
+                      {isSubmitting
+                        ? "Routing..."
+                        : !isAuthorizedToForward
+                        ? "🔒 Incomplete Session Context"
+                        : !canDispatchForward
+                        ? "🔒 Requires Desk Authority"
+                        : currentStep.includes("DDD")
+                        ? "✍️ Sign Minutes & Forward Desk"
+                        : "🚀 Dispatch Dossier Forward"}
+                    </button>
+                  )}
+
+                  {activeStepConfig?.prevStepKey && (
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => handleTransition("REWORK")}
+                      className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-xs font-bold rounded-lg transition-all text-center"
+                    >
+                      ↩️ Return to Previous Desk for Rework
+                    </button>
+                  )}
+                </>
               )}
-
             </div>
-          </div>
 
+            {/* Targeted Rework Direct Dispatch (Available on Senior Desks) */}
+            {["DDD_TECHNICAL_REVIEW", "DDD_IRSD_INTAKE", "IRSD_STAFF_VETTING", "DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF"].includes(currentStep) && (
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <label className="block text-[11px] font-bold text-rose-800 mb-1.5 uppercase tracking-wide">
+                  🚨 Direct Rework Assignment
+                </label>
+                <p className="text-[10px] text-slate-500 mb-2 leading-tight">
+                  Bypass intermediate steps and return this report directly to the field inspection team for corrections.
+                </p>
+
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    if (!remarks.trim()) {
+                      alert("Please provide official minutes/reasons for returning the report.");
+                      return;
+                    }
+                    if (window.confirm("Return dossier directly to the technical field inspection team (Team Leader & Co-Inspectors)?")) {
+                      handleTransition("TARGETED_REWORK", "STAFF_TECHNICAL_REVIEW");
+                    }
+                  }}
+                  className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                >
+                  ↩️ Direct Return to Technical Field Reviewers
+                </button>
+              </div>
+            )}
+
+          </div>
         </div>
+
       </div>
     </div>
-  );
+  </div>
+);
 }
