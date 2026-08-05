@@ -1,4 +1,4 @@
-import { pgTable, serial, text, varchar, timestamp, jsonb, integer, uuid, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, varchar, date, timestamp, jsonb, integer, uuid, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 // ==========================================
@@ -189,6 +189,35 @@ export const inspectionTeamAssignments = pgTable("inspection_team_assignments", 
   inspectorId: uuid("inspector_id").notNull(), // Links directly to auth.users in DB
   role: varchar("role", { length: 50 }).notNull(), // 'TEAM_LEADER' | 'CO_INSPECTOR' | 'TRAINEE_INSPECTOR'
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const scheduleBatches = pgTable("schedule_batches", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  batchReference: varchar("batch_reference", { length: 100 })
+    .notNull()
+    .unique(),
+  title: varchar("title", { length: 255 }).notNull(),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  status: varchar("status", { length: 50 })
+    .notNull()
+    .default("PENDING_RECOMMENDATION"),
+  currentPoint: varchar("current_point", { length: 100 })
+    .notNull()
+    .default("Divisional Deputy Director IRSD Routing"),
+  endorsedBy: uuid("endorsed_by"),
+  approvedBy: uuid("approved_by"),
+  history: jsonb("history").$type<Array<{
+    action: string;
+    actorRole: string;
+    actorId?: string;
+    comments: string;
+    fromStep?: string;
+    toStep?: string;
+    timestamp: string;
+  }>>().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
 

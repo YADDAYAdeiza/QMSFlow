@@ -6,14 +6,17 @@ import {
   companies, 
   inspectionSchedules, 
   inspectionTeamAssignments, 
+  scheduleBatches,
   users 
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, gte, lte } from "drizzle-orm";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";import { ShieldAlert, ClipboardList, UserCheck, Eye } from "lucide-react";
+import { redirect } from "next/navigation";
+import { ShieldAlert, ClipboardList, UserCheck, Eye } from "lucide-react";
+import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
+import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 
-// Force dynamic execution to guarantee fresh QMS tracking data
 export const dynamic = "force-dynamic";
 
 interface Task {
@@ -30,7 +33,6 @@ interface Task {
 }
 
 export default async function InspectorWorkspacePage() {
-  // 1. Establish session identity securely from server cookies
   const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -45,28 +47,22 @@ export default async function InspectorWorkspacePage() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             );
-          } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware handling session refreshes.
-          }
+          } catch {}
         },
       },
     }
   );
 
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) {
-    redirect("/login");
-  }
+  if (!session?.user) redirect("/login");
 
-// 2. Fetch internal QMS user meta profile securely
   const userEmail = session.user.email;
   if (!userEmail) {
     return (
       <div className="p-8 max-w-6xl mx-auto">
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs font-medium flex items-center gap-2">
           <ShieldAlert className="w-4 h-4" />
-          Active session metadata missing an email reference. Please re-authenticate.
+          Active session metadata missing email reference. Please re-authenticate.
         </div>
       </div>
     );
@@ -82,7 +78,6 @@ export default async function InspectorWorkspacePage() {
     .from(users)
     .where(eq(users.email, userEmail));
 
-  // 3. Fetch active assignments directly from the database
   let tasks: Task[] = [];
   try {
     const rawAssignments = await db
@@ -97,27 +92,47 @@ export default async function InspectorWorkspacePage() {
         companyName: companies.name,
       })
       .from(inspectionTeamAssignments)
-      .innerJoin(inspectionSchedules, eq(inspectionTeamAssignments.scheduleId, inspectionSchedules.id))
-      .innerJoin(applications, eq(inspectionSchedules.applicationId, applications.id))
-      .innerJoin(companies, eq(applications.companyId, companies.id))
+      .innerJoin(
+        inspectionSchedules,
+        eq(inspectionTeamAssignments.scheduleId, inspectionSchedules.id)
+      )
+      .innerJoin(
+        applications,
+        eq(inspectionSchedules.applicationId, applications.id)
+      )
+      .innerJoin(
+        companies,
+        eq(applications.companyId, companies.id)
+      )
+      // 🔒 Join with schedule_batches to check batch status
+      .innerJoin(
+        scheduleBatches,
+        and(
+          gte(inspectionSchedules.scheduledDate, scheduleBatches.startDate),
+          lte(inspectionSchedules.scheduledDate, scheduleBatches.endDate)
+        )
+      )
       .where(
         and(
           eq(inspectionTeamAssignments.inspectorId, userRecord.id),
-          eq(applications.currentPoint, "Staff Technical Field Review")
+          // 🔒 Must be at Staff Technical Field Review AND batch must be APPROVED
+          eq(applications.currentPoint, inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title),
+          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
         )
       );
 
-    // Map into required interface structure
     tasks = rawAssignments.map((row) => ({
       scheduleId: String(row.scheduleId),
-      scheduledDate: row.scheduledDate ? new Date(row.scheduledDate).toLocaleDateString("en-GB") : "Pending Data",
+      scheduledDate: row.scheduledDate
+        ? new Date(row.scheduledDate).toLocaleDateString("en-GB")
+        : "Pending Data",
       scheduleStatus: row.scheduleStatus ?? "SCHEDULED",
       assignedRole: row.assignedRole as Task["assignedRole"],
       application: {
         id: String(row.applicationId),
         fileNumber: row.fileNumber || "No File #",
         companyName: row.companyName,
-        currentPoint: row.currentPoint ?? "Staff Technical Field Review"
+        currentPoint: row.currentPoint ?? inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
       },
     }));
   } catch (dbError) {
@@ -126,8 +141,6 @@ export default async function InspectorWorkspacePage() {
 
   return (
     <div className="p-8 max-w-6xl mx-auto font-sans text-slate-900">
-      
-      {/* Header Profile Section */}
       <div className="mb-8 border-b border-slate-200 pb-5">
         <div className="flex items-center justify-between">
           <div>
@@ -141,15 +154,13 @@ export default async function InspectorWorkspacePage() {
         </div>
       </div>
 
-      {/* Task Inbox Count */}
       <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">
         Pending Scheduled Inspections ({tasks.length})
       </h2>
 
-      {/* Grid of Cards */}
       {tasks.length === 0 ? (
         <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-lg text-slate-400 text-xs font-medium bg-white">
-          No pending scheduled site inspections mapped to this profile.
+          No pending approved field inspections assigned to your profile.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -165,7 +176,6 @@ export default async function InspectorWorkspacePage() {
                 key={task.scheduleId} 
                 className="bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
               >
-                {/* Card Main Metadata Body */}
                 <div className="p-4 flex flex-col gap-3">
                   <div className="flex justify-between items-start gap-2">
                     <span className="text-[10px] font-mono text-slate-400 font-semibold tracking-tight">
@@ -186,14 +196,13 @@ export default async function InspectorWorkspacePage() {
                   </div>
 
                   <div className="mt-1 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400 font-medium">Current Stage:</span>
+                    <span className="text-slate-400 font-medium">Stage:</span>
                     <span className="font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
-                      Divisional Deputy Director
+                      {task.application.currentPoint}
                     </span>
                   </div>
                 </div>
 
-                {/* Action Tray */}
                 <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 rounded-b-lg flex justify-end gap-2">
                   {isTrainee ? (
                     <Link 
