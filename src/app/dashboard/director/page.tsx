@@ -20,23 +20,31 @@ export default async function DirectorPage({
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
-  // 1. Fetch counts for the badges independently of the list
+  // 1. Dynamic Badges calculating actual pending active items
   const reviewCountResult = await db
     .select({ value: count() })
     .from(applications)
-    .where(eq(applications.currentPoint, "Director Review"));
+    .innerJoin(qmsTimelines, and(
+      eq(qmsTimelines.applicationId, applications.id),
+      eq(qmsTimelines.point, "Director Review"),
+      isNull(qmsTimelines.endTime)
+    ));
 
   const finalCountResult = await db
     .select({ value: count() })
     .from(applications)
-    .where(eq(applications.currentPoint, "Director Final Review"));
+    .innerJoin(qmsTimelines, and(
+      eq(qmsTimelines.applicationId, applications.id),
+      eq(qmsTimelines.point, "Director Final Review"),
+      isNull(qmsTimelines.endTime)
+    ));
 
   const counts = {
     review: reviewCountResult[0]?.value || 0,
     final: finalCountResult[0]?.value || 0,
   };
 
-  // 2. Fetch heads for assignment
+  // 2. Fetch Divisional Deputy Directors for layout delegation
   const availableHeads = await db
     .select({
       id: users.id,
@@ -46,7 +54,7 @@ export default async function DirectorPage({
     .from(users)
     .where(eq(users.role, 'Divisional Deputy Director'));
 
-  // 3. Fetch the actual list for the current view
+  // 3. Enforce Strict QMS Desk clearance (Excludes records with an endTime populated)
   const inbox = await db
     .select({
       id: applications.id,
@@ -56,11 +64,10 @@ export default async function DirectorPage({
       point: applications.currentPoint,
     })
     .from(applications)
-    .where(eq(applications.currentPoint, currentView))
-    .leftJoin(qmsTimelines, and(
+    .innerJoin(qmsTimelines, and(
         eq(qmsTimelines.applicationId, applications.id),
         eq(qmsTimelines.point, currentView),
-        isNull(qmsTimelines.endTime)
+        isNull(qmsTimelines.endTime) 
     ));
 
   const QMS_LIMIT_SECONDS = 48 * 3600;
@@ -103,10 +110,6 @@ export default async function DirectorPage({
 
           const details = app.details as any;
 
-          /**
-           * ✅ PASS 2 DETECTION & DOCUMENT RESOLUTION
-           * Priority: Inspection Report (Pass 2) > POA/Dossier (Pass 1)
-           */
           const isInspectionReview = details?.type === "Inspection Report Review (Foreign)" || !!details?.inspectionReportUrl;
           const savedUrl = details?.inspectionReportUrl || details?.poaUrl;
           const appTypeLabel = isInspectionReview ? "Compliance Review (Foreign)" : "Facility Verification (Local)";

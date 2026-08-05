@@ -1,16 +1,21 @@
 "use client"
 
-import React, { useState, useEffect, useTransition } from 'react';
+import React, { useState, useEffect, useTransition, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { pdf, BlobProvider } from '@react-pdf/renderer'; 
 import { 
   FileSearch, ArrowRight, ShieldCheck, Loader2, 
   History, UserPlus, Gavel, FileText, Zap, AlertCircle, ClipboardList,
-  Building2, FileCheck, Globe, Diff
+  Building2, FileCheck, Globe, Diff, Eye, Mail
 } from 'lucide-react';
 import { approveToDirector, assignToStaff, forwardToHub } from '@/lib/actions/ddd';
 import RejectionModal from '@/components/RejectionModal';
 
-// Helper to prevent hydration mismatch for dates
+// --- IMPORT REGULATORY PDF TEMPLATES ---
+import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
+import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS"; 
+import { GmpCertificate } from "@/components/documents/GmpCertificate";
+
 function SafeTimestamp({ timestamp }: { timestamp?: string }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -30,32 +35,29 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const [assignmentRemarks, setAssignmentRemarks] = useState(""); 
   const [endorsementRemarks, setEndorsementRemarks] = useState("");
   const [selectedStaffId, setSelectedStaffId] = useState("");
+  
+  // NEW: Notification Toggle State
+  const [shouldNotifyStaff, setShouldNotifyStaff] = useState(false);
 
   const appDetails = app?.details || {};
   const history = app?.narrativeHistory || [];
+  const isInspection = app?.isInspection ?? false;
 
- // Define the actions that signify a staff member has completed their task
   const submissionActions = [
     'TECHNICAL_VETTING_SUBMITTED', 
     'COMPLIANCE_AUDIT_COMPLETED'
   ];
 
-  // 1. Find the history entry of the person who last worked on the application
-  // We look for any action in our defined list
   const lastWorkEntry = [...history]
     .reverse()
     .find(h => submissionActions.includes(h.action));
 
-  // 2. Extract the name and map to ID
   const lastSubmitterName = lastWorkEntry?.from;
   const lastAssignedStaffId = staffList.find(s => s.name === lastSubmitterName)?.id || "";
-console.log('This is the last staff id: ', lastAssignedStaffId);
 
-  // --- DELTA DATA EXTRACTION ---
   const lastRework = [...history].reverse().find(h => h.action === "REWORK_REQUIRED");
   const rejectedFindings = lastRework?.frozenFindings || [];
 
-  // --- PASS LOGIC START ---
   const isPass2 = app?.isComplianceReview === true;
   const poaUrl = appDetails?.poaUrl || "";
   const verificationReportUrl = appDetails?.verificationReportUrl || "";
@@ -63,12 +65,11 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
   const staffReportUrl = isPass2 ? inspectionReportUrl : verificationReportUrl;
   const hasStaffSubmission = !!staffReportUrl;
   
-  const [viewMode, setViewMode] = useState<'dossier' | 'report'>(
+  const [viewMode, setViewMode] = useState<'dossier' | 'report' | 'preview'>(
     hasStaffSubmission ? 'report' : 'dossier'
   );
 
   const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
-  // --- PASS LOGIC END ---
 
   const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
   const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
@@ -88,10 +89,87 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
 
+  const isIRSD = currentActingAs.toLowerCase() === 'irsd' || activeAssignmentDivision.toUpperCase() === 'IRSD';
+
+  const complianceRisk = useMemo(() => {
+    const baseRisk = app?.complianceRisk || {};
+    const ledger = appDetails.findings_ledger || findings || [];
+    const summarySource = appDetails.compliance_summary || baseRisk.summary || {};
+
+    return {
+      ...baseRisk,
+      summary: {
+        criticalCount: summarySource.criticalCount ?? 0,
+        majorCount: summarySource.majorCount ?? 0,
+        otherCount: summarySource.otherCount ?? 0,
+      },
+      findings: baseRisk.findings?.length > 0 ? baseRisk.findings : ledger,
+      intrinsicLevel: baseRisk.intrinsicLevel || appDetails.intrinsic_level || intrinsicLevel,
+      overallRating: baseRisk.overallRating || appDetails.overall_risk_rating || complianceLevel || "N/A",
+      isSra: baseRisk.isSra ?? (appDetails.sra_status === "TRUE" || isSRA)
+    };
+  }, [app, appDetails, findings, intrinsicLevel, complianceLevel, isSRA]);
+
+  const docConfig = useMemo(() => {
+    const appNumber = app.applicationNumber;
+    const date = new Date().toLocaleDateString('en-GB');
+
+    const factory = appDetails.facilityName || appDetails.factory_name || "N/A";
+    const address = appDetails.facilityAddress || appDetails.factory_address || "N/A";
+    const rawLines = appDetails.productLines || [];
+    const siteScope = appDetails.siteScope || "New Manufacturing Site";
+
+    if (isInspection) {
+      const certData = {
+        appNumber,
+        date,
+        facilityName: factory,
+        facilityAddress: address,
+        productLines: rawLines.map((line: any) => ({
+          lineName: line.lineName,
+          riskCategory: line.riskCategory || complianceRisk.overallRating || "Compliant"
+        }))
+      };
+      return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
+    } else {
+      const flatProducts = rawLines.flatMap((line: any) => 
+        (line.products || []).map((p: any) => p.name)
+      );
+
+      const clearanceData = {
+        appNumber,
+        date,
+        factoryName: factory,
+        factoryAddress: address,
+        localApplicantName: appDetails.companyName || "N/A",
+        localApplicantAddress: appDetails.companyAddress || "N/A",
+        products: flatProducts.length > 0 ? flatProducts : (appDetails.products || [])
+      };
+
+      if (siteScope === "Additional Manufacturing Site") {
+        return { component: <ClearanceLetterAMS data={clearanceData} />, prefix: "GMP_CLEARANCE_AMS" };
+      }
+      
+      return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
+    }
+  }, [app, appDetails, isInspection, complianceRisk]);
+
   const handleAssign = async () => {
     if (!selectedStaffId) return alert(`Please select an officer.`);
+    
+    // Resolve targeted staff metadata for optional email transmission
+    const assignedStaffObject = staffList.find(s => s.id === selectedStaffId);
+    const staffEmail = assignedStaffObject?.email || null;
+
     startTransition(async () => {
-      const res = await assignToStaff(app.id, selectedStaffId, assignmentRemarks);
+      // Passing email parameters dynamically downstream to your server actions file
+      const res = await assignToStaff(
+        app.id, 
+        selectedStaffId, 
+        assignmentRemarks, 
+        shouldNotifyStaff, 
+        staffEmail
+      );
       if (res.success) { 
         router.push(`/dashboard/ddd?as=${currentActingAs.toLowerCase()}`); 
         router.refresh(); 
@@ -140,6 +218,15 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
                     <FileCheck className="w-3.5 h-3.5" /> {isPass2 ? 'Inspection Report' : 'Verification Report'}
                   </button>
                 )}
+                
+                {isIRSD && (
+                  <button 
+                    onClick={() => setViewMode('preview')} 
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'preview' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    <Eye className="w-3.5 h-3.5" /> Preview {isInspection ? "GMP Certificate" : "GMP Clearance"}
+                  </button>
+                )}
             </div>
             <div className="flex items-center gap-4 pr-4">
               <div className="flex flex-col items-end">
@@ -166,7 +253,18 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
         </div>
 
         <div className="bg-white p-3 rounded-[3rem] shadow-2xl border border-slate-200 h-[82vh] relative overflow-hidden">
-          {iframeSrc ? (
+          {viewMode === 'preview' && isIRSD ? (
+            <BlobProvider document={docConfig.component}>
+              {({ url, loading }) => loading ? (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                  <p className="text-[10px] font-black uppercase tracking-widest italic">Compiling Executive Draft Preview...</p>
+                </div>
+              ) : (
+                <iframe src={`${url}#toolbar=0`} className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" key="preview-pdf" />
+              )}
+            </BlobProvider>
+          ) : iframeSrc ? (
             <iframe src={`${iframeSrc}#toolbar=0`} className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" key={viewMode} />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-3">
@@ -214,20 +312,17 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
             </h3>
             <div className="space-y-4">
               {[...history].reverse().map((note: any, idx: number) => {
-                // Define if this is a rework/rejection action
                 const isRework = note?.action === 'REWORK_REQUIRED';
 
                 return (
                   <div key={idx} className="group relative pl-6 border-l-2 border-slate-100 pb-2">
-                    {/* Change bullet color for rework items */}
                     <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isRework ? 'bg-rose-500 border-rose-100' : 'bg-white border-slate-100'}`} />
                     
                     <div className="flex justify-between items-center mb-1 font-mono text-[8px] text-slate-400 uppercase font-black">
-                      <span>{note?.from === 'DDD' ? 'Divisional Deputy Director' : note?.from}</span>
+                      <span>{(note?.from === 'DDD' || note?.from === 'Divisional Deputy Director') ? 'Divisional Deputy Director' : note?.from}</span>
                       <SafeTimestamp timestamp={note?.timestamp} />
                     </div>
                     
-                    {/* Apply specific styling for rework comments */}
                     <div className={`p-4 rounded-2xl ${isRework ? 'bg-rose-50 border border-rose-100' : 'bg-slate-50'}`}>
                       {isRework && (
                         <span className="block text-[8px] font-black uppercase text-rose-600 mb-1 tracking-widest">
@@ -263,6 +358,50 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
                 ))}
               </select>
               <textarea value={assignmentRemarks} onChange={(e) => setAssignmentRemarks(e.target.value)} placeholder="Specific instructions for vetting..." className="w-full h-24 bg-black/10 border border-white/10 rounded-2xl p-4 text-xs text-white outline-none placeholder:text-white/40" />
+              
+              {/* SLIDER / CHECKBOX TOGGLE FOR NOTIFYING OFFICERS */}
+              <div className="flex items-center justify-between bg-black/10 border border-white/10 rounded-2xl p-4">
+                <div className="flex items-center gap-2.5">
+                  <Mail className={`w-4 h-4 transition-colors duration-300 ${shouldNotifyStaff ? 'text-white' : 'text-white/50'}`} />
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-black uppercase tracking-wider">Email Notification</span>
+                    <span className="text-[9px] text-white/60">Dispatch assignment briefing to officer's inbox</span>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={shouldNotifyStaff} 
+                    onChange={(e) => setShouldNotifyStaff(e.target.checked)} 
+                    className="sr-only peer" 
+                  />
+                  <div className={`
+                    w-11 h-6 
+                    rounded-full 
+                    transition-all 
+                    duration-300 
+                    relative
+                    border
+                    ${shouldNotifyStaff 
+                      ? 'bg-emerald-500 border-emerald-400 shadow-inner' 
+                      : 'bg-black/40 border-white/10'
+                    }
+                    after:content-[''] 
+                    after:absolute 
+                    after:top-[2px] 
+                    after:left-[2px] 
+                    after:bg-white 
+                    after:rounded-full 
+                    after:h-4 
+                    after:w-4 
+                    after:transition-all 
+                    after:duration-300
+                    after:shadow-md
+                    peer-checked:after:translate-x-5
+                  `}></div>
+                </label>
+              </div>
+
               <button onClick={handleAssign} disabled={isPending || !selectedStaffId} className="w-full py-5 bg-white text-slate-900 rounded-3xl font-black uppercase text-[10px] disabled:opacity-50 transition-all hover:bg-slate-100 active:scale-95">
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `Dispatch for Vetting`}
               </button>
@@ -282,7 +421,7 @@ console.log('This is the last staff id: ', lastAssignedStaffId);
             <div className="space-y-3">
               <button onClick={handleEndorse} disabled={isPending} className={`w-full py-5 rounded-[2rem] font-black uppercase text-[11px] flex items-center justify-center gap-3 transition-all active:scale-95 ${isTechnicalReturn ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-                  <> {isTechnicalReturn ? 'Send to Hub' : 'Approve to Director'} <ArrowRight className="w-4 h-4" /> </>
+                  <> {isTechnicalReturn ? 'Send to Hub' : 'Recommend to Director'} <ArrowRight className="w-4 h-4" /> </>
                 )}
               </button>
               <button type="button" onClick={() => setIsReworkModalOpen(true)} className="w-full py-5 rounded-[2rem] font-black uppercase text-[10px] border-2 border-slate-800 text-slate-500 hover:text-white transition-colors">

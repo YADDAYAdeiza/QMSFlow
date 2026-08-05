@@ -1,15 +1,15 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
-import { applications, companies, qmsTimelines } from "@/db/schema";
-import { eq, and, isNull, or } from "drizzle-orm";
+import { applications, companies, qmsTimelines, users } from "@/db/schema";
+import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server"; 
 import DossierLink from "@/components/DossierLink";
 import { recallApplication } from "@/lib/actions/ddd";  
  
 import { 
   ArrowRightCircle, Clock, Inbox, Users, 
-  Landmark, Factory, ShieldCheck, RotateCcw 
+  Landmark, Factory, ShieldCheck, RotateCcw, AlertOctagon 
 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -32,11 +32,39 @@ export default async function DDDInboxPage({
   }
   
   const loggedInUserId = session.user.id; 
-  const actingDivision = as?.toUpperCase() || "VMD";
+
+  // 3. Resolve Profile-Driven Fallback Division
+  const userProfile = await db
+    .select({ division: users.division })
+    .from(users)
+    .where(eq(users.id, loggedInUserId))
+    .then(res => res[0]);
+
+  // STOPS FALLBACK LEAKAGE: Removed the hardcoded || "VMD" string trap completely
+  const userDefaultDivision = userProfile?.division?.toUpperCase();
+  const actingDivision = as?.toUpperCase() || userDefaultDivision;
+
+  // 3b. Defensive Structural Guard
+  if (!actingDivision) {
+    return (
+      <div className="pt-8 bg-slate-50 min-h-screen font-sans flex items-center justify-center">
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 text-center max-w-md">
+          <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertOctagon className="w-6 h-6" />
+          </div>
+          <p className="text-rose-600 font-black uppercase tracking-[0.2em] text-[10px] mb-1">Configuration Error</p>
+          <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-3">No Division Assigned</h2>
+          <p className="text-slate-500 text-xs leading-relaxed">
+            Your profile does not specify a primary structural division. Sign out and Sign in again, or please request an administrator to update your account settings.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const isAssignedView = view === "assigned";
   
-  // 3. Database Query
-  // 3. Database Query
+  // 4. Database Query
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -46,6 +74,7 @@ export default async function DDDInboxPage({
       currentPoint: applications.currentPoint,
       companyName: companies.name,
       startTime: qmsTimelines.startTime,
+      staffId: qmsTimelines.staffId, 
     })
     .from(applications)
     .leftJoin(companies, eq(applications.companyId, companies.id))
@@ -56,17 +85,38 @@ export default async function DDDInboxPage({
       isAssignedView 
         ? or(
             eq(applications.currentPoint, 'Staff Technical Review'),
-            eq(applications.currentPoint, 'IRSD Staff Vetting') // Added this for IRSD support
+            eq(applications.currentPoint, 'IRSD Staff Vetting') 
           )
         : or(
             eq(qmsTimelines.staffId, loggedInUserId),
             eq(applications.currentPoint, 'Technical DD Review'),
             eq(applications.currentPoint, 'IRSD Hub Clearance'),
-            eq(applications.currentPoint, 'IRSD Staff Vetting Return') // ✅ THE CRITICAL FIX;  I als use this as test account
-
+            eq(applications.currentPoint, 'IRSD Staff Vetting Return'),
+            eq(applications.currentPoint, 'Technical DD Review Return') 
           )
     ));
-  // 4. Formatting Logic
+
+  // 5. Secondary Staff Name Resolution Step (Strict Normalization)
+  let staffMap: Record<string, string> = {};
+  
+  if (isAssignedView && rawInbox.length > 0) {
+    const uniqueStaffIds = Array.from(
+      new Set(rawInbox.map(app => String(app.staffId || "")).filter(Boolean))
+    );
+
+    if (uniqueStaffIds.length > 0) {
+      const fetchedStaff = await db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(inArray(users.id, uniqueStaffIds));
+      
+      staffMap = Object.fromEntries(
+        fetchedStaff.map(u => [String(u.id).toLowerCase(), u.name])
+      );
+    }
+  }
+
+  // 6. Formatting & Runtime Evaluation Logic
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -82,8 +132,17 @@ export default async function DDDInboxPage({
 
     const details = (app.details as any) || {};
     const isRound2 = details.isComplianceReview === true || !!details.inspectionReportUrl;
+    
+    const lookupKey = String(app.staffId || "").toLowerCase();
+    const staffName = lookupKey ? staffMap[lookupKey] || null : null;
 
-    return { ...app, displayTime, isRound2 };
+    const isReturningFromStaff = 
+      app.currentPoint === "Technical DD Review Return" || 
+      app.currentPoint === "IRSD Staff Vetting Return" ||
+      app.status === "PENDING_DD_RECOMMENDATION" ||
+      app.status === "AWAITING_HUB_ENDORSEMENT";
+
+    return { ...app, displayTime, isRound2, staffName, isReturningFromStaff };
   });
 
   return (
@@ -148,7 +207,7 @@ export default async function DDDInboxPage({
                   </td>
 
                   <td className="p-6">
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-1.5">
                       <span className={cn(
                         "text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border",
                         app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
@@ -156,9 +215,20 @@ export default async function DDDInboxPage({
                         {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
                         {app.isRound2 ? 'Pass 2: Compliance' : 'Pass 1: Facility'}
                       </span>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase italic">
-                        {app.currentPoint}
-                      </span>
+                      
+                      {isAssignedView && app.staffName ? (
+                        <div className="text-[10px] font-black uppercase text-purple-700 bg-purple-50/60 px-2.5 py-1 rounded-lg w-fit border border-purple-200/40 flex items-center gap-1.5 tracking-tight mt-0.5">
+                          <Users className="w-3 h-3 text-purple-500" />
+                          <span>Reviewer: {app.staffName}</span>
+                        </div>
+                      ) : (
+                        <span className="text-[9px] font-bold text-slate-400 uppercase italic">
+                          {app.currentPoint === 'Technical DD Review Return' || app.currentPoint === 'IRSD Staff Vetting Return'
+                            ? "Returned from Staff Evaluation"
+                            : app.currentPoint
+                          }
+                        </span>
+                      )}
                     </div>
                   </td>
 
@@ -172,8 +242,8 @@ export default async function DDDInboxPage({
                   <td className="p-6 text-xs italic text-slate-400">
                     <div className="flex flex-col gap-2 max-w-md">
                        <DossierLink url={details.inspectionReportUrl || details.poaUrl} />
-                       <p className="line-clamp-1 border-l-2 border-slate-200 pl-2">
-                         {lastComment?.text || "New assignment."}
+                       <p className="line-clamp-1 border-l-2 border-slate-200 pl-2 text-slate-500">
+                         {lastComment?.text ? `"${lastComment.text}"` : "New assignment tracking session initiated."}
                        </p>
                     </div>
                   </td>
@@ -183,7 +253,6 @@ export default async function DDDInboxPage({
                       {isAssignedView && (
                         <form action={async () => {
                           "use server";
-                          // Convert ID to string to ensure it matches the server action expectations
                           await recallApplication(String(app.id), actingDivision);
                         }}>
                           <button 
@@ -199,10 +268,18 @@ export default async function DDDInboxPage({
                         href={`/dashboard/ddd/review/${app.id}?as=${actingDivision.toLowerCase()}`}
                         className={cn(
                           "inline-flex items-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-md group-hover:-translate-x-1",
-                          isAssignedView ? "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50" : "bg-slate-900 text-white hover:bg-blue-600"
+                          isAssignedView 
+                            ? "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50" 
+                            : app.isReturningFromStaff
+                              ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-100/50" 
+                              : "bg-slate-900 text-white hover:bg-blue-600" 
                         )}
                       >
-                        {isAssignedView ? 'Track' : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
+                        {isAssignedView 
+                          ? 'Track' 
+                          : app.isReturningFromStaff 
+                            ? 'Recommend' 
+                            : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
                       </Link>
                     </div>
                   </td>

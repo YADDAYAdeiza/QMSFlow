@@ -9,10 +9,13 @@ import {
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
+import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS";
 import { GmpCertificate } from "@/components/documents/GmpCertificate";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/client";
 import RejectionModal from "@/components/RejectionModal";
 import { RiskExecutiveSummary } from "@/components/analytics/RiskExecutiveSummary";
+
+const supabase = await createClient();
 
 export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUserId }: any) {
   const [remarks, setRemarks] = useState("");
@@ -92,7 +95,15 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         localApplicantAddress: details.companyAddress || "N/A",
         products: flatProducts.length > 0 ? flatProducts : (details.products || [])
       };
-      return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
+
+      // Explicitly checking if site scope matches Additional Manufacturing Site configuration
+      const isAdditionalSite = details.siteScope === "Additional Manufacturing Site";
+      const SelectedComponent = isAdditionalSite ? ClearanceLetterAMS : ClearanceLetter;
+
+      return { 
+        component: <SelectedComponent data={clearanceData} />, 
+        prefix: isAdditionalSite ? "GMP_CLEARANCE_AMS" : "GMP_CLEARANCE" 
+      };
     }
   }, [app, details, isInspection, complianceRisk]);
 

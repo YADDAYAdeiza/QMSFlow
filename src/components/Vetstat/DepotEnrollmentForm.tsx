@@ -7,6 +7,7 @@ import { Building2, MapPin, Warehouse, PlusCircle, CheckCircle2, AlertTriangle, 
 
 interface DepotEnrollmentFormProps {
   companies: any[];
+  companiesCatalog?: any[]; // Safeguard fallback array for master directory queries
 }
 
 const GEO_ZONES: Record<string, string[]> = {
@@ -20,10 +21,10 @@ const GEO_ZONES: Record<string, string[]> = {
 
 const ALL_STATES = Object.values(GEO_ZONES).flat().sort();
 
-export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentFormProps) {
+export default function DepotEnrollmentForm({ companies = [], companiesCatalog = [] }: DepotEnrollmentFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedCompany, setSelectedCompany] = useState("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [selectedState, setSelectedState] = useState("");
   const [nodeType, setNodeType] = useState<'WAREHOUSE' | 'DEPOT'>('DEPOT');
   
@@ -42,7 +43,21 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
     timestamp: 0
   });
 
-  const uniqueCompanies = Array.from(new Set(companies.map(c => c.company_name))).sort();
+  // Use the catalog or companies property to construct a strictly unique map layout
+  // Filter out any invalid items to protect the unique React `key` prop assignments
+  const sourceCollection = companiesCatalog.length > 0 ? companiesCatalog : companies;
+  
+  const cleanCompaniesDropdownList = Array.from(
+    new Map(
+      sourceCollection
+        .filter(c => (c.id || c.company_id) && (c.company_name || c.resolved_company_name))
+        .map(c => {
+          const id = c.id || c.company_id;
+          const name = c.company_name || c.resolved_company_name;
+          return [id, { id, name }];
+        })
+    ).values()
+  ).sort((a, b) => a.name.localeCompare(b.name));
 
   // Start workflow tracking whenever the form layout container expands open
   useEffect(() => {
@@ -54,7 +69,7 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
     }
   }, [isOpen]);
 
-  // Keep a running update loop for visible workflow auditing feedback
+  // Keep a running update loop for visible workflow auditing feedback (QMS Compliance)
   useEffect(() => {
     if (!startTime || isPending || state.success) return;
 
@@ -69,7 +84,7 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
   useEffect(() => {
     if (state.success && state.timestamp !== 0) {
       const timer = setTimeout(() => {
-        setSelectedCompany("");
+        setSelectedCompanyId("");
         setSelectedState("");
         formRef.current?.reset();
         setIsOpen(false);
@@ -143,15 +158,15 @@ export default function DepotEnrollmentForm({ companies = [] }: DepotEnrollmentF
                 <Building2 size={13} /> Marketing Authorization Holder
               </label>
               <select 
-                name="company_name"
-                value={selectedCompany} 
-                onChange={(e) => setSelectedCompany(e.target.value)}
+                name="company_id" // Changed from company_name to link with relational structures
+                value={selectedCompanyId} 
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
                 className="border-2 p-3 rounded-xl focus:border-blue-600 outline-none bg-white font-bold text-slate-700 text-sm cursor-pointer"
                 required
               >
                 <option value="">Select Corporate MAH...</option>
-                {uniqueCompanies.map(name => (
-                  <option key={name} value={name}>{name}</option>
+                {cleanCompaniesDropdownList.map(company => (
+                  <option key={company.id} value={company.id}>{company.name}</option>
                 ))}
               </select>
             </div>

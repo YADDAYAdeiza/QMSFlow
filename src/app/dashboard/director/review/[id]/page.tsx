@@ -5,7 +5,8 @@ import { applications, users, riskAssessments } from "@/db/schema";
 import { eq, and } from "drizzle-orm"; // Added and
 import { notFound } from "next/navigation";
 import DirectorReviewClient from "./DirectorReviewClient";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/client";
+const supabase = await createClient();
 
 export default async function DirectorReviewPage({ 
   params 

@@ -11,19 +11,17 @@ import { CompanySearch } from './CompanySearch';
 import { 
   Plus, Trash2, Globe, Building2, Save, Loader2, 
   MessageSquare, Share2, X, ChevronDown, Mail, RefreshCcw,
-  CheckCircle2, ArrowRight, Activity, ShieldAlert
+  CheckCircle2, ArrowRight, Activity, ShieldAlert, Layers, Hash
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
 const CURRENT_USER = { 
   id: "477d0494-3cfc-44c1-979d-5602eb01aabe", 
   name: "LOD", 
-  role: "Divisional Deputy Director" // Standardized for QMS profile accountability
+  role: "Divisional Deputy Director"
 };
 
 const DIVISION_OPTIONS = ["VMD", "PAD", "AFPD", "IRSD"];
-const PREFIX = "NAFDAC/VMAP/";
-
 const RISK_CATEGORIES = [
   { name: "VACCINES / BIOLOGICALS", comp: 3, crit: 3 },
   { name: "STERILE INJECTABLES", comp: 3, crit: 2 },
@@ -42,8 +40,8 @@ const getRiskLevel = (score: number) => {
   return null;
 };
 
-// --- HELPER COMPONENT: CREATABLE SELECT ---
-function CreatableSelect({ value, onChange, options, placeholder, onSelectOption, isAppNumber = false }: any) {
+// --- HELPER COMPONENT: CREATABLE SELECT (Strictly for Lines & Products) ---
+function CreatableSelect({ value, onChange, options, placeholder, onSelectOption }: any) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,11 +57,7 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
   }, []);
 
   useEffect(() => {
-    if (value) {
-      setSearch(value);
-    } else {
-      setSearch("");
-    }
+    setSearch(value || "");
   }, [value]);
 
   const filteredOptions = useMemo(() => {
@@ -99,23 +93,14 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
           <div className="p-2 border-b border-slate-50">
             <input 
               autoFocus
-              placeholder="Type or filter..."
+              placeholder="Type to filter or create..."
               className="w-full p-3 text-[10px] outline-none bg-slate-50 rounded-lg font-bold text-blue-600 uppercase"
               value={search}
               onClick={(e) => e.stopPropagation()} 
               onChange={(e) => {
                 e.stopPropagation();
-                const val = e.target.value.toUpperCase();
-                
-                if (isAppNumber) {
-                  if (val.startsWith(PREFIX) || val === "" || PREFIX.startsWith(val)) {
-                    setSearch(val);
-                    onChange(val);
-                  }
-                } else {
-                  setSearch(val);
-                  onChange(val);
-                }
+                setSearch(e.target.value.toUpperCase());
+                onChange(e.target.value.toUpperCase());
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && search.trim() !== "") {
@@ -127,18 +112,21 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
-            {filteredOptions.map((opt: any, idx: number) => (
+            {!showCreateOption && filteredOptions.map((opt: any, idx: number) => (
               <div 
                 key={`${opt.id || idx}`}
                 onClick={(e) => {
+                  e.preventDefault();
                   e.stopPropagation(); 
                   handleSelect(opt.name, opt);
                 }}
-                className="p-3 text-[10px] font-bold uppercase text-slate-600 hover:bg-blue-600 hover:text-white cursor-pointer"
+                className="p-3 text-[10px] font-bold uppercase text-slate-700 bg-white hover:bg-slate-50 cursor-pointer border-b border-slate-100/80 flex items-center justify-between select-none"
               >
-                {opt.name}
+                <span>{opt.name}</span>
+                <span className="text-[8px] tracking-widest bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-extrabold">HISTORICAL REFERENCE</span>
               </div>
             ))}
+            
             {showCreateOption && (
               <div 
                 onClick={(e) => {
@@ -147,7 +135,7 @@ function CreatableSelect({ value, onChange, options, placeholder, onSelectOption
                 }}
                 className="p-3 text-[10px] font-bold uppercase text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white cursor-pointer flex items-center gap-2"
               >
-                <Plus className="w-3 h-3" /> Use: "{search}"
+                <Plus className="w-3 h-3" /> Use/Create: "{search}"
               </div>
             )}
           </div>
@@ -162,31 +150,23 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
   const router = useRouter();
   const initialized = useRef(false);
   const [availableLines, setAvailableLines] = useState<any[]>(initialData?.productLines || []);
-  const [existingApps, setExistingApps] = useState<{name: string}[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  useEffect(() => {
-    async function loadHistory() {
-      const apps = await getApplications();
-      if (apps) {
-        const mapped = apps
-          .sort((a: any, b: any) => b.id - a.id)
-          .slice(0, 10)
-          .map((a: any) => ({ name: a.applicationNumber }));
-        setExistingApps(mapped);
-      }
-    }
-    loadHistory();
-  }, []);
+  const [localCompanyId, setLocalCompanyId] = useState<number | null>(initialData?.localCompanyId || null);
+  const [foreignFactoryId, setForeignFactoryId] = useState<number | null>(initialData?.foreignFactoryId || null);
+
+  const isLocalAutofilled = !!localCompanyId;
+  const isForeignAutofilled = !!foreignFactoryId;
 
   const defaultValues = useMemo(() => ({
-    appNumber: initialData?.appNumber || PREFIX, 
+    appNumber: initialData?.appNumber || "", 
     type: isUpdate ? "Inspection Report Review (Foreign)" : (initialData?.type || "Facility Verification"), 
     companyName: initialData?.companyName || "", 
     companyAddress: initialData?.companyAddress || "", 
     notificationEmail: initialData?.notificationEmail || "",
     facilityName: initialData?.facilityName || "", 
     facilityAddress: initialData?.facilityAddress || "", 
+    siteScope: initialData?.siteScope || "New Manufacturing Site",
     lodRemarks: "",
     productLines: initialData?.productLines || [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
     divisions: initialData?.divisions || ["VMD"], 
@@ -203,6 +183,14 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     defaultValues
   });
 
+  // Automatically construct and append the official NAFDAC/VMAP/{uuid} format on structural mount
+  useEffect(() => {
+    if (!initialData?.appNumber && !isUpdate) {
+      const uniqueId = crypto.randomUUID();
+      setValue("appNumber", `NAFDAC/VMAP/${uniqueId}`, { shouldValidate: true });
+    }
+  }, [initialData, isUpdate, setValue]);
+
   const { fields: lineFields, append: appendLine, remove: removeLine } = useFieldArray({ control, name: "productLines" });
   const watchProductLines = watch("productLines");
   const watchType = watch("type");
@@ -212,21 +200,16 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     if (initialData && !initialized.current) {
       reset(defaultValues);
       setAvailableLines(initialData.productLines || []);
+      setLocalCompanyId(initialData.localCompanyId || null);
+      setForeignFactoryId(initialData.foreignFactoryId || null);
       initialized.current = true;
     }
   }, [initialData, reset, defaultValues]);
 
-  const handleAppNumberChange = (val: string, onChange: (v: string) => void) => {
-    const upperVal = val.toUpperCase();
-    if (!upperVal.startsWith(PREFIX)) {
-      onChange(PREFIX);
-    } else {
-      onChange(upperVal);
-    }
-  };
-
   const handleGracefulExit = (path: string) => {
     reset(defaultValues);
+    setLocalCompanyId(null);
+    setForeignFactoryId(null);
     setShowSuccess(false);
     initialized.current = false;
     router.push(path);
@@ -242,7 +225,12 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
 
   const onSubmit = async (data: any) => {
     console.log("🚀 FORM SUBMITTED: Processing database commit step...");
-    const result = await submitLODApplication(data, CURRENT_USER.id, CURRENT_USER.name, CURRENT_USER.role);
+    const payload = {
+      ...data,
+      localCompanyId,
+      foreignFactoryId
+    };
+    const result = await submitLODApplication(payload, CURRENT_USER.id, CURRENT_USER.name, CURRENT_USER.role);
     
     if (result.success) {
       console.log("💾 Database write verified successfully!");
@@ -267,7 +255,7 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             
             <div className="space-y-4">
               <h2 className="text-4xl font-black text-slate-900 uppercase italic tracking-tighter leading-tight">Submission Complete</h2>
-              <p className="text-slate-500 text-[13px] font-medium px-6">Application <span className="text-blue-600 font-bold">#{watch("appNumber")}</span> has been successfully logged.</p>
+              <p className="text-slate-500 text-[13px] font-medium px-6">Application ID <span className="text-blue-600 font-bold text-xs">{watch("appNumber")}</span> has been logged.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 pt-4">
@@ -310,7 +298,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
           </div>
         </header>
 
-        {/* Global Schema Validation Alerts */}
         {Object.keys(errors).length > 0 && (
           <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl space-y-1">
             <h5 className="text-[11px] font-black uppercase text-rose-600 flex items-center gap-2">
@@ -323,22 +310,21 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 italic">App Number (Ref Latest in Dropdown)</label>
-            <Controller
-              name="appNumber"
-              control={control}
-              render={({ field }) => (
-                <CreatableSelect 
-                  value={field.value}
-                  options={existingApps}
-                  placeholder="NAFDAC/VMAP/..."
-                  isAppNumber={true}
-                  onChange={(val: string) => handleAppNumberChange(val, field.onChange)}
-                  onSelectOption={(opt: any) => field.onChange(opt.name)}
-                />
-              )}
-            />
+          <div className="flex flex-col gap-2 relative">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 italic">Application Reference (UUID)</label>
+            <div className="relative">
+              <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                {...register("appNumber")} 
+                placeholder="Generating Application ID reference..."
+                readOnly // <--- Locks down the field entirely
+                className={cn(
+                  "w-full p-5 pl-12 rounded-[1.5rem] text-xs font-bold font-mono outline-none border-2 border-transparent transition-all",
+                  "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" // <--- Gives a visual read-only state matching your design patterns
+                )}
+              />
+            </div>
+            {errors.appNumber && <p className="text-[9px] font-bold text-rose-500 ml-2">Valid Application UUID reference required.</p>}
           </div>
           <div className="flex flex-col gap-2">
             <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Review Type</label>
@@ -350,36 +336,133 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
-            <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2"><Building2 className="w-4 h-4" /> Local Applicant</h3>
-            {!isUpdate && (
+          {/* --- LOCAL APPLICANT CARD --- */}
+          <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 relative">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                <Building2 className="w-4 h-4" /> Local Applicant
+              </h3>
+              {isLocalAutofilled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalCompanyId(null);
+                    setValue("companyName", "");
+                    setValue("companyAddress", "");
+                    setValue("notificationEmail", "");
+                  }}
+                  className="text-[9px] font-black text-rose-600 bg-rose-50 px-3 py-1 rounded-full hover:bg-rose-100 transition-all flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear & Edit
+                </button>
+              )}
+            </div>
+
+            {!isUpdate && !isLocalAutofilled && (
               <CompanySearch category="LOCAL" onSelect={(company) => {
+                  setLocalCompanyId(company.id);
                   setValue("companyName", company.name, { shouldDirty: true });
                   setValue("companyAddress", company.address, { shouldDirty: true });
                   if (company.email) setValue("notificationEmail", company.email, { shouldDirty: true });
                 }}
               />
             )}
-            <input {...register("companyName")} placeholder="Company Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
-            <input {...register("companyAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
+            
+            <input 
+              {...register("companyName")} 
+              placeholder="Company Name" 
+              readOnly={isLocalAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none transition-all",
+                isLocalAutofilled ? "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+            <input 
+              {...register("companyAddress")} 
+              placeholder="Address" 
+              readOnly={isLocalAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm shadow-sm border-none transition-all",
+                isLocalAutofilled ? "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
             <div className="relative">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
-              <input {...register("notificationEmail")} placeholder="Email" className="w-full p-4 pl-10 rounded-xl text-sm font-bold text-blue-600 shadow-sm border-none" />
+              <input 
+                {...register("notificationEmail")} 
+                placeholder="Email" 
+                readOnly={isLocalAutofilled}
+                className={cn(
+                  "w-full p-4 pl-10 rounded-xl text-sm font-bold shadow-sm border-none transition-all",
+                  isLocalAutofilled ? "bg-slate-200/60 text-slate-400 cursor-not-allowed select-none" : "bg-white text-blue-600"
+                )} 
+              />
             </div>
           </div>
 
-          <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4">
-            <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2"><Globe className="w-4 h-4" /> Manufacturing Site</h3>
-            {!isUpdate && (
+          {/* --- MANUFACTURING SITE CARD --- */}
+          <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4 relative">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2">
+                <Globe className="w-4 h-4" /> Manufacturing Site
+              </h3>
+              {isForeignAutofilled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForeignFactoryId(null);
+                    setValue("facilityName", "");
+                    setValue("facilityAddress", "");
+                    setAvailableLines([]);
+                  }}
+                  className="text-[9px] font-black text-rose-600 bg-rose-50 px-3 py-1 rounded-full hover:bg-rose-100 transition-all flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear & Edit
+                </button>
+              )}
+            </div>
+
+            {!isUpdate && !isForeignAutofilled && (
               <CompanySearch category="FOREIGN" onSelect={(factory) => {
+                  setForeignFactoryId(factory.id);
                   setValue("facilityName", factory.name, { shouldDirty: true });
                   setValue("facilityAddress", factory.address, { shouldDirty: true });
-                  setAvailableLines(factory.product_lines || []);
+                  setAvailableLines(factory.product_lines || factory.productLines || []);
                 }}
               />
             )}
-            <input {...register("facilityName")} placeholder="Factory Name" className="w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none" />
-            <input {...register("facilityAddress")} placeholder="Address" className="w-full p-4 rounded-xl text-sm shadow-sm border-none" />
+            
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
+                <Layers className="w-3 h-3" /> Site Scope Configuration
+              </label>
+              <select 
+                {...register("siteScope")} 
+                className="w-full bg-white p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm cursor-pointer border border-transparent focus:border-blue-200"
+              >
+                <option value="New Manufacturing Site">New Manufacturing Site</option>
+                <option value="Additional Manufacturing Site">Additional Manufacturing Site</option>
+              </select>
+            </div>
+
+            <input 
+              {...register("facilityName")} 
+              placeholder="Factory Name" 
+              readOnly={isForeignAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none transition-all",
+                isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+            <input 
+              {...register("facilityAddress")} 
+              placeholder="Address" 
+              readOnly={isForeignAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm shadow-sm border-none transition-all",
+                isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
             <FileUpload 
               label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} 
               onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true, shouldValidate: true })} 
@@ -400,6 +483,12 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             const score = currentCat ? currentCat.comp * currentCat.crit : 0;
             const level = getRiskLevel(score);
 
+            const selectedLineString = watchProductLines[index]?.lineName;
+            const matchedLineObj = availableLines?.find(
+              (al: any) => al.name?.toLowerCase() === selectedLineString?.toLowerCase() || al.lineName?.toLowerCase() === selectedLineString?.toLowerCase()
+            );
+            const contextualProducts = matchedLineObj?.products || [];
+
             return (
               <div key={line.id} className="p-8 bg-white border border-slate-100 rounded-[3rem] relative shadow-sm">
                 <button type="button" onClick={() => removeLine(index)} className="absolute top-8 right-8 p-2 text-slate-200 hover:text-rose-500 rounded-full transition-all">
@@ -416,10 +505,9 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
                         render={({ field }) => (
                           <CreatableSelect 
                             value={field.value}
-                            options={availableLines}
+                            options={availableLines.map(al => ({ ...al, name: al.name || al.lineName }))}
                             onChange={field.onChange}
                             placeholder="Line Category..."
-                            isAppNumber={false}
                             onSelectOption={(opt: any) => {
                               setValue(`productLines.${index}.products`, opt.products?.map((p: any) => ({ name: p.name })) || [{ name: "" }]);
                             }}
@@ -445,7 +533,8 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
                       </select>
                     </div>
                   </div>
-                  <NestedProductArray nestIndex={index} control={control} />
+                  
+                  <NestedProductArray nestIndex={index} control={control} options={contextualProducts} />
                 </div>
               </div>
             );
@@ -463,7 +552,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
           </div>
         </div>
 
-        {/* INTEGRATED EMAIL OVERSIGHT FIELD */}
         <Controller
           name="sendEmailNotification"
           control={control}
@@ -481,7 +569,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
               <div 
                 onClick={() => {
                   const newValue = !field.value;
-                  console.log(`🎛️ Switch UI Clicked: Changing state to -> ${newValue}`);
                   setValue("sendEmailNotification", newValue, { shouldValidate: true, shouldDirty: true });
                 }}
                 className="relative inline-flex items-center cursor-pointer select-none"
@@ -513,21 +600,43 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
   );
 }
 
-function NestedProductArray({ nestIndex, control }: any) {
+// --- CONTEXT-AWARE NESTED PRODUCTS ARRAY ---
+function NestedProductArray({ nestIndex, control, options }: any) {
   const { fields, append, remove } = useFieldArray({ control, name: `productLines.${nestIndex}.products` });
+  
+  const computedOptions = useMemo(() => {
+    return (options || []).map((opt: any) => {
+      if (typeof opt === 'string') return { name: opt };
+      return { ...opt, name: opt.name || opt.productName || "" };
+    });
+  }, [options]);
+
   return (
     <div className="mt-4 space-y-2 border-t border-slate-50 pt-4">
       <div className="flex justify-between items-center px-2 mb-2">
         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Products</span>
-        <button type="button" onClick={() => append({ name: "" })} className="text-[9px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-all"><Plus className="w-3 h-3" /> ADD PRODUCT</button>
+        <button type="button" onClick={() => append({ name: "" })} className="text-[9px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-all">
+          <Plus className="w-3 h-3" /> ADD PRODUCT
+        </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {fields.map((item, k) => (
           <div key={item.id} className="flex items-center gap-2">
-            <Controller name={`productLines.${nestIndex}.products.${k}.name`} control={control} render={({ field }) => (
-              <CreatableSelect value={field.value} onChange={field.onChange} options={[]} placeholder="Product..." isAppNumber={false} />
-            )}/>
-            <button type="button" onClick={() => remove(k)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><X className="w-4 h-4" /></button>
+            <Controller 
+              name={`productLines.${nestIndex}.products.${k}.name`} 
+              control={control} 
+              render={({ field }) => (
+                <CreatableSelect 
+                  value={field.value} 
+                  onChange={field.onChange} 
+                  options={computedOptions} 
+                  placeholder="Product..." 
+                />
+              )}
+            />
+            <button type="button" onClick={() => remove(k)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
           </div>
         ))}
       </div>

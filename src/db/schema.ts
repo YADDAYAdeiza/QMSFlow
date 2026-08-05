@@ -1,6 +1,10 @@
 import { pgTable, serial, text, varchar, timestamp, jsonb, integer, uuid, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+// ==========================================
+// 1. MASTER TABLES & SYSTEM CONFIGURATIONS
+// ==========================================
+
 // 1. Master Company List
 export const companies = pgTable("companies", {
   id: serial("id").primaryKey(),
@@ -73,12 +77,11 @@ export const applications = pgTable("applications", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// 6. QMS Timelines
 // 6. QMS Timelines (Updated for automatic cascade delete support)
 export const qmsTimelines = pgTable("qms_timelines", {
   id: serial("id").primaryKey(),
-  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }), // <-- Added here
-  staffId: text("staff_id"),
+  applicationId: integer("application_id").references(() => applications.id, { onDelete: 'cascade' }),
+  staffId: text("staff_id"), // Maps to users.id (UUID text string representation)
   division: text("division"),
   point: text("point"),
   startTime: timestamp("start_time").defaultNow(),
@@ -128,7 +131,70 @@ export const riskAssessments = pgTable("risk_assessments", {
   uniqueAppRisk: uniqueIndex("unique_app_risk").on(table.applicationId),
 }));
 
+// 10. Local Inspection Reports
+export const localInspectionReports = pgTable("local_inspection_reports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  applicationId: integer("application_id")
+    .references(() => applications.id, { onDelete: "cascade" })
+    .notNull(),
+  companyId: integer("company_id")
+    .references(() => companies.id, { onDelete: "cascade" })
+    .notNull(),
+  inspectorId: uuid("inspector_id")
+    .references(() => users.id),
+  reportDocNumber: varchar("report_doc_number", { length: 100 }).unique().notNull(),
+  typeOfInspection: varchar("type_of_inspection", { length: 10 }).notNull(),
+  currentStatus: varchar("current_status", { length: 50 }).default("LOD_INTAKE").notNull(),
+  checklistRaw: jsonb("checklist_raw").notNull(),
+  reportHtml: text("report_html"),
+  versionHistory: jsonb("version_history").$type<Array<{
+    modifiedBy: string;
+    updatedAt: string;
+    changes: string;
+  }>>().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// 11. CAPA Submissions
+export const capaSubmissions = pgTable("capa_submissions", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").references(() => applications.id),
+  refNumber: varchar("ref_number", { length: 255 }),
+  status: varchar("status", { length: 50 }).default("PENDING_VERIFICATION"),
+  capaItems: jsonb("capa_items"),
+  signatures: jsonb("signatures"),
+  createdAt: text("created_at"), 
+  submittedAt: text("submitted_at"),
+});
+
+// 12. Inspection Schedules (Direct SQL sync)
+export const inspectionSchedules = pgTable("inspection_schedules", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  applicationId: integer("application_id")
+    .references(() => applications.id, { onDelete: "cascade" })
+    .notNull(),
+  scheduledDate: timestamp("scheduled_date", { mode: "string" }).notNull(), // using string mode to easily parse date formats without zone shifting
+  status: varchar("status", { length: 50 }).default("SCHEDULED"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// 13. Inspection Team Assignments (Direct SQL sync)
+export const inspectionTeamAssignments = pgTable("inspection_team_assignments", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  scheduleId: uuid("schedule_id")
+    .references(() => inspectionSchedules.id, { onDelete: "cascade" })
+    .notNull(),
+  inspectorId: uuid("inspector_id").notNull(), // Links directly to auth.users in DB
+  role: varchar("role", { length: 50 }).notNull(), // 'TEAM_LEADER' | 'CO_INSPECTOR' | 'TRAINEE_INSPECTOR'
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+
+// ==========================================
 // --- RELATIONS ---
+// ==========================================
 
 export const companiesRelations = relations(companies, ({ many }) => ({
   productLines: many(productLines),
@@ -159,13 +225,26 @@ export const applicationsRelations = relations(applications, ({ one, many }) => 
   }),
   timelines: many(qmsTimelines),
   riskAssessments: many(riskAssessments), 
+  schedules: many(inspectionSchedules), // Relational mapping to inspection system
 }));
 
+// UPDATED: Linked qmsTimelines to both Applications and Users
 export const qmsTimelinesRelations = relations(qmsTimelines, ({ one }) => ({
   application: one(applications, {
     fields: [qmsTimelines.applicationId],
     references: [applications.id],
   }),
+  staff: one(users, {
+    fields: [qmsTimelines.staffId],
+    references: [users.id],
+  }),
+}));
+
+// ADDED: Backwards relation definition so users can load their historical/active timelines
+export const usersRelations = relations(users, ({ many }) => ({
+  timelines: many(qmsTimelines),
+  reportsInspected: many(localInspectionReports),
+  assignments: many(inspectionTeamAssignments), // Tracks actual field assignments linked to user records
 }));
 
 export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => ({
@@ -173,3 +252,23 @@ export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => 
   application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),
 }));
 
+export const localInspectionReportsRelations = relations(localInspectionReports, ({ one }) => ({
+  application: one(applications, { fields: [localInspectionReports.applicationId], references: [applications.id] }),
+  company: one(companies, { fields: [localInspectionReports.companyId], references: [companies.id] }),
+  inspector: one(users, { fields: [localInspectionReports.inspectorId], references: [users.id] }),
+}));
+
+export const capaSubmissionsRelations = relations(capaSubmissions, ({ one }) => ({
+  application: one(applications, { fields: [capaSubmissions.applicationId], references: [applications.id] }),
+}));
+
+// NEW RELATIONS FOR FIELD DESK WORKFLOWS
+export const inspectionSchedulesRelations = relations(inspectionSchedules, ({ one, many }) => ({
+  application: one(applications, { fields: [inspectionSchedules.applicationId], references: [applications.id] }),
+  teamAssignments: many(inspectionTeamAssignments),
+}));
+
+export const inspectionTeamAssignmentsRelations = relations(inspectionTeamAssignments, ({ one }) => ({
+  schedule: one(inspectionSchedules, { fields: [inspectionTeamAssignments.scheduleId], references: [inspectionSchedules.id] }),
+  inspectorProfile: one(users, { fields: [inspectionTeamAssignments.inspectorId], references: [users.id] }),
+}));

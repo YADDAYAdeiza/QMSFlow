@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, MessageSquare, Loader2, Building2, Check, ShieldCheck } from "lucide-react";
+import { Send, MessageSquare, Loader2, Building2, Check, ShieldCheck, Mail } from "lucide-react";
 import { assignToDDD } from '@/lib/actions/director';
 import { cn } from "@/lib/utils";
 
@@ -16,7 +16,7 @@ export default function AssignToDDDButton({
   appId, 
   defaultDivision, 
   availableHeads,
-  isCompliance = false // Added to distinguish Round 2
+  isCompliance = false // Distinguishes Round 2
 }: { 
   appId: number; 
   defaultDivision: string; 
@@ -27,6 +27,7 @@ export default function AssignToDDDButton({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [comment, setComment] = useState("");
   const [selectedDiv, setSelectedDiv] = useState(defaultDivision);
+  const [sendEmail, setSendEmail] = useState(false); // Controls optional notification state
   const [isPending, setIsPending] = useState(false);
 
   useEffect(() => {
@@ -38,11 +39,14 @@ export default function AssignToDDDButton({
     
     setIsPending(true);
     const head = availableHeads.find(h => h.division === selectedDiv);
-    const result = await assignToDDD(appId, [selectedDiv], comment, head?.id);
+    
+    // Passing sendEmail toggle state as the fifth parameter
+    const result = await assignToDDD(appId, [selectedDiv], comment, head?.id, sendEmail);
     
     if (result.success) {
       setIsModalOpen(false);
       setComment(""); 
+      setSendEmail(false);
       router.refresh();
     } else {
       alert("Assignment failed. Check server logs.");
@@ -92,21 +96,52 @@ export default function AssignToDDDButton({
                   Target {selectedDiv === defaultDivision ? "Recommended" : "Modified"} Division
                 </label>
                 <div className="relative">
-                    <select 
-                      value={selectedDiv}
-                      onChange={(e) => setSelectedDiv(e.target.value)}
-                      className="w-full p-5 bg-slate-50 border-none rounded-2xl text-xs font-bold outline-none ring-2 ring-transparent focus:ring-blue-500 transition-all appearance-none"
-                    >
-                      {availableHeads.map(head => (
-                        <option key={head.id} value={head.division}>
-                          {head.division} — {head.name} {head.division === defaultDivision ? " (LOD SUGGESTION)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                    {selectedDiv === defaultDivision && (
-                        <Check className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
-                    )}
+                  <select 
+                    value={selectedDiv}
+                    onChange={(e) => setSelectedDiv(e.target.value)}
+                    className="w-full p-5 bg-slate-50 border-none rounded-2xl text-xs font-bold outline-none ring-2 ring-transparent focus:ring-blue-500 transition-all appearance-none"
+                  >
+                    {availableHeads.map(head => (
+                      <option key={head.id} value={head.division}>
+                        {head.division} — {head.name} {head.division === defaultDivision ? " (LOD SUGGESTION)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedDiv === defaultDivision && (
+                    <Check className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
+                  )}
                 </div>
+              </div>
+
+              {/* Email Notification Toggle Slider Slider Section */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
+                <div className="flex items-center gap-2.5">
+                  <div className={cn(
+                    "p-2 rounded-xl transition-colors",
+                    sendEmail ? "bg-blue-100 text-blue-600" : "bg-slate-200/60 text-slate-400"
+                  )}>
+                    <Mail className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-slate-700 tracking-tight">Email Alert</p>
+                    <p className="text-[9px] font-medium text-slate-400">Notify Divisional Deputy Director</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSendEmail(!sendEmail)}
+                  className={cn(
+                    "relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                    sendEmail ? (isCompliance ? "bg-purple-600" : "bg-blue-600") : "bg-slate-200"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      sendEmail ? "translate-x-5" : "translate-x-0"
+                    )}
+                  />
+                </button>
               </div>
 
               <div className="space-y-2">
@@ -125,10 +160,10 @@ export default function AssignToDDDButton({
 
               <div className="grid grid-cols-2 gap-4 pt-2">
                 <button 
-                    onClick={() => setIsModalOpen(false)} 
-                    className="py-4 text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 transition-colors"
+                  onClick={() => setIsModalOpen(false)} 
+                  className="py-4 text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 transition-colors"
                 >
-                    Discard
+                  Discard
                 </button>
                 <button 
                   disabled={isPending} 

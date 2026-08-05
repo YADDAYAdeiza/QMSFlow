@@ -46,8 +46,11 @@ export default async function DDDNestedLayout({
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* HORIZONTAL DDD NAVIGATION */}
-      <nav className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+      {/* 
+        FIX: Keeping your sleek backdrop-blur style but ensuring 'w-full' and a solid 
+        z-50 stacking rule forces all scrolling children to remain underneath.
+      */}
+      <nav className="bg-white/90 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50 w-full shadow-sm">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           
           <div className="flex items-center gap-10">
@@ -81,7 +84,7 @@ export default async function DDDNestedLayout({
             </div>
           </div>
 
-          {/* SYSTEM STATUS & LOGOUT (Inherited from Outer Layout usually) */}
+          {/* SYSTEM STATUS & LOGOUT */}
           <div className="flex items-center gap-4">
              <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-full border border-slate-100">
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
@@ -95,7 +98,6 @@ export default async function DDDNestedLayout({
 
       {/* DDD PAGE CONTENT */}
       <main className="flex-1">
-        {/* We don't add extra padding here because your page.tsx already has p-8 */}
         {children}
       </main>
 
