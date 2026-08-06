@@ -2,8 +2,7 @@
 
 import React, { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Edit3, Eye, Save, X, AlertCircle } from "lucide-react";
-// import PrintTrigger from "./PrintTrigger";
+import { Edit3, Eye, Save, AlertCircle, Trash2 } from "lucide-react";
 import RecommendApprovalModal from "@/app/LocalInspectionReports/ddd/schedule/print/RecommendApprovalModal";
 import PrintTrigger from "@/app/LocalInspectionReports/ddd/schedule/print/PrintTrigger";
 
@@ -38,6 +37,8 @@ interface BatchScheduleEditorProps {
   inspectorPool: InspectorPoolItem[];
   formattedHeaderDate: string;
   isApproved: boolean;
+  userId?: string;
+  isReadOnly?: boolean;
 }
 
 export default function BatchScheduleEditor({
@@ -51,6 +52,8 @@ export default function BatchScheduleEditor({
   inspectorPool,
   formattedHeaderDate,
   isApproved,
+  userId,
+  isReadOnly = false,
 }: BatchScheduleEditorProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -59,14 +62,21 @@ export default function BatchScheduleEditor({
   const [rows, setRows] = useState<EditableScheduleItem[]>(initialRows);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Sync internal rows if props change
+  // Keep internal row state synced with parent props
   useEffect(() => {
     setRows(initialRows);
   }, [initialRows]);
 
   const isRework = batchStatus === "REWORK_REQUIRED";
 
-  // Field change handlers for inline editing
+  // --- Row Removal (Local Deletion) ---
+  const handleRemoveRow = (scheduleId: string) => {
+    if (confirm("Are you sure you want to remove this inspection entry from the batch schedule?")) {
+      setRows((prev) => prev.filter((r) => r.scheduleId !== scheduleId));
+    }
+  };
+
+  // --- Inline Field Handlers ---
   const handleDateChange = (scheduleId: string, date: string) => {
     setRows((prev) =>
       prev.map((r) => (r.scheduleId === scheduleId ? { ...r, scheduledDate: date } : r))
@@ -112,7 +122,7 @@ export default function BatchScheduleEditor({
         if (r.scheduleId !== scheduleId) return r;
         const exists = r.traineeInspectorIds.includes(inspectorId);
         if (!exists && r.traineeInspectorIds.length >= 2) {
-          alert("QMS Guardrail: Maximum of 2 trainees allowed per team.");
+          alert("QMS Guardrail: Maximum of 2 trainees allowed per inspection team.");
           return r;
         }
         const updated = exists
@@ -123,12 +133,16 @@ export default function BatchScheduleEditor({
     );
   };
 
-  // Submit all row changes in one batch payload
+  // --- Save Batch Updates & Send Remaining Active Schedule IDs ---
   const handleSaveChanges = async () => {
     setSaveError(null);
 
     const payloadUpdates = rows.map((r) => {
-      const inspectors: Array<{ inspectorId: string; role: "TEAM_LEADER" | "CO_INSPECTOR" | "TRAINEE_INSPECTOR" }> = [];
+      const inspectors: Array<{
+        inspectorId: string;
+        role: "TEAM_LEADER" | "CO_INSPECTOR" | "TRAINEE_INSPECTOR";
+      }> = [];
+
       if (r.teamLeaderId) {
         inspectors.push({ inspectorId: r.teamLeaderId, role: "TEAM_LEADER" });
       }
@@ -147,116 +161,135 @@ export default function BatchScheduleEditor({
       };
     });
 
+    // Extract current list of remaining schedule IDs
+    const activeScheduleIds = rows.map((r) => r.scheduleId);
+
     startTransition(async () => {
       try {
         const response = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ updates: payloadUpdates }),
+          body: JSON.stringify({
+            updates: payloadUpdates,
+            activeScheduleIds,
+            batchId,
+            startDate,
+            endDate,
+          }),
         });
 
         const result = await response.json();
         if (!response.ok || !result.success) {
-          throw new Error(result.error || "Failed to update batch schedule.");
+          throw new Error(result.error || "Failed to save batch schedule.");
         }
 
         setIsEditMode(false);
         router.refresh();
       } catch (err: any) {
-        setSaveError(err.message || "Error saving schedule changes.");
+        setSaveError(err.message || "Error saving batch schedule changes.");
       }
     });
   };
 
-  // Helper to format inspector names for view mode display
   const getInspectorName = (id: string) =>
     inspectorPool.find((ins) => ins.id === id)?.full_name || "Unknown Staff";
 
   return (
     <div>
-      {/* Control Action Bar */}
+      {/* Action Bar (Screen Only) */}
       <div className="max-w-5xl mx-auto mb-6 p-4 bg-white rounded-lg shadow-md border border-slate-200 flex flex-wrap justify-between items-center gap-4 print:hidden">
-        {/* Date Filter Form */}
-        <form method="GET" className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">
-            From:
-            <input
-              type="date"
-              name="startDate"
-              defaultValue={startDate}
-              className="ml-1 px-2 py-1 border border-slate-300 rounded-md text-sm"
-            />
-          </label>
-          <label className="text-xs font-semibold text-slate-600">
-            To:
-            <input
-              type="date"
-              name="endDate"
-              defaultValue={endDate}
-              className="ml-1 px-2 py-1 border border-slate-300 rounded-md text-sm"
-            />
-          </label>
-          <button
-            type="submit"
-            className="px-3 py-1 bg-slate-800 text-white rounded-md text-xs font-medium hover:bg-slate-700 cursor-pointer"
-          >
-            Filter Schedule
-          </button>
-        </form>
-
-        {/* Action Toggle Buttons */}
-        <div className="flex items-center gap-3">
-          {/* Editor Toggle */}
-          {!isApproved && (
+        
+        {/* Date Filter */}
+        {!isReadOnly ? (
+          <form method="GET" className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">
+              From:
+              <input
+                type="date"
+                name="startDate"
+                defaultValue={startDate}
+                className="ml-1 px-2 py-1 border border-slate-300 rounded-md text-sm"
+              />
+            </label>
+            <label className="text-xs font-semibold text-slate-600">
+              To:
+              <input
+                type="date"
+                name="endDate"
+                defaultValue={endDate}
+                className="ml-1 px-2 py-1 border border-slate-300 rounded-md text-sm"
+              />
+            </label>
             <button
-              type="button"
-              onClick={() => {
-                setIsEditMode(!isEditMode);
-                setSaveError(null);
-              }}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md shadow-xs transition-colors cursor-pointer text-white ${
-                isEditMode
-                  ? "bg-slate-600 hover:bg-slate-700"
-                  : "bg-indigo-600 hover:bg-indigo-700"
-              }`}
+              type="submit"
+              className="px-3 py-1 bg-slate-800 text-white rounded-md text-xs font-medium hover:bg-slate-700 cursor-pointer"
             >
-              {isEditMode ? <Eye className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
-              {isEditMode ? "Switch to View Mode" : "Edit Batch Schedule"}
+              Filter Schedule
             </button>
+          </form>
+        ) : (
+          <div className="text-xs font-medium text-slate-500">
+            Viewing Schedule Period: <span className="font-bold text-slate-800">{formattedHeaderDate}</span>
+          </div>
+        )}
+
+        {/* Action Controls */}
+        <div className="flex items-center gap-3 ml-auto">
+          {!isReadOnly && !isApproved && (
+            <>
+              {/* Toggle Edit Mode */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditMode(!isEditMode);
+                  setSaveError(null);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md shadow-xs transition-colors cursor-pointer text-white ${
+                  isEditMode
+                    ? "bg-slate-600 hover:bg-slate-700"
+                    : "bg-indigo-600 hover:bg-indigo-700"
+                }`}
+              >
+                {isEditMode ? <Eye className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
+                {isEditMode ? "Switch to View Mode" : "Edit Batch Schedule"}
+              </button>
+
+              {/* Save Edits */}
+              {isEditMode && (
+                <button
+                  type="button"
+                  onClick={handleSaveChanges}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-xs font-bold rounded-md shadow-xs cursor-pointer transition-colors"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  {isPending ? "Saving..." : "Save Batch Edits"}
+                </button>
+              )}
+
+              {/* Recommend / Resubmit Workflow Modal */}
+              {!isEditMode && (
+                <RecommendApprovalModal
+                  batchId={batchId}
+                  batchReference={`SCHEDULE-${startDate}`}
+                  title={`Annexure 08 (${startDate} to ${endDate})`}
+                  startDate={startDate}
+                  endDate={endDate}
+                  scheduleIds={scheduleIds}
+                  history={batchHistory}
+                  isRework={isRework}
+                  userId={userId}
+                />
+              )}
+            </>
           )}
 
-          {/* Save Changes Button (Visible in Editor Mode) */}
-          {isEditMode && (
-            <button
-              type="button"
-              onClick={handleSaveChanges}
-              disabled={isPending}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-xs font-bold rounded-md shadow-xs cursor-pointer transition-colors"
-            >
-              <Save className="w-3.5 h-3.5" />
-              {isPending ? "Saving..." : "Save Batch Edits"}
-            </button>
-          )}
-
-          {/* Recommend / Resubmit Modal */}
-          {!isEditMode && (
-            <RecommendApprovalModal
-              batchId={batchId}
-              batchReference={`SCHEDULE-${startDate}`}
-              title={`Annexure 08 (${startDate} to ${endDate})`}
-              startDate={startDate}
-              endDate={endDate}
-              scheduleIds={scheduleIds}
-              history={batchHistory}
-              isRework={isRework}
-            />
-          )}
-
+          {/* Print Trigger */}
           <PrintTrigger />
         </div>
       </div>
 
-      {/* Editor Error Banner */}
+      {/* Save Error Alert */}
       {saveError && (
         <div className="max-w-5xl mx-auto mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-xs flex items-center gap-2 print:hidden">
           <AlertCircle className="w-4 h-4 shrink-0" />
@@ -264,17 +297,17 @@ export default function BatchScheduleEditor({
         </div>
       )}
 
-      {/* Official Annexure Sheet (Renders View or Editor) */}
+      {/* Official Annexure Sheet */}
       <div className="max-w-5xl mx-auto bg-white p-6 border border-slate-300 shadow-sm print:shadow-none print:border-none print:p-0">
         
-        {/* Top Header Metadata */}
+        {/* Annexure Top Metadata Banner */}
         <div className="border border-black text-xs font-bold flex justify-between divide-x divide-black mb-4">
           <div className="p-1.5 flex-1 text-left">Annexure No. 08</div>
           <div className="p-1.5 flex-1 text-center">SOP Ref No. VMAP-015-01</div>
           <div className="p-1.5 flex-1 text-right">Title of Annexure: Inspection Schedule</div>
         </div>
 
-        {/* NAFDAC Crest Logo */}
+        {/* Agency Logo & Title */}
         <div className="text-center my-4 space-y-2">
           <div className="flex justify-center mb-1">
             <img
@@ -286,14 +319,14 @@ export default function BatchScheduleEditor({
           <h2 className="text-base font-extrabold tracking-wide uppercase">
             VMAP INSPECTION SCHEDULE FOR {formattedHeaderDate}
           </h2>
-          {isEditMode && (
+          {!isReadOnly && isEditMode && (
             <p className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded py-1 max-w-md mx-auto print:hidden">
-              ✏️ BATCH EDITOR ACTIVE — Modify dates & team allocations below, then click "Save Batch Edits"
+              ✏️ BATCH EDITOR ACTIVE — Modify dates, team allocations, or delete entries below, then click "Save Batch Edits"
             </p>
           )}
         </div>
 
-        {/* Dynamic Table */}
+        {/* Schedule Table */}
         <table className="w-full border-collapse border border-black text-xs">
           <thead>
             <tr className="border-b border-black text-center font-bold uppercase bg-slate-50 print:bg-transparent">
@@ -302,31 +335,41 @@ export default function BatchScheduleEditor({
               <th className="border-r border-black p-2 w-1/5">PURPOSE/TYPES OF INSPECTION</th>
               <th className="border-r border-black p-2 w-1/3">NAME OF INSPECTORS</th>
               <th className="border-r border-black p-2 w-32">DATE OF INSPECTION</th>
-              <th className="p-2 w-24">DRIVER</th>
+              <th className={`p-2 ${!isReadOnly && isEditMode ? "border-r border-black w-24" : "w-24"}`}>
+                DRIVER
+              </th>
+              {!isReadOnly && isEditMode && (
+                <th className="p-2 w-12 text-center text-red-600 print:hidden">ACTION</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-black">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center text-slate-500 italic">
+                <td colSpan={!isReadOnly && isEditMode ? 7 : 6} className="p-8 text-center text-slate-500 italic">
                   No inspection schedules found for the selected date range.
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              rows.map((row, index) => (
                 <tr key={row.scheduleId} className="border-b border-black align-top">
-                  <td className="border-r border-black p-2 text-center font-bold">{row.sn}.</td>
+                  {/* Dynamic Serial Number Re-sequencing */}
+                  <td className="border-r border-black p-2 text-center font-bold">{index + 1}.</td>
+                  
+                  {/* Facility Details */}
                   <td className="border-r border-black p-2 uppercase font-semibold">
                     <div>{row.companyName}</div>
                     <div className="text-[11px] font-normal text-slate-700 mt-1">{row.companyAddress}</div>
                   </td>
+                  
+                  {/* Inspection Purpose */}
                   <td className="border-r border-black p-2 uppercase font-medium">
                     {row.inspectionType}
                   </td>
 
-                  {/* INSPECTORS COLUMN */}
+                  {/* Inspectors Column */}
                   <td className="border-r border-black p-2 uppercase">
-                    {isEditMode ? (
+                    {!isReadOnly && isEditMode ? (
                       <div className="space-y-3 lowercase">
                         {/* Team Leader Select */}
                         <div>
@@ -345,7 +388,7 @@ export default function BatchScheduleEditor({
                           </select>
                         </div>
 
-                        {/* Co-Inspectors Selector */}
+                        {/* Co-Inspectors Checkboxes */}
                         <div>
                           <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Co-Inspectors:</label>
                           <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
@@ -365,7 +408,7 @@ export default function BatchScheduleEditor({
                           </div>
                         </div>
 
-                        {/* Trainees Selector */}
+                        {/* Trainees Checkboxes (Max 2 Guardrail) */}
                         <div>
                           <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Trainees (Max 2):</label>
                           <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
@@ -412,9 +455,9 @@ export default function BatchScheduleEditor({
                     )}
                   </td>
 
-                  {/* DATE COLUMN */}
+                  {/* Date Column */}
                   <td className="border-r border-black p-2 text-center font-bold">
-                    {isEditMode ? (
+                    {!isReadOnly && isEditMode ? (
                       <input
                         type="date"
                         value={row.scheduledDate}
@@ -426,9 +469,9 @@ export default function BatchScheduleEditor({
                     )}
                   </td>
 
-                  {/* DRIVER COLUMN */}
-                  <td className="p-2 text-center font-semibold uppercase">
-                    {isEditMode ? (
+                  {/* Driver Column */}
+                  <td className={`p-2 text-center font-semibold uppercase ${!isReadOnly && isEditMode ? "border-r border-black" : ""}`}>
+                    {!isReadOnly && isEditMode ? (
                       <input
                         type="text"
                         value={row.driver || ""}
@@ -440,13 +483,27 @@ export default function BatchScheduleEditor({
                       row.driver || "DAN BABA"
                     )}
                   </td>
+
+                  {/* Delete Action Column (Edit Mode Only) */}
+                  {!isReadOnly && isEditMode && (
+                    <td className="p-2 text-center align-middle print:hidden">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRow(row.scheduleId)}
+                        className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                        title="Remove schedule from batch"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
           </tbody>
         </table>
 
-        {/* Signature Endorsement Footer */}
+        {/* Official Endorsement & Approval Signature Footer */}
         <div className="mt-12 pt-4 flex justify-between items-end text-xs font-bold px-8">
           {/* Endorsed By */}
           <div className="text-center space-y-1">

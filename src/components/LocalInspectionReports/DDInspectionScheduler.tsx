@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation'; // 1. Import useRouter
 
 interface LockedWorkflow {
   application_id: number;
@@ -11,7 +12,7 @@ interface LockedWorkflow {
 interface Inspector {
   id: string;
   full_name: string;
-  division?: string; // Appended to handle incoming API matrix allocations safely
+  division?: string;
   is_available: boolean;
   locked_workflows?: LockedWorkflow[];
 }
@@ -21,9 +22,20 @@ interface DDInspectionSchedulerProps {
   companyName: string;
   userRole: string;
   onSuccess?: () => void;
+  /** Optional custom redirect route - defaults to the DDD Inbox */
+  redirectTo?: string; 
 }
 
-export default function DDInspectionScheduler({ applicationId, companyName, userRole, onSuccess }: DDInspectionSchedulerProps) {
+export default function DDInspectionScheduler({ 
+  applicationId, 
+  companyName, 
+  userRole, 
+  onSuccess,
+  redirectTo = "/LocalInspectionReports/ddd/inbox?tab=assigned" // 2. Default target tab
+}: DDInspectionSchedulerProps) {
+  
+  const router = useRouter(); // 3. Instantiate router
+
   // Strict Security Boundary Guard
   if (userRole !== 'Divisional Deputy Director') {
     return (
@@ -47,20 +59,15 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
   const [coInspectors, setCoInspectors] = useState<string[]>([]);
   const [traineeInspectors, setTraineeInspectors] = useState<string[]>([]);
 
-  // Load staff pool alongside their active registry metrics on mount
   useEffect(() => {
     async function getStaffPoolRegistry() {
       try {
         setErrorMsg(null);
         setLoading(true);
-        
-        // Point directly to our newly structured API route
         const res = await fetch('/api/LocalInspectionReports/inspectors/poolRegistry');
         if (!res.ok) throw new Error('Failed to retrieve inspector workforce matrix from QMS registry.');
         
         const data = await res.json();
-        
-        // This sets the unified state array containing all profiles + block lists
         setInspectors(data.inspectors || []);
       } catch (err: any) {
         setErrorMsg(err.message);
@@ -71,17 +78,14 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
     getStaffPoolRegistry();
   }, []);
 
-  // Isolate inspectors that are fully cleared and completely unallocated
   const availableInspectors = inspectors.filter(ins => ins.is_available);
 
-  // Handle Co-Inspector Checkbox selections
   const handleCoInspectorToggle = (id: string) => {
     setCoInspectors(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
   };
 
-  // Handle Trainee Checkbox selections with a Max Cap of 2 rule
   const handleTraineeToggle = (id: string) => {
     setTraineeInspectors(prev => {
       if (prev.includes(id)) {
@@ -121,11 +125,16 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
       if (!result.success) throw new Error(result.error || 'Failed to register schedule.');
       
       alert("Inspection successfully scheduled and mandated.");
+      
       if (onSuccess) onSuccess();
+
+      // 4. Force a router refresh and redirect straight back to the Inbox Dashboard!
+      router.refresh();
+      router.push(redirectTo);
+
     } catch (err: any) {
       setErrorMsg(err.message);
-    } finally {
-      setSubmitting(false);
+      setSubmitting(false); // Only unset submitting on error so UI stays disabled during page redirect
     }
   };
 
@@ -233,7 +242,7 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
           </div>
 
           <button 
-            className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold py-2.5 px-4 rounded-md text-sm transition-colors shadow-sm"
+            className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold py-2.5 px-4 rounded-md text-sm transition-colors shadow-sm cursor-pointer"
             onClick={handleSubmitSchedule}
             disabled={submitting}
           >
@@ -242,7 +251,7 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
         </div>
       </div>
 
-      {/* Side Audit Panel: Workload Allocations Tracker */}
+      {/* Side Audit Panel */}
       <div className="w-full md:w-80 bg-slate-50 border border-slate-200 rounded-lg p-4 flex flex-col justify-between">
         <div>
           <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3 border-b border-slate-200 pb-2">
@@ -277,7 +286,6 @@ export default function DDInspectionScheduler({ applicationId, companyName, user
             ))}
           </div>
 
-          {/* Workflow Lock Insights Board */}
           {focusedInspector ? (
             <div className="bg-white border border-slate-200 rounded p-3 shadow-inner min-h-[140px]">
               <h4 className="text-xs font-bold text-slate-800 truncate mb-2">

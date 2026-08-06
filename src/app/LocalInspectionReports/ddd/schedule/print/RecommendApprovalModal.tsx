@@ -2,8 +2,8 @@
 
 import React, { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Send, CheckCircle2, X } from "lucide-react";
-import BatchHistoryModal from "@/app/LocalInspectionReports/Director/schedules/BatchHistoryModal";
+import { AlertTriangle } from "lucide-react";
+import BatchHistoryModal, { HistoryEntry } from "@/app/LocalInspectionReports/Director/schedules/BatchHistoryModal";
 
 interface RecommendApprovalModalProps {
   batchId?: string;
@@ -13,7 +13,7 @@ interface RecommendApprovalModalProps {
   endDate: string;
   scheduleIds: string[];
   history?: HistoryEntry[] | null | undefined;
-  isRework?: boolean; // 💡 Dynamically adapts button styling if this is a rework resubmission
+  isRework?: boolean;
   userId?: string;
 }
 
@@ -33,7 +33,6 @@ export default function RecommendApprovalModal({
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  // Extract the latest Director directive if under rework status
   const historyList = Array.isArray(history) ? history : [];
   const latestDirectorRemark = historyList
     .slice()
@@ -43,26 +42,37 @@ export default function RecommendApprovalModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!batchId) {
+      alert("Error: Batch ID is missing. Please select a valid schedule batch.");
+      return;
+    }
+
+    // Validate UUID format before passing to backend
+    const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+
     startTransition(async () => {
       try {
         const response = await fetch("/api/LocalInspectionReports/schedule/director-action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          // Inside handleSubmit in RecommendApprovalModal.tsx
           body: JSON.stringify({
             batchId,
-            scheduleIds,
+            scheduleIds: scheduleIds || [],
             startDate,
             endDate,
             comments,
-            userId: userId || "system-user", // Fallback or pass active user ID
-            userRole: "Divisional Deputy Director (IRSD)",
-            action: "RECOMMEND_RESUBMIT", // Unified handler action
+            userId: isValidUuid ? userId : null,
+            userRole: "Divisional Deputy Director",
+            // 💡 Sends RECOMMEND for initial routing, RESUBMIT for rework routing
+            action: isRework ? "RESUBMIT" : "RECOMMEND", 
           }),
         });
 
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || "Failed to submit recommendation.");
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || "Failed to submit recommendation.");
         }
 
         setIsOpen(false);
@@ -74,7 +84,7 @@ export default function RecommendApprovalModal({
         );
         router.refresh();
       } catch (err: any) {
-        console.error(err);
+        console.error("Submission Error:", err);
         alert(err.message || "An error occurred while submitting. Please try again.");
       }
     });
@@ -96,8 +106,6 @@ export default function RecommendApprovalModal({
       {isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
           <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            
-            {/* Modal Header */}
             <div className="flex justify-between items-center border-b pb-3 border-slate-200">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 {isRework && <AlertTriangle className="w-4 h-4 text-amber-600" />}
@@ -112,13 +120,14 @@ export default function RecommendApprovalModal({
               </button>
             </div>
 
-            {/* Director's Previous Directive Banner (if applicable) */}
             {isRework && latestDirectorRemark && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-1">
                 <div className="font-bold text-amber-900 flex justify-between items-center">
                   <span>Director's Rework Directive:</span>
                   <span className="text-[10px] font-normal text-amber-700 font-mono">
-                    {new Date(latestDirectorRemark.timestamp).toLocaleDateString("en-GB")}
+                    {latestDirectorRemark.timestamp
+                      ? new Date(latestDirectorRemark.timestamp).toLocaleDateString("en-GB")
+                      : "N/A"}
                   </span>
                 </div>
                 <p className="text-amber-800 italic bg-white/70 p-2 rounded border border-amber-200/50">
@@ -130,7 +139,7 @@ export default function RecommendApprovalModal({
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {isRework ? "Head IRSD Revisions & Minutes Summary:" : "Endorsement Remarks / Minutes to Director:"}
+                  {isRework ? "Divisional Deputy Director Revisions & Minutes Summary:" : "Endorsement Remarks / Minutes to Director:"}
                 </label>
                 <textarea
                   required
@@ -147,8 +156,7 @@ export default function RecommendApprovalModal({
               </div>
 
               <div className="flex justify-between items-center pt-2">
-                {/* Optional History Viewer inside Modal */}
-                {batchReference && title && history ? (
+                {batchReference && title ? (
                   <BatchHistoryModal
                     batchReference={batchReference}
                     title={title}

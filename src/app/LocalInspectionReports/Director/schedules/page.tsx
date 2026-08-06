@@ -4,7 +4,7 @@ import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionSc
 import { eq, or, and, desc } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
-import DirectorBatchActionModal from "./DirectorBatchActionModal"; // Client Modal for Approve / Rework Actions
+import DirectorBatchActionModal from "./DirectorBatchActionModal";
 import BatchHistoryModal from "./BatchHistoryModal";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,6 @@ export default async function DirectorScheduleInboxPage({
   const { tab } = (await searchParams) || {};
   const activeTab = tab || "pending";
 
-  // 1. Fetch all schedule batches relevant to the Directorate
   const rawBatches = await db
     .select({
       id: scheduleBatches.id,
@@ -35,33 +34,26 @@ export default async function DirectorScheduleInboxPage({
     .leftJoin(users, eq(scheduleBatches.endorsedBy, users.id))
     .where(
       or(
-        // Pending Director Review
         and(
           eq(scheduleBatches.currentPoint, inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW.currentPoint),
           eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL)
         ),
-        // Approved
         eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED),
-        // Rework Tracking
         eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED)
       )
     )
     .orderBy(desc(scheduleBatches.createdAt));
 
-  // 2. Filter records into Tab groups using workflow constants
   const pendingBatches = rawBatches.filter(
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL
   );
-
   const approvedBatches = rawBatches.filter(
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.APPROVED
   );
-
   const reworkBatches = rawBatches.filter(
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
   );
 
-  // 3. Determine active list
   let currentList = pendingBatches;
   if (activeTab === "approved") currentList = approvedBatches;
   if (activeTab === "rework") currentList = reworkBatches;
@@ -124,8 +116,7 @@ export default async function DirectorScheduleInboxPage({
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500">
                   <th className="p-4">Batch Ref</th>
                   <th className="p-4">Schedule Title</th>
-                  <th className="p-4">Date Range</th>
-                  <th className="p-4">Endorsed By (Head IRSD)</th>
+                  <th className="p-4">Endorsed By</th>
                   <th className="p-4">Status</th>
                   <th className="p-4 text-right">Actions</th>
                 </tr>
@@ -138,10 +129,7 @@ export default async function DirectorScheduleInboxPage({
                     </td>
                     <td className="p-4 font-semibold text-slate-800">{batch.title}</td>
                     <td className="p-4 text-slate-600">
-                      {batch.startDate} to {batch.endDate}
-                    </td>
-                    <td className="p-4 text-slate-600">
-                      {batch.endorsedByName || "Pharm (Mrs.) Uba Florence"}
+                      {batch.endorsedByName || "Divisional Deputy Director"}
                     </td>
                     <td className="p-4">
                       <span
@@ -157,38 +145,20 @@ export default async function DirectorScheduleInboxPage({
                       </span>
                     </td>
                     <td className="p-4 text-right space-x-2 whitespace-nowrap">
-                      {/* Link to view print preview sheet */}
                       <Link
-                        href={`/LocalInspectionReports/ddd/schedule/print?startDate=${batch.startDate}&endDate=${batch.endDate}`}
+                        href={`/LocalInspectionReports/ddd/schedule/print?startDate=${batch.startDate}&endDate=${batch.endDate}&readOnly=true`}
                         target="_blank"
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 inline-flex items-center gap-1"
                       >
                         👁️ Preview Sheet
                       </Link>
 
-                      {/* Modal for Director to Approve or Request Rework */}
-                      {activeTab === "pending" && (
-                        <DirectorBatchActionModal batchId={batch.id} title={batch.title} />
-                      )}
-                    </td>
-                    <td className="p-4 text-right space-x-2 whitespace-nowrap">
-                      {/* Link to view print preview sheet */}
-                      <Link
-                        href={`/LocalInspectionReports/ddd/schedule/print?startDate=${batch.startDate}&endDate=${batch.endDate}`}
-                        target="_blank"
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 inline-flex items-center gap-1"
-                      >
-                        👁️ Preview Sheet
-                      </Link>
-
-                      {/* History & Minutes Modal */}
                       <BatchHistoryModal
                         batchReference={batch.batchReference}
                         title={batch.title}
                         history={batch.history as any}
                       />
 
-                      {/* Modal for Director to Approve or Request Rework */}
                       {activeTab === "pending" && (
                         <DirectorBatchActionModal batchId={batch.id} title={batch.title} />
                       )}

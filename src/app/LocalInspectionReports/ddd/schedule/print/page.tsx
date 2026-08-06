@@ -14,15 +14,29 @@ import BatchScheduleEditor, {
   EditableScheduleItem, 
   InspectorPoolItem 
 } from "@/components/LocalInspectionReports/BatchScheduleEditor";
+import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function PrintInspectionSchedulePage({
   searchParams,
 }: {
-  searchParams: Promise<{ startDate?: string; endDate?: string }>;
+  searchParams: Promise<{ startDate?: string; endDate?: string; readOnly?: string }>;
 }) {
-  const { startDate, endDate } = (await searchParams) || {};
+  const { startDate, endDate, readOnly } = (await searchParams) || {};
+
+  // Fetch current authenticated user & details
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
+
+  // Determine if the viewer should have read-only access (e.g., Director / Director VMAP role or query param)
+  const userRole = user?.user_metadata?.role || "";
+  const isReadOnly = 
+    readOnly === "true" || 
+    userRole === "Director" || 
+    userRole === "Director VMAP" || 
+    userRole === "DIRECTOR";
 
   const today = new Date();
   const defaultStart = startDate || new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
@@ -44,10 +58,51 @@ export default async function PrintInspectionSchedulePage({
     )
     .limit(1);
 
-  const activeBatch = currentBatch[0] || null;
+  let activeBatch = currentBatch[0] || null;
+
+  if (!activeBatch) {
+    try {
+      const [newBatch] = await db
+        .insert(scheduleBatches)
+        .values({
+          batchReference: `SCHEDULE-${defaultStart}-${defaultEnd}`,
+          title: `VMAP Inspection Schedule (${defaultStart} to ${defaultEnd})`,
+          startDate: defaultStart,
+          endDate: defaultEnd,
+          status: "PENDING_RECOMMENDATION",
+          currentPoint: "Divisional Deputy Director IRSD Routing",
+          history: [],
+        })
+        .returning({
+          id: scheduleBatches.id,
+          status: scheduleBatches.status,
+          history: scheduleBatches.history,
+        });
+
+      activeBatch = newBatch;
+    } catch (err) {
+      const [reFetched] = await db
+        .select({
+          id: scheduleBatches.id,
+          status: scheduleBatches.status,
+          history: scheduleBatches.history,
+        })
+        .from(scheduleBatches)
+        .where(
+          and(
+            eq(scheduleBatches.startDate, defaultStart),
+            eq(scheduleBatches.endDate, defaultEnd)
+          )
+        )
+        .limit(1);
+
+      activeBatch = reFetched || null;
+    }
+  }
+
   const isApproved = activeBatch?.status === "APPROVED";
 
-  // 2. Fetch Inspector Pool for the Editor Dropdowns
+  // 2. Fetch Inspector Pool
   const rawUsers = await db
     .select({
       id: users.id,
@@ -86,9 +141,8 @@ export default async function PrintInspectionSchedulePage({
 
   const scheduleIds = rawSchedules.map((s) => s.scheduleId);
 
-  // 4. Fetch Assigned Team Members
+  // 4. Fetch Team Assignments
   let assignments: Array<{ scheduleId: string; inspectorId: string; role: string }> = [];
-  
   if (scheduleIds.length > 0) {
     assignments = await db
       .select({
@@ -100,7 +154,7 @@ export default async function PrintInspectionSchedulePage({
       .where(inArray(inspectionTeamAssignments.scheduleId, scheduleIds));
   }
 
-  // 5. Transform Data into Editable Row Format
+  // 5. Transform Data
   const initialRows: EditableScheduleItem[] = rawSchedules.map((row, index) => {
     const rowAssignments = assignments.filter((a) => a.scheduleId === row.scheduleId);
     const teamLeader = rowAssignments.find((a) => a.role === "TEAM_LEADER")?.inspectorId || "";
@@ -138,6 +192,8 @@ export default async function PrintInspectionSchedulePage({
         inspectorPool={inspectorPool}
         formattedHeaderDate={formattedHeaderDate}
         isApproved={isApproved}
+        userId={userId}
+        isReadOnly={isReadOnly}
       />
     </main>
   );
