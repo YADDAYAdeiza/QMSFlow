@@ -32,6 +32,21 @@ interface Task {
   };
 }
 
+// Deterministic date formatter (safe for Server + Client hydration)
+function formatDateSafe(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return "Pending Data";
+  try {
+    const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return "Pending Data";
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const year = d.getUTCFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return "Pending Data";
+  }
+}
+
 export default async function InspectorWorkspacePage() {
   const cookieStore = await cookies();
   const supabase = createServerClient(
@@ -78,6 +93,16 @@ export default async function InspectorWorkspacePage() {
     .from(users)
     .where(eq(users.email, userEmail));
 
+  if (!userRecord) {
+    return (
+      <div className="p-8 max-w-6xl mx-auto">
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-xs font-medium">
+          Inspector profile record not found. Please contact system administration.
+        </div>
+      </div>
+    );
+  }
+
   let tasks: Task[] = [];
   try {
     const rawAssignments = await db
@@ -104,7 +129,6 @@ export default async function InspectorWorkspacePage() {
         companies,
         eq(applications.companyId, companies.id)
       )
-      // 🔒 Join with schedule_batches to check batch status
       .innerJoin(
         scheduleBatches,
         and(
@@ -115,7 +139,6 @@ export default async function InspectorWorkspacePage() {
       .where(
         and(
           eq(inspectionTeamAssignments.inspectorId, userRecord.id),
-          // 🔒 Must be at Staff Technical Field Review AND batch must be APPROVED
           eq(applications.currentPoint, inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title),
           eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
         )
@@ -123,10 +146,8 @@ export default async function InspectorWorkspacePage() {
 
     tasks = rawAssignments.map((row) => ({
       scheduleId: String(row.scheduleId),
-      scheduledDate: row.scheduledDate
-        ? new Date(row.scheduledDate).toLocaleDateString("en-GB")
-        : "Pending Data",
-      scheduleStatus: row.scheduleStatus ?? "SCHEDULED",
+      scheduledDate: formatDateSafe(row.scheduledDate),
+      scheduleStatus: row.scheduleStatus ?? "APPROVED",
       assignedRole: row.assignedRole as Task["assignedRole"],
       application: {
         id: String(row.applicationId),
@@ -148,7 +169,7 @@ export default async function InspectorWorkspacePage() {
               Inspector Field Assignment Desk
             </h1>
             <p className="text-xs text-slate-500 mt-1">
-              {userRecord.name} • Divisional Deputy Director ({userRecord.division || "VMD"})
+              {userRecord.name} • Inspector ({userRecord.division || "VMD"})
             </p>
           </div>
         </div>
