@@ -30,6 +30,7 @@ export default function RecommendApprovalModal({
 }: RecommendApprovalModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [comments, setComments] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -39,13 +40,20 @@ export default function RecommendApprovalModal({
     .reverse()
     .find((entry) => entry.action === "REWORK");
 
+  const isDisabled = isPending || isSubmitting;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isDisabled) return;
 
     if (!batchId) {
       alert("Error: Batch ID is missing. Please select a valid schedule batch.");
       return;
     }
+
+    // 🔒 Synchronously disable immediately before async transition kicks in
+    setIsSubmitting(true);
 
     // Validate UUID format before passing to backend
     const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
@@ -55,7 +63,6 @@ export default function RecommendApprovalModal({
         const response = await fetch("/api/LocalInspectionReports/schedule/director-action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // Inside handleSubmit in RecommendApprovalModal.tsx
           body: JSON.stringify({
             batchId,
             scheduleIds: scheduleIds || [],
@@ -64,7 +71,6 @@ export default function RecommendApprovalModal({
             comments,
             userId: isValidUuid ? userId : null,
             userRole: "Divisional Deputy Director",
-            // 💡 Sends RECOMMEND for initial routing, RESUBMIT for rework routing
             action: isRework ? "RESUBMIT" : "RECOMMEND", 
           }),
         });
@@ -86,6 +92,8 @@ export default function RecommendApprovalModal({
       } catch (err: any) {
         console.error("Submission Error:", err);
         alert(err.message || "An error occurred while submitting. Please try again.");
+      } finally {
+        setIsSubmitting(false);
       }
     });
   };
@@ -114,7 +122,8 @@ export default function RecommendApprovalModal({
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+                disabled={isDisabled}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer disabled:opacity-50"
               >
                 ✕
               </button>
@@ -144,6 +153,7 @@ export default function RecommendApprovalModal({
                 <textarea
                   required
                   rows={4}
+                  disabled={isDisabled}
                   value={comments}
                   onChange={(e) => setComments(e.target.value)}
                   placeholder={
@@ -151,7 +161,7 @@ export default function RecommendApprovalModal({
                       ? "Detail changes made (e.g., 'Replaced Inspector X with Inspector Y per Director directive')."
                       : "e.g., Respectfully submitted for your review and approval for the upcoming week's inspections."
                   }
-                  className="w-full text-xs p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-600 text-slate-800"
+                  className="w-full text-xs p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-600 text-slate-800 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -170,19 +180,19 @@ export default function RecommendApprovalModal({
                   <button
                     type="button"
                     onClick={() => setIsOpen(false)}
-                    disabled={isPending}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md transition-colors cursor-pointer"
+                    disabled={isDisabled}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={isPending}
-                    className={`px-4 py-1.5 text-white text-xs font-semibold rounded-md shadow-xs transition-colors flex items-center gap-1 cursor-pointer ${
+                    disabled={isDisabled}
+                    className={`px-4 py-1.5 text-white text-xs font-semibold rounded-md shadow-xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                       isRework ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-700 hover:bg-emerald-800"
                     }`}
                   >
-                    {isPending ? "Submitting..." : isRework ? "Confirm & Resubmit" : "Submit Recommendation"}
+                    {isDisabled ? "Submitting..." : isRework ? "Confirm & Resubmit" : "Submit Recommendation"}
                   </button>
                 </div>
               </div>

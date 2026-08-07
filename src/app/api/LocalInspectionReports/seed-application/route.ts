@@ -1,102 +1,232 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextResponse } from 'next/server';
+import { db } from '@/db';
+import { 
+  companies, 
+  facilities, 
+  productLinesLocal, 
+  productsLocal, 
+  applications, 
+  qmsTimelines 
+} from '@/db/schema';
+import { eq, and, ilike } from 'drizzle-orm';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const body = await request.json();
-    const { 
-      companyName, 
-      companyAddress, 
-      inspectionType, 
-      notificationEmail, 
-      productLines 
-    } = body;
+    const body = await req.json();
 
-    if (!companyName || !companyAddress || !notificationEmail) {
-      return NextResponse.json({ error: "Missing required core facility attributes." }, { status: 400 });
+    const companyIdInput = body.companyId;
+    const facilityIdInput = body.facilityId;
+    const companyName = body.companyName?.trim();
+    const address = (body.address || body.facilityAddress)?.trim();
+    const facilityName = body.facilityName?.trim() || `${companyName} Facility`;
+    const latitude = body.latitude;
+    const longitude = body.longitude;
+    const applicationNumber = body.applicationNumber || `APP-${Date.now()}`;
+    const type = body.type || body.inspectionType || 'Pre-Registration';
+    
+    // Standardized directorate default: VMD
+    const targetDirectorate = body.targetDirectorate || 'VMD';
+    const estimatedInspectionDays = body.estimatedInspectionDays ?? 3;
+    const notificationEmail = body.notificationEmail;
+    
+    // Updated default list to reflect: ["VMD", "PAD", "AFPD", "IRSD"]
+    const assignedDivisions = body.assignedDivisions || ['VMD', 'PAD', 'AFPD', 'IRSD'];
+    const productLines = body.productLines || [];
+
+    if (!companyName || !address) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required parameters: companyName and address are mandatory.' },
+        { status: 400 }
+      );
     }
 
-    // 1. Generate unique arbitrary IDs or pull existing sequence indicators
-    const generatedCompanyId = Math.floor(100000 + Math.random() * 900000);
-    const generatedApplicationId = Math.floor(100000 + Math.random() * 900000);
+    const result = await db.transaction(async (tx) => {
+      // 1. Resolve Company
+      let company;
+      if (companyIdInput) {
+        [company] = await tx
+          .select()
+          .from(companies)
+          .where(eq(companies.id, companyIdInput));
+      }
 
-    // 2. Map structural code definitions based on requested inspection types
-    // Pre-Production -> PPD, Pre-Registration -> PRI, Renewal -> REN, GMP-Reassessment -> GMP
-    let typeCode = "PRI";
-    if (inspectionType === "Pre-Production") typeCode = "PPD";
-    if (inspectionType === "Renewal") typeCode = "REN";
-    if (inspectionType === "GMP-Reassessment") typeCode = "GMP";
+      if (!company) {
+        [company] = await tx
+          .select()
+          .from(companies)
+          .where(ilike(companies.name, companyName));
+      }
 
-    // 3. Upsert / Insert Company Data
-    const { error: compErr } = await supabase
-      .from("companies")
-      .upsert(
-        {
-          id: generatedCompanyId,
-          name: companyName,
-          address: companyAddress,
-          category: "LOCAL",
-        },
-        { onConflict: "id" }
-      );
+      if (!company) {
+        [company] = await tx
+          .insert(companies)
+          .values({
+            name: companyName,
+            address: address,
+            category: 'LOCAL',
+          })
+          .returning();
+      }
 
-    if (compErr) throw compErr;
+      if (!company?.id) {
+        throw new Error('Failed to resolve valid Company ID.');
+      }
 
-    // 4. Transform line fields into structural JSONB format for details tracking
-    const formattedProductLines = productLines.map((line: any) => ({
-      lineName: `${line.lineType} Manufacturing Line`,
-      lineType: line.lineType,
-      products: line.products.map((p: any) => ({
-        name: p.name,
-        classification: p.classification
-      }))
-    }));
+      // 2. Resolve Facility
+      let facility;
+      if (facilityIdInput) {
+        [facility] = await tx
+          .select()
+          .from(facilities)
+          .where(eq(facilities.id, facilityIdInput));
+      }
 
-    // 5. Build and insert application payload starting at initial technical desk
-    const applicationNumber = `APP-2026-VMD-${typeCode}-${generatedApplicationId}`;
-    
-    const { error: appErr } = await supabase
-      .from("applications")
-      .insert({
-        id: generatedApplicationId,
-        application_number: applicationNumber,
-        type: typeCode,
-        company_id: generatedCompanyId,
-        current_point: "Staff Technical Field Review",
-        status: "INSPECTION_PENDING",
-        details: {
-          notificationEmail: notificationEmail,
-          assignedDivisions: ["VMD"], // Mapping to the correct VMD tracking domain
-          inspectionTypeMeta: inspectionType,
-          productLines: formattedProductLines,
-          comments: [
-            {
-              text: `Application filed for ${inspectionType} inspection pipeline via system creation panel.`,
-              action: "INITIALIZE",
-              fromStep: "System Registration",
-              toStep: "Staff Technical Field Review",
-              actorName: "System Portal",
-              timestamp: new Date().toISOString()
+      if (!facility) {
+        [facility] = await tx
+          .select()
+          .from(facilities)
+          .where(
+            and(
+              eq(facilities.companyId, company.id),
+              ilike(facilities.address, address)
+            )
+          );
+      }
+
+      if (!facility) {
+        [facility] = await tx
+          .insert(facilities)
+          .values({
+            companyId: company.id,
+            name: facilityName,
+            address: address,
+            latitude: latitude != null && latitude !== '' ? parseFloat(latitude) : null,
+            longitude: longitude != null && longitude !== '' ? parseFloat(longitude) : null,
+          })
+          .returning();
+      } else if (latitude != null && longitude != null && latitude !== '' && longitude !== '') {
+        [facility] = await tx
+          .update(facilities)
+          .set({ 
+            latitude: parseFloat(latitude), 
+            longitude: parseFloat(longitude) 
+          })
+          .where(eq(facilities.id, facility.id))
+          .returning();
+      }
+
+      if (!facility?.id) {
+        throw new Error('Failed to resolve valid Facility ID.');
+      }
+
+      // 3. Resolve Product Lines & Products (with adjacent fields inserted)
+      if (Array.isArray(productLines)) {
+        for (const lineData of productLines) {
+          const lineName = lineData.lineName || lineData.name;
+          if (!lineName) continue;
+
+          let [line] = await tx
+            .select()
+            .from(productLinesLocal)
+            .where(
+              and(
+                eq(productLinesLocal.facilityId, facility.id),
+                ilike(productLinesLocal.name, lineName)
+              )
+            );
+
+          if (!line) {
+            [line] = await tx
+              .insert(productLinesLocal)
+              .values({
+                facilityId: facility.id,
+                name: lineName,
+              })
+              .returning();
+          }
+
+          if (lineData.products && Array.isArray(lineData.products) && lineData.products.length > 0) {
+            for (const p of lineData.products) {
+              const prodName = (typeof p === 'string' ? p : p.name)?.trim();
+              if (!prodName) continue;
+
+              const classification = typeof p === 'string' ? lineData.classification : (p.classification || lineData.classification);
+              const targetSpecies = typeof p === 'string' ? lineData.targetSpecies : (p.targetSpecies || lineData.targetSpecies);
+
+              let [existingProd] = await tx
+                .select()
+                .from(productsLocal)
+                .where(
+                  and(
+                    eq(productsLocal.lineId, line.id),
+                    ilike(productsLocal.name, prodName)
+                  )
+                );
+
+              if (!existingProd) {
+                // Insert new product record with classification and targetSpecies
+                await tx.insert(productsLocal).values({
+                  lineId: line.id,
+                  name: prodName,
+                  classification: classification ?? null,
+                  targetSpecies: targetSpecies ?? null,
+                });
+              } else {
+                // Update adjacent fields if they were missing or updated
+                await tx
+                  .update(productsLocal)
+                  .set({
+                    classification: classification ?? existingProd.classification,
+                    targetSpecies: targetSpecies ?? existingProd.targetSpecies,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(productsLocal.id, existingProd.id));
+              }
             }
-          ],
-          savedChecklistSnapshot: null,
-          compiledReportHtml: ""
+          }
         }
-      });
+      }
 
-    if (appErr) throw appErr;
+     // 4. Applications: Create main tracking entry
+        const [application] = await tx
+          .insert(applications)
+          .values({
+            applicationNumber,
+            type,
+            companyId: company.id,
+            facilityId: facility.id,
+            currentPoint: 'Staff Technical Field Review', // Matches dashboard unassigned filter
+            status: 'INSPECTION_PENDING',               // Matches dashboard status requirement
+            details: {
+              targetDirectorate,
+              estimatedInspectionDays,
+              notificationEmail,
+              assignedDivisions,
+              productLines,
+            },
+          })
+          .returning();
 
-    return NextResponse.json({
-      success: true,
-      message: `Inspection application successfully compiled. Assigned Tracking Number: ${applicationNumber}`
+        // 5. QMS Timelines: Start time tracking
+        await tx.insert(qmsTimelines).values({
+          applicationId: application.id,
+          point: 'Staff Technical Field Review', // Aligned with initial workflow point
+          startTime: new Date(),
+        });
+
+      return application;
     });
 
-  } catch (err: any) {
-    console.error("Application configuration workflow error:", err);
-    return NextResponse.json({ error: err.message || "Failed to process application record." }, { status: 500 });
+    return NextResponse.json({ 
+      success: true, 
+      applicationNumber: result.applicationNumber, 
+      data: result 
+    }, { status: 201 });
+  } catch (error: any) {
+    console.error('Failed to submit local application:', error);
+    return NextResponse.json(
+      { success: false, error: error.message || 'Internal Server Error' },
+      { status: 500 }
+    );
   }
 }

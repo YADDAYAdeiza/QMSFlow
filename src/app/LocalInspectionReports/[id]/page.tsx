@@ -83,7 +83,6 @@ export default async function LocalReportPage({ params }: PageProps) {
     .where(eq(applications.id, numericId))
     .limit(1);
 
-    console.log('This is appData[0] ', appData[0]);
   const application = appData[0];
 
   if (!application) {
@@ -183,9 +182,25 @@ export default async function LocalReportPage({ params }: PageProps) {
   const notificationEmail = appDetails.notificationEmail || "";
   const inspectionTypeMeta = appDetails.inspectionTypeMeta || "";
   
-  const initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey 
-    || application.currentPoint 
-    || "STAFF_TECHNICAL_REVIEW"; 
+  // 🎯 STEP KEY RESOLUTION FIX:
+  // Prioritize application.currentPoint directly over jsonb metadata
+  const currentPointStr = application.currentPoint || "";
+  let initialStepKey = "STAFF_TECHNICAL_REVIEW";
+
+  if (
+    currentPointStr === "Staff Technical Field Review" || 
+    currentPointStr === "STAFF_TECHNICAL_REVIEW"
+  ) {
+    initialStepKey = "STAFF_TECHNICAL_REVIEW";
+  } else if (
+    currentPointStr === "Divisional Deputy Director Technical Assignment" || 
+    currentPointStr === "DDD_TECHNICAL_ASSIGNMENT"
+  ) {
+    initialStepKey = "DDD_TECHNICAL_ASSIGNMENT";
+  } else {
+    // Fallback to jsonb currentStepKey or currentPoint string if not matched above
+    initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey || currentPointStr || "STAFF_TECHNICAL_REVIEW";
+  }
 
   const activeSnapshot = appDetails.checklistSnapshot || appDetails.savedChecklistSnapshot;
 
@@ -254,7 +269,7 @@ export default async function LocalReportPage({ params }: PageProps) {
         globalStructuralRole={structuralBaseRole} 
         notificationEmail={notificationEmail}
         scheduledDate={scheduledDate}
-        leadInspectorName={leadInspectorName} // 👈 Passed down directly here
+        leadInspectorName={leadInspectorName}
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}
         initialChecklistSnapshot={initialChecklistSnapshot}

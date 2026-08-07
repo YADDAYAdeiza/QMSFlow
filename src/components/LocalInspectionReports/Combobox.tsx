@@ -3,12 +3,13 @@
 import React, { useState, useEffect, useRef } from "react";
 
 export interface Option {
-  id?: string;
+  id?: string | number;
   label: string;
   value?: string;
   name?: string;
   classification?: string;
   targetSpecies?: string;
+  address?: string;
   [key: string]: any;
 }
 
@@ -20,6 +21,7 @@ export interface ComboboxProps {
   placeholder?: string;
   className?: string;
   label?: string;
+  disabled?: boolean;
 }
 
 export function Combobox({
@@ -29,6 +31,8 @@ export function Combobox({
   options: staticOptions,
   placeholder,
   className,
+  label,
+  disabled = false,
 }: ComboboxProps) {
   const [fetchedOptions, setFetchedOptions] = useState<Option[]>([]);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -37,7 +41,7 @@ export function Combobox({
   const displayOptions = staticOptions || fetchedOptions;
 
   useEffect(() => {
-    if (!fetchUrl || !value.trim()) {
+    if (disabled || !fetchUrl || !value.trim()) {
       setFetchedOptions([]);
       return;
     }
@@ -58,9 +62,11 @@ export function Combobox({
         }
 
         const data = await res.json();
-        if (res.ok && data.success && Array.isArray(data.data)) {
+        const results = Array.isArray(data) ? data : data?.data || [];
+
+        if (res.ok && Array.isArray(results)) {
           setFetchedOptions(
-            data.data.map((item: Record<string, any>) => ({
+            results.map((item: Record<string, any>) => ({
               ...item,
               label: item.name || item.title || item.label || "",
             }))
@@ -79,7 +85,7 @@ export function Combobox({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [value, fetchUrl]);
+  }, [value, fetchUrl, disabled]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -102,22 +108,30 @@ export function Combobox({
 
   return (
     <div ref={containerRef} className="relative w-full">
+      {label && (
+        <label className="block text-xs font-medium text-slate-400 mb-1">
+          {label}
+        </label>
+      )}
       <input
         type="text"
         value={value}
+        disabled={disabled}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
           onChange(e.target.value);
         }}
         onFocus={() => {
-          if (displayOptions.length > 0) setIsOpen(true);
+          if (!disabled && displayOptions.length > 0) setIsOpen(true);
         }}
         placeholder={placeholder}
         className={
           className ||
-          "w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+          `w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-opacity ${
+            disabled ? "opacity-50 cursor-not-allowed bg-slate-800/50" : ""
+          }`
         }
       />
-      {isOpen && displayOptions.length > 0 && (
+      {isOpen && !disabled && displayOptions.length > 0 && (
         <div className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded-md shadow-xl py-1 text-xs text-slate-200">
           {displayOptions.map((opt, idx) => (
             <div
@@ -133,7 +147,8 @@ export function Combobox({
               </div>
               {opt.classification && (
                 <span className="text-[10px] text-slate-400 block mt-0.5">
-                  {opt.classification} {opt.targetSpecies ? `• ${opt.targetSpecies}` : ""}
+                  {opt.classification}{" "}
+                  {opt.targetSpecies ? `• ${opt.targetSpecies}` : ""}
                 </span>
               )}
               {opt.address && (

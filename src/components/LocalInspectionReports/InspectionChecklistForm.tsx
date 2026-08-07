@@ -3,10 +3,29 @@
 
 import { useState, useEffect, useRef } from "react";
 
-interface Observation {
+export type QualitySystemKey = 
+  | 'pqs' 
+  | 'personnel' 
+  | 'premises_equipment' 
+  | 'qualification_validation' 
+  | 'material_management' 
+  | 'laboratory_control';
+
+export type RootCauseCategory = 
+  | 'SOP_Deficit' 
+  | 'Training_Failure' 
+  | 'Equipment_Breakdown' 
+  | 'Design_Flaw' 
+  | 'Human_Error' 
+  | 'Vendor_Issue' 
+  | 'Other';
+
+export interface Observation {
   id: string;
   severity: "critical" | "major" | "other";
+  system_category: QualitySystemKey; // Operational Sub-domain
   text: string;
+  root_cause_category?: RootCauseCategory | ""; // Root Cause Taxonomy
 }
 
 export interface ChecklistData {
@@ -17,6 +36,11 @@ export interface ChecklistData {
   inspected_site_name: string;
   notificationEmail?: string;
   site_contact_details: { phone: string; email: string; website: string };
+  
+  // Geolocation Fields
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+
   activities_carried_out: string[];
   vicinity_assessment: string;
   lead_inspector: string;
@@ -34,12 +58,17 @@ export interface ChecklistData {
   qualification_validation_score: number; qualification_validation_notes: string;
   material_management_score: number; material_management_notes: string;
   laboratory_control_score: number; laboratory_control_notes: string;
-  // Step 3: Synthesis
+  // Step 3: Synthesis & Cycle Resolution Metrics
   critical_count: number;
   major_count: number;
   other_count: number;
   observations: Observation[];
   final_recommendation: string;
+  
+  // Analytics Tracking Stamps
+  capa_first_submitted_at?: string;
+  capa_approved_at?: string;
+  rework_cycle_count?: number;
 }
 
 interface ChecklistFormProps {
@@ -53,8 +82,6 @@ interface ChecklistFormProps {
   isReadOnly?: boolean;
 }
 
-type QualitySystemKey = 'pqs' | 'personnel' | 'premises_equipment' | 'qualification_validation' | 'material_management' | 'laboratory_control';
-
 interface QualitySystemConfig {
   key: QualitySystemKey;
   label: string;
@@ -63,7 +90,6 @@ interface QualitySystemConfig {
   placeholder: string;
 }
 
-// Extracted outside the main component function body to prevent remount issues
 const Spinner = () => (
   <svg className="animate-spin h-3.5 w-3.5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -71,24 +97,12 @@ const Spinner = () => (
   </svg>
 );
 
-// Helpers for payload normalization
 const resolveInitialEmail = (data?: Record<string, any> | null) => {
-  return (
-    data?.notificationEmail ||
-    data?.site_contact_details?.email ||
-    data?.applicant_email ||
-    ""
-  );
+  return data?.notificationEmail || data?.site_contact_details?.email || data?.applicant_email || "";
 };
 
 const resolveInitialInspector = (data?: Record<string, any> | null, fallbackInspector?: string) => {
-  return (
-    data?.lead_inspector ||
-    data?.leadInspector ||
-    data?.inspector_name ||
-    fallbackInspector ||
-    ""
-  );
+  return data?.lead_inspector || data?.leadInspector || data?.inspector_name || fallbackInspector || "";
 };
 
 export default function InspectionChecklistForm({ 
@@ -103,6 +117,20 @@ export default function InspectionChecklistForm({
   const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [isGeolocating, setIsGeolocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
+
+  // Helper to normalize observations with new schema guarantees
+  const normalizeObservations = (obsArray: any[]): Observation[] => {
+    if (!Array.isArray(obsArray)) return [];
+    return obsArray.map(item => ({
+      id: item.id || crypto.randomUUID(),
+      severity: item.severity || "major",
+      system_category: item.system_category || "pqs",
+      text: item.text || "",
+      root_cause_category: item.root_cause_category || ""
+    }));
+  };
 
   const [formData, setFormData] = useState<ChecklistData>(() => {
     const resolvedEmail = resolveInitialEmail(initialData);
@@ -118,6 +146,11 @@ export default function InspectionChecklistForm({
         email: resolvedEmail,
         website: initialData?.site_contact_details?.website || initialData?.website || ""
       },
+      
+      // Initialize Coordinates
+      latitude: initialData?.latitude ?? initialData?.facility?.latitude ?? "",
+      longitude: initialData?.longitude ?? initialData?.facility?.longitude ?? "",
+
       activities_carried_out: Array.isArray(initialData?.activities_carried_out) ? initialData.activities_carried_out : [],
       vicinity_assessment: initialData?.vicinity_assessment || "",
       lead_inspector: resolveInitialInspector(initialData, leadInspectorName),
@@ -134,25 +167,25 @@ export default function InspectionChecklistForm({
       critical_count: initialData?.critical_count ?? 0,
       major_count: initialData?.major_count ?? 0,
       other_count: initialData?.other_count ?? 0,
-      observations: Array.isArray(initialData?.observations) ? initialData.observations : [],
-      final_recommendation: initialData?.final_recommendation || "PENDING"
+      observations: normalizeObservations(initialData?.observations),
+      final_recommendation: initialData?.final_recommendation || "PENDING",
+
+      capa_first_submitted_at: initialData?.capa_first_submitted_at || "",
+      capa_approved_at: initialData?.capa_approved_at || "",
+      rework_cycle_count: initialData?.rework_cycle_count ?? 0,
     };
   });
 
   const lastEmittedDataRef = useRef<ChecklistData | null>(null);
 
-  // Sync leadInspectorName if it becomes available after initial mount
   useEffect(() => {
     if (leadInspectorName && !formData.lead_inspector) {
       setFormData(prev => ({ ...prev, lead_inspector: leadInspectorName }));
     }
   }, [leadInspectorName, formData.lead_inspector]);
 
-  // Safely re-hydrate formData only when switching to a completely new payload/record
   useEffect(() => {
     if (!initialData) return;
-
-    // Check if initialData reference matches what was emitted back to parent
     const isEcho = lastEmittedDataRef.current && initialData === lastEmittedDataRef.current;
 
     if (!isEcho) {
@@ -169,6 +202,8 @@ export default function InspectionChecklistForm({
           email: resolvedEmail || prev.site_contact_details.email,
           website: initialData.site_contact_details?.website ?? initialData.website ?? prev.site_contact_details.website,
         },
+        latitude: initialData.latitude ?? initialData.facility?.latitude ?? prev.latitude,
+        longitude: initialData.longitude ?? initialData.facility?.longitude ?? prev.longitude,
         historical_baseline: {
           prev_date_type: initialData.historical_baseline?.prev_date_type ?? prev.historical_baseline.prev_date_type,
           prev_team: initialData.historical_baseline?.prev_team ?? prev.historical_baseline.prev_team,
@@ -176,12 +211,14 @@ export default function InspectionChecklistForm({
           major_changes: initialData.historical_baseline?.major_changes ?? prev.historical_baseline.major_changes,
         },
         activities_carried_out: Array.isArray(initialData.activities_carried_out) ? initialData.activities_carried_out : prev.activities_carried_out,
-        observations: Array.isArray(initialData.observations) ? initialData.observations : prev.observations
+        observations: normalizeObservations(initialData.observations ?? prev.observations),
+        capa_first_submitted_at: initialData.capa_first_submitted_at ?? prev.capa_first_submitted_at,
+        capa_approved_at: initialData.capa_approved_at ?? prev.capa_approved_at,
+        rework_cycle_count: initialData.rework_cycle_count ?? prev.rework_cycle_count,
       }));
     }
   }, [initialData?.report_doc_number, initialData?.inspected_site_name, leadInspectorName]);
 
-  // Notify parent of state changes
   useEffect(() => {
     if (onChange) {
       lastEmittedDataRef.current = formData;
@@ -189,8 +226,52 @@ export default function InspectionChecklistForm({
     }
   }, [formData, onChange]);
 
+  // Geolocation Handler
+  const handleGeolocate = () => {
+    if (isReadOnly) return;
+    setGeoError(null);
+
+    if (!navigator.geolocation) {
+      setGeoError("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    setIsGeolocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setFormData(prev => ({
+          ...prev,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        }));
+        setIsGeolocating(false);
+      },
+      (error) => {
+        setIsGeolocating(false);
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            setGeoError("Location permission denied by user.");
+            break;
+          case error.POSITION_UNAVAILABLE:
+            setGeoError("Location information is unavailable.");
+            break;
+          case error.TIMEOUT:
+            setGeoError("Location request timed out.");
+            break;
+          default:
+            setGeoError("An unknown error occurred while fetching location.");
+            break;
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  // Form input states for adding a new observation
   const [newObsText, setNewObsText] = useState("");
   const [newObsSeverity, setNewObsSeverity] = useState<"critical" | "major" | "other">("major");
+  const [newObsSystem, setNewObsSystem] = useState<QualitySystemKey>("pqs");
+  const [newObsRootCause, setNewObsRootCause] = useState<RootCauseCategory | "">("");
 
   const toggleActivity = (activity: string) => {
     if (isReadOnly) return;
@@ -209,7 +290,13 @@ export default function InspectionChecklistForm({
     if (!newObsText.trim()) return;
 
     const uniqueId = crypto.randomUUID();
-    const newObs: Observation = { id: uniqueId, severity: newObsSeverity, text: newObsText.trim() };
+    const newObs: Observation = { 
+      id: uniqueId, 
+      severity: newObsSeverity, 
+      system_category: newObsSystem,
+      text: newObsText.trim(),
+      root_cause_category: newObsRootCause
+    };
     
     setFormData(prev => ({
       ...prev,
@@ -218,7 +305,9 @@ export default function InspectionChecklistForm({
       major_count: newObsSeverity === "major" ? prev.major_count + 1 : prev.major_count,
       other_count: newObsSeverity === "other" ? prev.other_count + 1 : prev.other_count,
     }));
+
     setNewObsText("");
+    setNewObsRootCause("");
   };
 
   const removeObservation = (id: string, severity: "critical" | "major" | "other") => {
@@ -261,305 +350,425 @@ export default function InspectionChecklistForm({
     { key: "laboratory_control", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence..." },
   ];
 
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-      {/* WIZARD TABS HEADER */}
-      <div className="flex border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
-        <button type="button" onClick={() => setActiveTab(1)} className={`flex-1 py-3 text-center border-r border-slate-200 transition-all ${activeTab === 1 ? "bg-white text-emerald-700 border-b-2 border-b-emerald-600" : "hover:bg-slate-100"}`}>
-          Step 1: Admin & Baseline
-        </button>
-        <button type="button" onClick={() => setActiveTab(2)} className={`flex-1 py-3 text-center border-r border-slate-200 transition-all ${activeTab === 2 ? "bg-white text-emerald-700 border-b-2 border-b-emerald-600" : "hover:bg-slate-100"}`}>
-          Step 2: The 6 Quality Systems
-        </button>
-        <button type="button" onClick={() => setActiveTab(3)} className={`flex-1 py-3 text-center transition-all ${activeTab === 3 ? "bg-white text-emerald-700 border-b-2 border-b-emerald-600" : "hover:bg-slate-100"}`}>
-          Step 3: Synthesis & Adjudication
-        </button>
-      </div>
+return (
+  <div className="bg-slate-900 border border-slate-700/60 rounded-xl p-6 shadow-2xl space-y-6">
+    {/* Header Tabs Navigation */}
+    <div className="flex border-b border-slate-700">
+      <button
+        type="button"
+        onClick={() => setActiveTab(1)}
+        className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
+          activeTab === 1
+            ? "border-blue-500 text-blue-400 bg-blue-950/20"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+        }`}
+      >
+        1. Site Identification & Baseline
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTab(2)}
+        className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
+          activeTab === 2
+            ? "border-blue-500 text-blue-400 bg-blue-950/20"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+        }`}
+      >
+        2. The 6 Quality Systems
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTab(3)}
+        className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
+          activeTab === 3
+            ? "border-blue-500 text-blue-400 bg-blue-950/20"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+        }`}
+      >
+        3. Synthesis & Recommendations
+      </button>
+    </div>
 
-      <div className="p-6">
-        {/* --- STEP 1: ADMINISTRATIVE METADATA & HISTORICAL BASELINE --- */}
-        {activeTab === 1 && (
-          <div className="space-y-6">
+    {/* Tab 1: Site Meta, Geolocation & History Baseline */}
+    {activeTab === 1 && (
+      <div className="space-y-6 animate-fadeIn">
+        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-4">
+          <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+            1.1 Primary Audit Metadata
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1 mb-3">Inspection Core Details & Facility Information</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Doc Number</label>
-                  <input type="text" disabled className="w-full border p-2 bg-slate-100 rounded text-slate-600 font-mono text-xs font-medium" value={formData.report_doc_number} />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Inspection Date(s)</label>
-                  <input type="date" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={scheduledDate || formData.inspection_dates} onChange={e => setFormData(prev => ({ ...prev, inspection_dates: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Inspection Type</label>
-                  <select disabled={isReadOnly} className="w-full border p-2 rounded bg-white text-xs font-medium text-slate-800" value={formData.type_of_inspection} onChange={e => setFormData(prev => ({ ...prev, type_of_inspection: e.target.value }))}>
-                    <option value="PPI">Pre-Production Inspection (PPI)</option>
-                    <option value="PRI">Pre-Registration Inspection (PRI)</option>
-                    <option value="GMP">GMP-Reassessment Inspection (GMP)</option>
-                    <option value="RI">Routine Inspection (RI)</option>
-                    <option value="FUI">Follow-Up / CAPA Verification (FUI)</option>
-                    <option value="REN">Renewal (REN)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Inspected Site Name</label>
-                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.inspected_site_name} onChange={e => setFormData(prev => ({ ...prev, inspected_site_name: e.target.value }))} />
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Site Phone</label>
-                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.phone} onChange={e => setFormData(prev => ({ ...prev, site_contact_details: { ...prev.site_contact_details, phone: e.target.value } }))} />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Site Email</label>
-                  <input 
-                    type="email" 
-                    disabled={isReadOnly} 
-                    className="w-full border p-2 rounded text-xs font-medium text-slate-800" 
-                    value={formData.notificationEmail || formData.site_contact_details.email} 
-                    onChange={e => {
-                      const emailVal = e.target.value;
-                      setFormData(prev => ({
-                        ...prev, 
-                        notificationEmail: emailVal,
-                        site_contact_details: { ...prev.site_contact_details, email: emailVal }
-                      }));
-                    }} 
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Site Website</label>
-                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.site_contact_details.website} onChange={e => setFormData(prev => ({ ...prev, site_contact_details: { ...prev.site_contact_details, website: e.target.value } }))} />
-                </div>
-              </div>
+              <label className="block text-xs text-slate-400 mb-1 font-medium">Report Doc Number</label>
+              <input
+                type="text"
+                disabled={isReadOnly}
+                value={formData.report_doc_number}
+                onChange={e => setFormData(prev => ({ ...prev, report_doc_number: e.target.value }))}
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50 font-mono"
+              />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Scope of Operations / Jurisdictions</label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                {["Active Ingredient", "Finished Product", "Packaging", "Importing", "Lab Testing", "Batch Release"].map((act) => (
-                  <label key={act} className="flex items-center gap-2 p-2 border rounded bg-slate-50 cursor-pointer select-none font-bold text-slate-700">
-                    <input type="checkbox" disabled={isReadOnly} checked={formData.activities_carried_out.includes(act)} onChange={() => toggleActivity(act)} className="rounded text-emerald-600 focus:ring-0" />
-                    <span>{act}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Lead Inspector</label>
-                <input type="text" placeholder="Authorized Inspector Name" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.lead_inspector} onChange={e => setFormData(prev => ({ ...prev, lead_inspector: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Co-Inspectors / Trainees</label>
-                <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.co_inspectors} onChange={e => setFormData(prev => ({ ...prev, co_inspectors: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="text-xs">
-              <label className="block font-bold text-slate-700 mb-1">Vicinity Assessment</label>
-              <textarea rows={2} disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" placeholder="Observe external physical features, surroundings, sanitation..." value={formData.vicinity_assessment} onChange={e => setFormData(prev => ({ ...prev, vicinity_assessment: e.target.value }))} />
+              <label className="block text-xs text-slate-400 mb-1 font-medium font-bold text-slate-300">
+                Inspected Site Name
+              </label>
+              <input
+                type="text"
+                disabled={isReadOnly}
+                value={formData.inspected_site_name}
+                onChange={e => setFormData(prev => ({ ...prev, inspected_site_name: e.target.value }))}
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              />
             </div>
 
             <div>
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1 mb-3">Historical Baseline & Previous Performance</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Previous Inspection Date & Type</label>
-                  <input type="text" placeholder="e.g. 14th March 2024 (Routine)" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_date_type} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, prev_date_type: e.target.value } }))} />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Previous Inspection Team</label>
-                  <input type="text" disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.prev_team} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, prev_team: e.target.value } }))} />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Past CAPA Status / Outstanding Items</label>
-                  <input type="text" placeholder="Fully implemented..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.past_capa_status} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, past_capa_status: e.target.value } }))} />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Major Changes Since Last Intervention</label>
-                  <input type="text" placeholder="Facility upgrades, new lines..." disabled={isReadOnly} className="w-full border p-2 rounded text-xs font-medium text-slate-800" value={formData.historical_baseline.major_changes} onChange={e => setFormData(prev => ({ ...prev, historical_baseline: { ...prev.historical_baseline, major_changes: e.target.value } }))} />
-                </div>
-              </div>
+              <label className="block text-xs text-slate-400 mb-1 font-medium">Inspection Dates</label>
+              <input
+                type="text"
+                disabled={isReadOnly}
+                placeholder="e.g. Oct 12 - Oct 14, 2026"
+                value={formData.inspection_dates}
+                onChange={e => setFormData(prev => ({ ...prev, inspection_dates: e.target.value }))}
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              />
             </div>
           </div>
-        )}
 
-        {/* --- STEP 2: THE 6 QUALITY SYSTEMS --- */}
-        {activeTab === 2 && (
-          <div className="space-y-6">
-            <p className="text-xs text-slate-500 italic">Enter bullet points of raw observations. The system compilation framework will parse these metrics directly into the regulatory output draft.</p>
-            
-            {qualitySystemsConfigs.map((sys) => (
-              <div key={sys.key} className="border border-slate-100 rounded-lg p-4 bg-slate-50/50 space-y-2 text-xs">
-                <div className="flex justify-between items-center">
-                  <h4 className="font-bold text-slate-800 uppercase tracking-wide">{sys.label}</h4>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-slate-500 text-[11px]">Grade:</span>
-                    <input 
-                      type="number" 
-                      min="0" 
-                      max="100" 
-                      disabled={isReadOnly} 
-                      className="w-16 p-1 border rounded text-center font-bold bg-white text-slate-800" 
-                      value={formData[sys.scoreKey] as number} 
-                      onChange={e => {
-                        const val = Math.min(100, Math.max(0, Number(e.target.value)));
-                        setFormData(prev => ({ ...prev, [sys.scoreKey]: val }));
-                      }} 
-                    />
-                    <span className="font-bold text-slate-600">%</span>
-                  </div>
-                </div>
-                <textarea 
-                  rows={3} 
-                  disabled={isReadOnly} 
-                  placeholder={sys.placeholder} 
-                  className="w-full border p-2 rounded bg-white text-slate-800 text-xs font-medium" 
-                  value={formData[sys.notesKey] as string} 
-                  onChange={e => {
-                    const val = e.target.value;
-                    setFormData(prev => ({ ...prev, [sys.notesKey]: val }));
-                  }} 
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* --- STEP 3: SYNTHESIS & FINAL CONCLUSION --- */}
-        {activeTab === 3 && (
-          <div className="space-y-4 text-xs">
-            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900 border-b pb-1">Deficiency Aggregates & Sign-off Adjudication</h3>
-            
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="bg-rose-50 p-2 rounded border border-rose-200">
-                <p className="text-[10px] uppercase font-bold text-rose-700">Critical</p>
-                <p className="text-lg font-black text-rose-900">{formData.critical_count}</p>
-              </div>
-              <div className="bg-amber-50 p-2 rounded border border-amber-200">
-                <p className="text-[10px] uppercase font-bold text-amber-700">Major</p>
-                <p className="text-lg font-black text-amber-900">{formData.major_count}</p>
-              </div>
-              <div className="bg-blue-50 p-2 rounded border border-blue-200">
-                <p className="text-[10px] uppercase font-bold text-blue-700">Other / Minor</p>
-                <p className="text-lg font-black text-blue-900">{formData.other_count}</p>
-              </div>
-            </div>
-
-            {/* DEFICIENCY INPUT REGISTER */}
-            {!isReadOnly && (
-              <div className="bg-slate-50 p-3 rounded border border-slate-200 space-y-2">
-                <div className="flex gap-2">
-                  <select value={newObsSeverity} onChange={e => setNewObsSeverity(e.target.value as any)} className="w-1/3 bg-white border p-2 rounded font-bold text-slate-800">
-                    <option value="other">Other/Minor</option>
-                    <option value="major">Major Deficiency</option>
-                    <option value="critical">Critical Deficiency</option>
-                  </select>
-                  <input 
-                    type="text" 
-                    placeholder="Describe the non-conformance observation precisely..." 
-                    value={newObsText} 
-                    onChange={e => setNewObsText(e.target.value)} 
-                    className="w-2/3 bg-white border p-2 rounded text-slate-800 text-xs font-medium" 
-                  />
-                </div>
-                <button type="button" onClick={addObservation} className="w-full bg-slate-900 hover:bg-black text-white font-bold p-2 rounded transition-all text-xs">
-                  ＋ Add to Deficiency Log
+          {/* Geolocation Section */}
+          <div className="pt-2 border-t border-slate-700/50">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-slate-300">
+                Site GPS Coordinates (Latitude & Longitude)
+              </label>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  onClick={handleGeolocate}
+                  disabled={isGeolocating}
+                  className="flex items-center gap-1.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 text-[11px] font-medium px-2.5 py-1 rounded transition disabled:opacity-50"
+                >
+                  {isGeolocating ? <Spinner /> : "📍 Fetch GPS Location"}
                 </button>
-              </div>
+              )}
+            </div>
+
+            {geoError && (
+              <p className="text-[11px] text-rose-400 mb-2 font-mono">⚠️ {geoError}</p>
             )}
 
-            {/* CURRENT LOG DISPLAY */}
-            <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
-              {formData.observations.length === 0 ? (
-                <p className="text-slate-400 italic p-4 text-center border border-dashed rounded">No non-conformances registered yet for this cycle.</p>
-              ) : (
-                formData.observations.map((obs) => (
-                  <div key={obs.id} className="p-2 border rounded bg-slate-50/50 flex justify-between items-center text-xs group">
-                    <div className="flex gap-2 items-center overflow-hidden mr-2">
-                      <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] text-white font-bold uppercase tracking-wide ${obs.severity === "critical" ? "bg-rose-600" : obs.severity === "major" ? "bg-amber-500" : "bg-blue-500"}`}>{obs.severity}</span>
-                      <span className="text-slate-700 font-medium truncate">{obs.text}</span>
-                    </div>
-                    {!isReadOnly && (
-                      <button type="button" onClick={() => removeObservation(obs.id, obs.severity)} className="text-rose-500 hover:text-rose-700 font-bold px-1.5 py-0.5 rounded hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity">
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Latitude</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={isReadOnly}
+                  value={formData.latitude ?? ""}
+                  onChange={e => setFormData(prev => ({ ...prev, latitude: e.target.value ? parseFloat(e.target.value) : null }))}
+                  placeholder="e.g. 8.950700"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Longitude</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={isReadOnly}
+                  value={formData.longitude ?? ""}
+                  onChange={e => setFormData(prev => ({ ...prev, longitude: e.target.value ? parseFloat(e.target.value) : null }))}
+                  placeholder="e.g. 7.076800"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-medium">Lead Inspector</label>
+              <input
+                type="text"
+                disabled={isReadOnly}
+                value={formData.lead_inspector}
+                onChange={e => setFormData(prev => ({ ...prev, lead_inspector: e.target.value }))}
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              />
             </div>
 
-            {/* FINAL ADJUDICATION DROPDOWN */}
-            <div className="pt-2 border-t">
-              <label className="block font-bold text-slate-800 mb-1 uppercase tracking-wide">Final Recommendation / Adjudication</label>
-              <select disabled={isReadOnly} className="w-full border p-2.5 rounded bg-white font-semibold text-slate-800 text-xs" value={formData.final_recommendation} onChange={e => setFormData(prev => ({ ...prev, final_recommendation: e.target.value }))}>
-                <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
-                <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
-                <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
-                <option value="REJECTED">Recommended for Rejection / Hold</option>
-              </select>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-medium">Co-Inspectors</label>
+              <input
+                type="text"
+                disabled={isReadOnly}
+                placeholder="e.g. Jane Doe, John Smith"
+                value={formData.co_inspectors}
+                onChange={e => setFormData(prev => ({ ...prev, co_inspectors: e.target.value }))}
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-4">
+          <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+            1.2 Scope & Historical Baseline
+          </h3>
+          
+          <div>
+            <label className="block text-xs text-slate-400 mb-2 font-medium">Activities Evaluated</label>
+            <div className="flex flex-wrap gap-2">
+              {["Active Ingredient", "Finished Product", "Intermediate or bulk", "Packaging", "Importing", "Laboratory Testing", "Batch Control", "Batch release"].map(act => {
+                const active = formData.activities_carried_out.includes(act);
+                return (
+                  <label
+                    key={act}
+                    className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-md border font-medium transition cursor-pointer select-none ${
+                      active 
+                        ? "bg-blue-600/30 border-blue-500 text-blue-300"
+                        : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                    } ${isReadOnly ? "cursor-not-allowed opacity-60" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      disabled={isReadOnly}
+                      onChange={() => toggleActivity(act)}
+                      className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer disabled:cursor-not-allowed"
+                    />
+                    <span>{act}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1 font-medium">Vicinity & Surrounding Environment Assessment</label>
+            <textarea
+              rows={2}
+              disabled={isReadOnly}
+              value={formData.vicinity_assessment}
+              onChange={e => setFormData(prev => ({ ...prev, vicinity_assessment: e.target.value }))}
+              placeholder="Details regarding adjacent facilities, potential environmental risks..."
+              className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            />
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Tab 2: The 6 Quality Systems */}
+    {activeTab === 2 && (
+      <div className="space-y-4 animate-fadeIn">
+        {qualitySystemsConfigs.map(sys => (
+          <div key={sys.key} className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-slate-200">{sys.label}</h4>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Compliance Score:</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  disabled={isReadOnly}
+                  value={formData[sys.scoreKey] as number}
+                  onChange={e => setFormData(prev => ({ ...prev, [sys.scoreKey]: Number(e.target.value) }))}
+                  className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-blue-400 font-bold focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+                <span className="text-xs text-slate-500">%</span>
+              </div>
+            </div>
+            <textarea
+              rows={2}
+              disabled={isReadOnly}
+              placeholder={sys.placeholder}
+              value={formData[sys.notesKey] as string}
+              onChange={e => setFormData(prev => ({ ...prev, [sys.notesKey]: e.target.value }))}
+              className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            />
+          </div>
+        ))}
+      </div>
+    )}
+
+    {/* Tab 3: Synthesis, Observations & Submit */}
+    {activeTab === 3 && (
+      <div className="space-y-6 animate-fadeIn">
+        {/* Add Observation Form */}
+        {!isReadOnly && (
+          <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
+            <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+              Log New Audit Deficit / Observation
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Severity</label>
+                <select
+                  value={newObsSeverity}
+                  onChange={e => setNewObsSeverity(e.target.value as any)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="critical">Critical</option>
+                  <option value="major">Major</option>
+                  <option value="other">Other / Minor</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Quality Domain</label>
+                <select
+                  value={newObsSystem}
+                  onChange={e => setNewObsSystem(e.target.value as any)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="pqs">PQS</option>
+                  <option value="personnel">Personnel</option>
+                  <option value="premises_equipment">Premises & Equipment</option>
+                  <option value="qualification_validation">Qualification & Validation</option>
+                  <option value="material_management">Material Management</option>
+                  <option value="laboratory_control">Laboratory Control</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Root Cause Category</label>
+                <select
+                  value={newObsRootCause}
+                  onChange={e => setNewObsRootCause(e.target.value as any)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">Unassigned</option>
+                  <option value="SOP_Deficit">SOP Deficit</option>
+                  <option value="Training_Failure">Training Failure</option>
+                  <option value="Equipment_Breakdown">Equipment Breakdown</option>
+                  <option value="Design_Flaw">Design Flaw</option>
+                  <option value="Human_Error">Human Error</option>
+                  <option value="Vendor_Issue">Vendor Issue</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Deficit Description</label>
+              <textarea
+                rows={2}
+                value={newObsText}
+                onChange={e => setNewObsText(e.target.value)}
+                placeholder="Record clear objective evidence of non-compliance..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={addObservation}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded transition font-medium"
+              >
+                + Append Observation
+              </button>
             </div>
           </div>
         )}
-      </div>
 
-      {/* FOOTER ACTIONS PANEL */}
-      <div className="bg-slate-50 px-6 py-4 border-t flex justify-between items-center">
-        <button type="button" disabled={activeTab === 1 || isSavingDraft || isCompiling} onClick={() => setActiveTab((activeTab - 1) as any)} className="px-3 py-1.5 border font-semibold text-xs rounded bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700">
-          ← Back
-        </button>
-        
-        <div className="flex items-center gap-2">
-          {!isReadOnly && onSaveDraft && (
-            <button 
-              type="button" 
-              disabled={isSavingDraft || isCompiling}
-              onClick={handleDraftSubmit} 
-              className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-200/60 hover:bg-slate-200 disabled:opacity-50 rounded transition-all flex items-center gap-2 min-w-[130px] justify-center"
-            >
-              {isSavingDraft ? (
-                <><Spinner /><span>Saving Draft...</span></>
-              ) : (
-                <span>Save Draft Progress</span>
-              )}
-            </button>
-          )}
+        {/* Logged Observations Table */}
+        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
+          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+            Recorded Audit Findings ({formData.observations.length})
+          </h3>
 
-          {activeTab < 3 ? (
-            <button 
-              type="button" 
-              disabled={isSavingDraft || isCompiling}
-              onClick={() => setActiveTab((activeTab + 1) as any)} 
-              className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold text-xs rounded"
-            >
-              Next Section →
-            </button>
+          {formData.observations.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-2">No findings or observations logged.</p>
           ) : (
-            !isReadOnly && (
-              <button 
-                type="button" 
-                disabled={isCompiling || isSavingDraft}
-                onClick={handleFinalSubmit} 
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center gap-2 min-w-[210px] justify-center"
-              >
-                {isCompiling ? (
-                  <><Spinner /><span>Running Engine...</span></>
-                ) : (
-                  <span>Run Draft via System Engine</span>
-                )}
-              </button>
-            )
+            <div className="space-y-2">
+              {formData.observations.map((obs) => (
+                <div key={obs.id} className="bg-slate-900 border border-slate-800 p-3 rounded-md flex justify-between items-start gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                        obs.severity === "critical" 
+                          ? "bg-rose-950/60 border-rose-500/40 text-rose-400"
+                          : obs.severity === "major"
+                          ? "bg-amber-950/60 border-amber-500/40 text-amber-400"
+                          : "bg-slate-800 border-slate-700 text-slate-300"
+                      }`}>
+                        {obs.severity}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-400">{obs.system_category}</span>
+                      {obs.root_cause_category && (
+                        <span className="text-[10px] text-blue-400 bg-blue-950/40 border border-blue-500/20 px-1.5 py-0.5 rounded">
+                          {obs.root_cause_category}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-200">{obs.text}</p>
+                  </div>
+
+                  {!isReadOnly && (
+                    <button
+                      type="button"
+                      onClick={() => removeObservation(obs.id, obs.severity)}
+                      className="text-rose-400 hover:text-rose-300 text-xs font-bold"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
+
+        {/* FINAL ADJUDICATION DROPDOWN */}
+        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-2">
+          <label className="block font-bold text-xs text-slate-200 uppercase tracking-wider">
+            Final Recommendation / Adjudication
+          </label>
+          <select
+            disabled={isReadOnly}
+            value={formData.final_recommendation || "PENDING"}
+            onChange={e => setFormData(prev => ({ ...prev, final_recommendation: e.target.value }))}
+            className="w-full bg-slate-900 border border-slate-700 rounded-md p-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:border-blue-500 disabled:opacity-50"
+          >
+            <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
+            <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
+            <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
+            <option value="REJECTED">Recommended for Rejection / Hold</option>
+          </select>
+        </div>
       </div>
-    </div>
-  );
-}
+    )}
+
+    {/* Global Form Actions */}
+    {!isReadOnly && (
+      <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
+        {onSaveDraft && (
+          <button
+            type="button"
+            onClick={handleDraftSubmit}
+            disabled={isSavingDraft || isCompiling}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 text-xs font-medium py-2.5 px-4 rounded-md transition flex items-center gap-2 disabled:opacity-50"
+          >
+            {isSavingDraft ? <Spinner /> : null}
+            {isSavingDraft ? "Saving Draft..." : "Save Draft"}
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={handleFinalSubmit}
+          disabled={isCompiling || isSavingDraft}
+          className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider py-2.5 px-5 rounded-md transition flex items-center gap-2 shadow-lg disabled:opacity-50"
+        >
+          {isCompiling ? <Spinner /> : null}
+          {isCompiling ? "Generating..." : "AI Generate Report Framework"}
+        </button>
+      </div>
+    )}
+  </div>
+);
+};

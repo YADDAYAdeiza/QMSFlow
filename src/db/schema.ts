@@ -1,5 +1,6 @@
-import { pgTable, serial, text, varchar, date, timestamp, jsonb, integer, uuid, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, varchar, date, timestamp, doublePrecision, jsonb, integer, uuid, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+
 
 // ==========================================
 // 1. MASTER TABLES & SYSTEM CONFIGURATIONS
@@ -15,6 +16,27 @@ export const companies = pgTable("companies", {
 }, (table) => ({
   // FIX: This composite index enforces uniqueness across the name + address combination
   companySiteComboUnique: uniqueIndex("companies_name_address_unique").on(table.name, table.address),
+}));
+
+export const facilities = pgTable("facilities", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  address: text("address"),
+  companyId: integer("company_id").references(() => companies.id, {
+    onDelete: "cascade",
+  }),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Optional: Drizzle Relations setup (if you query facilities with companies)
+export const facilitiesRelations = relations(facilities, ({ one }) => ({
+  company: one(companies, {
+    fields: [facilities.companyId],
+    references: [companies.id],
+  }),
 }));
 
 // 2. Affiliation Bridge
@@ -35,6 +57,31 @@ export const productLines = pgTable("product_lines", {
   uniqueLine: uniqueIndex("unique_line_per_factory").on(table.companyId, table.name),
 }));
 
+export const productLinesLocal = pgTable(
+  "product_lines_local",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    facilityId: uuid("facility_id").references(() => facilities.id, {
+      onDelete: "cascade",
+    }),
+    name: varchar("name", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("unique_line_per_facility").on(table.facilityId, table.name),
+  ]
+);
+
+// Drizzle Relations setup
+export const productLinesLocalRelations = relations(productLinesLocal, ({ one, many }) => ({
+  facility: one(facilities, {
+    fields: [productLinesLocal.facilityId],
+    references: [facilities.id],
+  }),
+  products: many(productsLocal),
+}));
+
 // 4. Products
 export const products = pgTable("products", {
   id: serial("id").primaryKey(),
@@ -42,6 +89,26 @@ export const products = pgTable("products", {
   name: text("name").notNull(),
 }, (table) => ({
   uniqueProduct: uniqueIndex("unique_product_per_line").on(table.lineId, table.name),
+}));
+
+export const productsLocal = pgTable("products_local", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  lineId: uuid("line_id").references(() => productLinesLocal.id, {
+    onDelete: "cascade",
+  }),
+  name: text("name").notNull(),
+  classification: text("classification"),
+  targetSpecies: text("target_species"),
+  createdAt: timestamp("created_at", { mode: "string" }).defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow(),
+});
+
+// Drizzle Relations setup for queries with product lines
+export const productsLocalRelations = relations(productsLocal, ({ one }) => ({
+  productLine: one(productLinesLocal, {
+    fields: [productsLocal.lineId],
+    references: [productLinesLocal.id],
+  }),
 }));
 
 // 5. Applications
@@ -174,6 +241,7 @@ export const inspectionSchedules = pgTable("inspection_schedules", {
   applicationId: integer("application_id")
     .references(() => applications.id, { onDelete: "cascade" })
     .notNull(),
+  batchId: uuid("batch_id").references(() => scheduleBatches.id),
   scheduledDate: timestamp("scheduled_date", { mode: "string" }).notNull(), // using string mode to easily parse date formats without zone shifting
   status: varchar("status", { length: 50 }).default("SCHEDULED"),
   createdBy: uuid("created_by"),

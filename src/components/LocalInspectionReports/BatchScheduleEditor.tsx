@@ -526,7 +526,7 @@ export default function BatchScheduleEditor({
             <div className="h-14 flex items-end justify-center">
               {isApproved ? (
                 <img
-                  src="/director-signature.png"
+                  src="/MudSig-removebg-preview.png"
                   alt="Director Approval Signature"
                   className="object-contain max-h-12"
                 />

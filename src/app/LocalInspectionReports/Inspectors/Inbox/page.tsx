@@ -144,7 +144,15 @@ export default async function InspectorWorkspacePage() {
         )
       );
 
-    tasks = rawAssignments.map((row) => ({
+    // 🔒 Deduplicate assignments by scheduleId to guard against overlapping batch date ranges
+    const uniqueAssignmentsMap = new Map<string | number, typeof rawAssignments[number]>();
+    for (const row of rawAssignments) {
+      if (!uniqueAssignmentsMap.has(row.scheduleId)) {
+        uniqueAssignmentsMap.set(row.scheduleId, row);
+      }
+    }
+
+    tasks = Array.from(uniqueAssignmentsMap.values()).map((row) => ({
       scheduleId: String(row.scheduleId),
       scheduledDate: formatDateSafe(row.scheduledDate),
       scheduleStatus: row.scheduleStatus ?? "APPROVED",

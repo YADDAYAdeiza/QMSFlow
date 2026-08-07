@@ -60,6 +60,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
           inArray(applications.status, ["INSPECTION_PENDING", "INSPECTION_SCHEDULED", "APPROVED", "CAPA_APPROVED"]),
           inArray(applications.currentPoint, [
             "Staff Technical Field Review",
+            "Divisional Deputy Director Technical Assignment", // 👈 Fixed name here
             "Divisional Deputy Director Technical Endorsement",
             "Divisional Deputy Director IRSD Routing",
             "Divisional Deputy Director IRSD Concurrence",
@@ -211,7 +212,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                       {/* Show Assign Task button alongside Audit Trail for Unassigned items */}
                       {activeTab === "unassigned" && (
                         <Link
-                          href={`/LocalInspectionReports/ddd//applications/${app.id}`}
+                          href={`/LocalInspectionReports/ddd/applications/${app.id}`}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
                         >
                           <span>📝</span> Assign Task

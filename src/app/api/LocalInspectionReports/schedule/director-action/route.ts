@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { scheduleBatches, inspectionSchedules, applications } from "@/db/schema";
-import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, sql } from "drizzle-orm";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
@@ -110,13 +110,19 @@ export async function POST(request: Request) {
           .map((item) => item.applicationId)
           .filter((id): id is number => id !== null);
 
-        // 3. Advance applications to Staff Technical Review desk
+        // 3. Advance applications to Staff Technical Review desk AND synchronize details JSONB
         if (applicationIds.length > 0) {
           await tx
             .update(applications)
             .set({
               currentPoint: inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
               status: "INSPECTION_SCHEDULED",
+              // 🔒 Keeps details.inspectionWorkflowMeta.currentStepKey synchronized with database column
+              details: sql`jsonb_set(
+                COALESCE(${applications.details}, '{}'::jsonb), 
+                '{inspectionWorkflowMeta,currentStepKey}', 
+                '"STAFF_TECHNICAL_REVIEW"'::jsonb
+              )`,
               updatedAt: new Date(),
             })
             .where(inArray(applications.id, applicationIds));

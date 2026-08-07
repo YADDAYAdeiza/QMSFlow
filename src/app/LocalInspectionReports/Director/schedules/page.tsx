@@ -146,7 +146,7 @@ export default async function DirectorScheduleInboxPage({
                     </td>
                     <td className="p-4 text-right space-x-2 whitespace-nowrap">
                       <Link
-                        href={`/LocalInspectionReports/ddd/schedule/print?startDate=${batch.startDate}&endDate=${batch.endDate}&readOnly=true`}
+                        href={`/LocalInspectionReports/ddd/schedule/print?batchId=${batch.id}&readOnly=true`}
                         target="_blank"
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 inline-flex items-center gap-1"
                       >
