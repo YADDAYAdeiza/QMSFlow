@@ -501,17 +501,23 @@ export default function GMPReportWorkspace({
       // ------------------------------------------------------------------
       // 3. EXECUTE DB TRANSITION ENGINE CALL
       // ------------------------------------------------------------------
-      const res = await executeInspectionReportTransition({
-        applicationId: Number(applicationId),
-        currentStepKey: currentStep,
-        direction,
-        targetStepKey,
-        actingUserId: activeUserId,
-        actingUserRole: activeUserRole,
-        actingUserName: `${expectedUserRaw} (${activeDivision})`,
-        targetUserId: resolvedTargetUserId,
-        remarks,
-      });
+      // Inside handleTransition in GMPReportWorkspace.tsx:
+
+// ------------------------------------------------------------------
+// 3. EXECUTE DB TRANSITION ENGINE CALL (Includes Analytics Snapshot)
+// ------------------------------------------------------------------
+    const res = await executeInspectionReportTransition({
+      applicationId: Number(applicationId),
+      currentStepKey: currentStep,
+      direction,
+      targetStepKey,
+      actingUserId: activeUserId,
+      actingUserRole: activeUserRole,
+      actingUserName: `${expectedUserRaw} (${activeDivision})`,
+      targetUserId: resolvedTargetUserId,
+      remarks,
+      checklistSnapshot, // 👈 Snapshot passed to trigger relational analytics pipeline
+    });
 
       if (res.success && "arrivedAt" in res && res.arrivedAt) {
         const nextStepKey = res.arrivedAt as keyof typeof inspectionReportWorkflow.steps;

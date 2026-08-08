@@ -1,8 +1,12 @@
-// @/lib/actions/inspectionReportsEngine.ts
 "use server"
 
 import { db } from "@/db";
-import { applications, qmsTimelines } from "@/db/schema";
+import { 
+  applications, 
+  qmsTimelines, 
+  localInspectionReports, 
+  inspectionObservationsAnalytics 
+} from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
@@ -10,23 +14,23 @@ import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWor
 interface TransitionPayload {
   applicationId: number;
   currentStepKey: keyof typeof inspectionReportWorkflow.steps;
-  direction: "FORWARD" | "REWORK" | "RECALL" | "TARGETED_REWORK"; // 🎯 Added TARGETED_REWORK
-  targetStepKey?: keyof typeof inspectionReportWorkflow.steps; // 🎯 Added optional jump target
+  direction: "FORWARD" | "REWORK" | "RECALL" | "TARGETED_REWORK";
+  targetStepKey?: keyof typeof inspectionReportWorkflow.steps;
   actingUserId: string;
-  actingUserRole: string;     // 🛡️ Added to track acting authority profile
+  actingUserRole: string;
   actingUserName: string;
-  targetUserId: string | null; // Desk officer receiving the file
+  targetUserId: string | null;
   remarks: string;
-  checklistSnapshot?: any; // 🌟 Added to capture snapshots on mid-stage transitions
+  checklistSnapshot?: any;
 }
 
 export async function executeInspectionReportTransition({
   applicationId,
   currentStepKey,
   direction,
-  targetStepKey: customTargetStepKey, // 🎯 Destructured optional jump target
+  targetStepKey: customTargetStepKey,
   actingUserId,
-  actingUserRole,             // 📥 Destructured from incoming payload
+  actingUserRole,
   actingUserName,
   targetUserId,
   remarks,
@@ -37,14 +41,13 @@ export async function executeInspectionReportTransition({
     const activeStep = config.steps[currentStepKey];
     if (!activeStep) throw new Error(`Step ${currentStepKey} is not configured.`);
 
-    // 1. Resolve Target State Node using the routing path direction
+    // 1. Resolve Target State Node using routing direction
     let targetStepKey: keyof typeof config.steps | null;
     if (direction === "FORWARD") {
       targetStepKey = activeStep.nextStepKey;
     } else if (direction === "REWORK") {
       targetStepKey = activeStep.prevStepKey;
     } else if (direction === "TARGETED_REWORK") {
-      // 🎯 Direct bypass: Jumps directly to specified step or defaults to STAFF_TECHNICAL_REVIEW
       targetStepKey = customTargetStepKey || "STAFF_TECHNICAL_REVIEW";
     } else {
       targetStepKey = currentStepKey; 
@@ -63,7 +66,7 @@ export async function executeInspectionReportTransition({
       const oldDetails = (app.details as any) || {};
       const timestamp = new Date();
 
-      // Determine the initial incoming baseline snapshot block
+      // Determine baseline incoming snapshot block
       const incomingSnapshot = checklistSnapshot || oldDetails.savedChecklistSnapshot || null;
 
       let finalStatusLabel = nextStep.statusLabel;
@@ -88,23 +91,21 @@ export async function executeInspectionReportTransition({
           finalTitle = "Applicant Notification Hub - Final Approval Certified";
         }
       }
-      // -------------------------------------------------------------
 
       // 3. Build standardized, title-compliant audit notation
-      // Explicitly converts 'DDD' to 'Divisional Deputy Director' for official presentation layers
       const systemLogEntry = {
         fromStep: activeStep.title.replace(/DDD/g, "Divisional Deputy Director"),
         toStep: finalTitle.replace(/DDD/g, "Divisional Deputy Director"),
         actorName: actingUserName,
         actorId: actingUserId,
-        actorRole: actingUserRole, // 📋 Safely logged into the historic JSONB minute sheet array
+        actorRole: actingUserRole,
         assignedToId: targetUserId,
         action: direction,
         text: remarks,
         timestamp: timestamp.toISOString()
       };
 
-      // 4. Update application state matching JSON config parameters
+      // 4. Update core application state
       await tx.update(applications)
         .set({
           currentPoint: finalTitle.replace(/DDD/g, "Divisional Deputy Director"), 
@@ -115,7 +116,7 @@ export async function executeInspectionReportTransition({
             savedChecklistSnapshot: incomingSnapshot, 
             comments: [...(oldDetails.comments || []), systemLogEntry],
             inspectionWorkflowMeta: {
-              ...(oldDetails.inspectionWorkflowMeta || {}), // 💡 Preserves assignedTeam and other metadata
+              ...(oldDetails.inspectionWorkflowMeta || {}),
               currentStepKey: targetStepKey,
               currentOwnerId: targetUserId,
               lastAction: direction
@@ -124,7 +125,74 @@ export async function executeInspectionReportTransition({
         })
         .where(eq(applications.id, applicationId));
 
-      // 5. Close previous QMS Session tracking session clock
+      // ------------------------------------------------------------------
+      // 📊 5. ANALYTICAL WAREHOUSE PIPELINE: UPSERT REPORT & OBSERVATIONS
+      // ------------------------------------------------------------------
+      if (incomingSnapshot) {
+        const docNumber = incomingSnapshot.report_doc_number || `NAFDAC/VMD/GMP/${applicationId}/2026`;
+        const obsList = incomingSnapshot.observations || [];
+
+        const criticalCount = incomingSnapshot.critical_count ?? obsList.filter((o: any) => o.severity === "critical").length;
+        const majorCount = incomingSnapshot.major_count ?? obsList.filter((o: any) => o.severity === "major").length;
+        const otherCount = incomingSnapshot.other_count ?? obsList.filter((o: any) => o.severity === "other").length;
+        const totalObs = obsList.length || (criticalCount + majorCount + otherCount);
+
+        const rec = incomingSnapshot.final_recommendation || "PENDING";
+        const isCapaReq = rec === "CAPA_PENDING";
+
+        // Upsert Header Report Entry
+        const [upsertedReport] = await tx
+          .insert(localInspectionReports)
+          .values({
+            applicationId: applicationId,
+            companyId: app.companyId,
+            reportDocNumber: docNumber,
+            typeOfInspection: incomingSnapshot.type_of_inspection || "PRI",
+            facilityState: oldDetails.facilityAddressState || incomingSnapshot.facilityState || null,
+            criticalCount: criticalCount,
+            majorCount: majorCount,
+            otherCount: otherCount,
+            totalObservations: totalObs,
+            finalRecommendation: rec,
+            capaRequired: isCapaReq,
+            capaIssuedAt: isCapaReq ? timestamp : null,
+            updatedAt: timestamp,
+          })
+          .onConflictDoUpdate({
+            target: localInspectionReports.reportDocNumber,
+            set: {
+              criticalCount: criticalCount,
+              majorCount: majorCount,
+              otherCount: otherCount,
+              totalObservations: totalObs,
+              finalRecommendation: rec,
+              capaRequired: isCapaReq,
+              capaIssuedAt: isCapaReq ? timestamp : null,
+              updatedAt: timestamp,
+            },
+          })
+          .returning({ id: localInspectionReports.id });
+
+        // Populate Granular Findings for Analytics (Clear and Re-Insert)
+        if (upsertedReport?.id && obsList.length > 0) {
+          await tx
+            .delete(inspectionObservationsAnalytics)
+            .where(eq(inspectionObservationsAnalytics.reportId, upsertedReport.id));
+
+          const analyticsRows = obsList.map((obs: any) => ({
+            reportId: upsertedReport.id,
+            companyId: app.companyId,
+            qualitySystem: obs.qualitySystem || obs.system || "General Quality System",
+            severity: String(obs.severity || "OTHER").toUpperCase(),
+            rootCauseCategory: obs.rootCauseCategory || obs.rootCause || "Uncategorized",
+            observationText: obs.text || obs.observation || "Observation recorded without description.",
+          }));
+
+          await tx.insert(inspectionObservationsAnalytics).values(analyticsRows);
+        }
+      }
+
+      // 6. Close previous QMS Session tracking clock
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
@@ -132,7 +200,7 @@ export async function executeInspectionReportTransition({
           isNull(qmsTimelines.endTime)
         ));
 
-      // 6. Start new QMS timing interval customized to current step definitions
+      // 7. Start new QMS timing interval
       await tx.insert(qmsTimelines).values({
         applicationId,
         point: finalTitle.replace(/DDD/g, "Divisional Deputy Director"),
@@ -141,7 +209,7 @@ export async function executeInspectionReportTransition({
         startTime: timestamp,
       });
 
-      // 7. Refresh dashboard views instantly
+      // 8. Refresh dashboard views
       revalidatePath("/dashboard/ddd");
       revalidatePath("/dashboard/staff");
       revalidatePath("/dashboard/director");

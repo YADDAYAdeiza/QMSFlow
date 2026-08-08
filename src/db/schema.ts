@@ -1,6 +1,5 @@
-import { pgTable, serial, text, varchar, date, timestamp, doublePrecision, jsonb, integer, uuid, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, varchar, boolean, date, timestamp, doublePrecision, jsonb, integer, uuid, index, customType, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-
 
 // ==========================================
 // 1. MASTER TABLES & SYSTEM CONFIGURATIONS
@@ -198,31 +197,6 @@ export const riskAssessments = pgTable("risk_assessments", {
   uniqueAppRisk: uniqueIndex("unique_app_risk").on(table.applicationId),
 }));
 
-// 10. Local Inspection Reports
-export const localInspectionReports = pgTable("local_inspection_reports", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  applicationId: integer("application_id")
-    .references(() => applications.id, { onDelete: "cascade" })
-    .notNull(),
-  companyId: integer("company_id")
-    .references(() => companies.id, { onDelete: "cascade" })
-    .notNull(),
-  inspectorId: uuid("inspector_id")
-    .references(() => users.id),
-  reportDocNumber: varchar("report_doc_number", { length: 100 }).unique().notNull(),
-  typeOfInspection: varchar("type_of_inspection", { length: 10 }).notNull(),
-  currentStatus: varchar("current_status", { length: 50 }).default("LOD_INTAKE").notNull(),
-  checklistRaw: jsonb("checklist_raw").notNull(),
-  reportHtml: text("report_html"),
-  versionHistory: jsonb("version_history").$type<Array<{
-    modifiedBy: string;
-    updatedAt: string;
-    changes: string;
-  }>>().default([]),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
 // 11. CAPA Submissions
 export const capaSubmissions = pgTable("capa_submissions", {
   id: serial("id").primaryKey(),
@@ -288,6 +262,102 @@ export const scheduleBatches = pgTable("schedule_batches", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// Custom type helper for Postgres GENERATED ALWAYS AS STORED columns in Drizzle
+const generatedDays = customType<{ data: number }>({
+  dataType() {
+    return "int GENERATED ALWAYS AS (EXTRACT(DAY FROM (capa_closed_at - capa_issued_at))) STORED";
+  },
+});
+
+// ============================================================================
+// 1. PARENT TABLE: Local Inspection Reports (Header & High-Level Metrics)
+// ============================================================================
+export const localInspectionReports = pgTable(
+  "local_inspection_reports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    applicationId: integer("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    companyId: integer("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    reportDocNumber: varchar("report_doc_number", { length: 100 })
+      .notNull()
+      .unique(),
+    typeOfInspection: varchar("type_of_inspection", { length: 20 }).notNull(), // PRI, RI, Re-Inspection
+    facilityState: varchar("facility_state", { length: 100 }), // Geographic indexing
+
+    // Objective Deficit Counts
+    criticalCount: integer("critical_count").default(0).notNull(),
+    majorCount: integer("major_count").default(0).notNull(),
+    otherCount: integer("other_count").default(0).notNull(),
+    totalObservations: integer("total_observations").default(0).notNull(),
+
+    // Final Adjudication & Regulatory Status
+    finalRecommendation: varchar("final_recommendation", { length: 50 })
+      .default("PENDING")
+      .notNull(), // APPROVED, CAPA_PENDING, REJECTED
+
+    // CAPA Metrics & Turnaround Velocity
+    capaRequired: boolean("capa_required").default(false).notNull(),
+    capaIssuedAt: timestamp("capa_issued_at", { mode: "date" }),
+    capaSubmittedAt: timestamp("capa_submitted_at", { mode: "date" }),
+    capaClosedAt: timestamp("capa_closed_at", { mode: "date" }),
+    capaTurnaroundDays: generatedDays("capa_turnaround_days"),
+
+    createdAt: timestamp("created_at", { mode: "date" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    recommendationIdx: index("idx_reports_recommendation").on(
+      table.finalRecommendation
+    ),
+    criticalCountIdx: index("idx_reports_critical_count").on(
+      table.criticalCount
+    ),
+    capaDaysIdx: index("idx_reports_capa_days").on(table.capaTurnaroundDays),
+  })
+);
+
+// ============================================================================
+// 2. CHILD TABLE: Inspection Observations Analytics (Granular Findings)
+// ============================================================================
+export const inspectionObservationsAnalytics = pgTable(
+  "inspection_observations_analytics",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => localInspectionReports.id, { onDelete: "cascade" }),
+    companyId: integer("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+
+    // Quality System Domain & Severity Mapping
+    qualitySystem: varchar("quality_system", { length: 100 }).notNull(), // e.g. 'Premises and Equipment', 'Personnel'
+    severity: varchar("severity", { length: 20 }).notNull(), // 'CRITICAL', 'MAJOR', 'OTHER'
+
+    // Analytical & Policy Categorization
+    rootCauseCategory: varchar("root_cause_category", { length: 100 }), // e.g. 'SOP Deficit', 'Training Failure'
+    observationText: text("observation_text").notNull(),
+
+    createdAt: timestamp("created_at", { mode: "date" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    reportIdIdx: index("idx_obs_report_id").on(table.reportId),
+    companyIdIdx: index("idx_obs_company_id").on(table.companyId),
+    qualitySystemIdx: index("idx_obs_quality_system").on(table.qualitySystem),
+    severityIdx: index("idx_obs_severity").on(table.severity),
+    rootCauseIdx: index("idx_obs_root_cause").on(table.rootCauseCategory),
+  })
+);
 
 // ==========================================
 // --- RELATIONS ---
@@ -349,12 +419,6 @@ export const riskAssessmentsRelations = relations(riskAssessments, ({ one }) => 
   application: one(applications, { fields: [riskAssessments.applicationId], references: [applications.id] }),
 }));
 
-export const localInspectionReportsRelations = relations(localInspectionReports, ({ one }) => ({
-  application: one(applications, { fields: [localInspectionReports.applicationId], references: [applications.id] }),
-  company: one(companies, { fields: [localInspectionReports.companyId], references: [companies.id] }),
-  inspector: one(users, { fields: [localInspectionReports.inspectorId], references: [users.id] }),
-}));
-
 export const capaSubmissionsRelations = relations(capaSubmissions, ({ one }) => ({
   application: one(applications, { fields: [capaSubmissions.applicationId], references: [applications.id] }),
 }));
@@ -369,3 +433,37 @@ export const inspectionTeamAssignmentsRelations = relations(inspectionTeamAssign
   schedule: one(inspectionSchedules, { fields: [inspectionTeamAssignments.scheduleId], references: [inspectionSchedules.id] }),
   inspectorProfile: one(users, { fields: [inspectionTeamAssignments.inspectorId], references: [users.id] }),
 }));
+
+
+// ============================================================================
+// 3. DRIZZLE RELATIONS DEFINITIONS
+// ============================================================================
+export const localInspectionReportsRelations = relations(
+  localInspectionReports,
+  ({ one, many }) => ({
+    application: one(applications, {
+      fields: [localInspectionReports.applicationId],
+      references: [applications.id],
+    }),
+    company: one(companies, {
+      fields: [localInspectionReports.companyId],
+      references: [companies.id],
+    }),
+    observations: many(inspectionObservationsAnalytics),
+  })
+);
+
+export const inspectionObservationsAnalyticsRelations = relations(
+  inspectionObservationsAnalytics,
+  ({ one }) => ({
+    report: one(localInspectionReports, {
+      fields: [inspectionObservationsAnalytics.reportId],
+      references: [localInspectionReports.id],
+    }),
+    company: one(companies, {
+      fields: [inspectionObservationsAnalytics.companyId],
+      references: [companies.id],
+    }),
+  })
+);
+
