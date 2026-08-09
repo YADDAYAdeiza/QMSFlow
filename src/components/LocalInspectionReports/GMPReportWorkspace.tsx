@@ -506,6 +506,7 @@ export default function GMPReportWorkspace({
 // ------------------------------------------------------------------
 // 3. EXECUTE DB TRANSITION ENGINE CALL (Includes Analytics Snapshot)
 // ------------------------------------------------------------------
+console.log('This is checklistSnapshot: ', checklistSnapshot);
     const res = await executeInspectionReportTransition({
       applicationId: Number(applicationId),
       currentStepKey: currentStep,

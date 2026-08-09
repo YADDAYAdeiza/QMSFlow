@@ -244,6 +244,8 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
         };
       });
 
+      const nowIso = new Date().toISOString();
+
       // 1. Update the ledger entry in database
       const { error: capaError } = await supabase
         .from("capa_submissions")
@@ -260,13 +262,28 @@ export default function InspectorCapaVerifyPage({ params }: PageProps) {
         .from("applications")
         .update({
           status: appStatusMap[finalLifecycleStatus],
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         })
         .eq("id", parseInt(applicationId, 10));
 
       if (appError) throw appError;
 
-      // 3. Email dispatch with rich HTML template
+      // 3. Synchronize Analytics & QMS Warehouse (local_inspection_reports)
+      if (finalLifecycleStatus === "VERIFIED_PASSED") {
+        const { error: analyticsErr } = await supabase
+          .from("local_inspection_reports")
+          .update({
+            capa_closed_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq("application_id", parseInt(applicationId, 10));
+
+        if (analyticsErr) {
+          console.warn("Analytics warehouse timestamp sync warning:", analyticsErr);
+        }
+      }
+
+      // 4. Email dispatch with rich HTML template
       const targetEmail = applicantEmail || "hiscript@gmail.com";
       const isPassed = finalLifecycleStatus === "VERIFIED_PASSED";
 

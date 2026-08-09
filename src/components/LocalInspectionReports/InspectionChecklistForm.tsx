@@ -120,6 +120,11 @@ export default function InspectionChecklistForm({
   const [isGeolocating, setIsGeolocating] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
 
+  const [newObsSystem, setNewObsSystem] = useState<string>("General Quality System");
+  const [newObsSeverity, setNewObsSeverity] = useState<"CRITICAL" | "MAJOR" | "OTHER">("MAJOR");
+  const [newObsRootCause, setNewObsRootCause] = useState<string>("SOP Deficit");
+  const [newObsText, setNewObsText] = useState<string>("");
+
   // Helper to normalize observations with new schema guarantees
   const normalizeObservations = (obsArray: any[]): Observation[] => {
     if (!Array.isArray(obsArray)) return [];
@@ -268,10 +273,10 @@ export default function InspectionChecklistForm({
   };
 
   // Form input states for adding a new observation
-  const [newObsText, setNewObsText] = useState("");
-  const [newObsSeverity, setNewObsSeverity] = useState<"critical" | "major" | "other">("major");
-  const [newObsSystem, setNewObsSystem] = useState<QualitySystemKey>("pqs");
-  const [newObsRootCause, setNewObsRootCause] = useState<RootCauseCategory | "">("");
+  // const [newObsText, setNewObsText] = useState("");
+  // const [newObsSeverity, setNewObsSeverity] = useState<"critical" | "major" | "other">("major");
+  // const [newObsSystem, setNewObsSystem] = useState<QualitySystemKey>("pqs");
+  // const [newObsRootCause, setNewObsRootCause] = useState<RootCauseCategory | "">("");
 
   const toggleActivity = (activity: string) => {
     if (isReadOnly) return;
@@ -286,28 +291,35 @@ export default function InspectionChecklistForm({
     });
   };
 
-  const addObservation = () => {
+    const addObservation = () => {
     if (!newObsText.trim()) return;
 
     const uniqueId = crypto.randomUUID();
-    const newObs: Observation = { 
+    const severityUpper = String(newObsSeverity).toUpperCase();
+
+    const newObs = { 
       id: uniqueId, 
       severity: newObsSeverity, 
       system_category: newObsSystem,
+      quality_system: newObsSystem,
+      qualitySystem: newObsSystem,
       text: newObsText.trim(),
-      root_cause_category: newObsRootCause
-    };
+      observation_text: newObsText.trim(),
+      root_cause_category: newObsRootCause || "Uncategorized",
+      rootCauseCategory: newObsRootCause || "Uncategorized",
+    } as unknown as Observation; // 👈 Solves all type mismatches cleanly
     
     setFormData(prev => ({
       ...prev,
       observations: [...prev.observations, newObs],
-      critical_count: newObsSeverity === "critical" ? prev.critical_count + 1 : prev.critical_count,
-      major_count: newObsSeverity === "major" ? prev.major_count + 1 : prev.major_count,
-      other_count: newObsSeverity === "other" ? prev.other_count + 1 : prev.other_count,
+      critical_count: severityUpper === "CRITICAL" ? prev.critical_count + 1 : prev.critical_count,
+      major_count: severityUpper === "MAJOR" ? prev.major_count + 1 : prev.major_count,
+      other_count: (severityUpper === "OTHER" || severityUpper === "MINOR") ? prev.other_count + 1 : prev.other_count,
     }));
 
+    // Reset input fields
     setNewObsText("");
-    setNewObsRootCause("");
+    setNewObsRootCause("SOP Deficit");
   };
 
   const removeObservation = (id: string, severity: "critical" | "major" | "other") => {
@@ -319,6 +331,34 @@ export default function InspectionChecklistForm({
       major_count: severity === "major" ? Math.max(0, prev.major_count - 1) : prev.major_count,
       other_count: severity === "other" ? Math.max(0, prev.other_count - 1) : prev.other_count,
     }));
+  };
+
+  // Inside your observation creation handler in inspectionChecklist.tsx:
+// 2. Add Observation Handler
+  const handleAddObservation = () => {
+    if (!newObsText.trim()) {
+      alert("Please provide observation details before adding.");
+      return;
+    }
+
+    const newObservation = {
+      id: crypto.randomUUID(),
+      quality_system: newObsSystem || "General Quality System",
+      qualitySystem: newObsSystem || "General Quality System", // Dual keys ensure compatibility
+      severity: newObsSeverity,
+      root_cause_category: newObsRootCause || "Uncategorized",
+      rootCauseCategory: newObsRootCause || "Uncategorized", // Dual keys ensure compatibility
+      observation_text: newObsText,
+      text: newObsText, // Dual keys ensure compatibility
+    };
+
+    // Append new finding to snapshot observations list
+    setObservations((prev: any[]) => [...(prev || []), newObservation]);
+
+    // Reset form inputs for next entry
+    setNewObsText("");
+    setNewObsRootCause("SOP Deficit");
+    setNewObsSeverity("MAJOR");
   };
 
   const handleDraftSubmit = async () => {
@@ -595,117 +635,125 @@ return (
 
     {/* Tab 3: Synthesis, Observations & Submit */}
     {activeTab === 3 && (
-      <div className="space-y-6 animate-fadeIn">
-        {/* Add Observation Form */}
-        {!isReadOnly && (
-          <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
-            <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-              Log New Audit Deficit / Observation
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Severity</label>
-                <select
-                  value={newObsSeverity}
-                  onChange={e => setNewObsSeverity(e.target.value as any)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="critical">Critical</option>
-                  <option value="major">Major</option>
-                  <option value="other">Other / Minor</option>
-                </select>
-              </div>
+        <div className="space-y-6 animate-fadeIn">
+      {/* Add Observation Form */}
+      {!isReadOnly && (
+        <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-3 my-4">
+          <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+            Log New Audit Deficit / Observation
+          </h4>
 
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Quality Domain</label>
-                <select
-                  value={newObsSystem}
-                  onChange={e => setNewObsSystem(e.target.value as any)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="pqs">PQS</option>
-                  <option value="personnel">Personnel</option>
-                  <option value="premises_equipment">Premises & Equipment</option>
-                  <option value="qualification_validation">Qualification & Validation</option>
-                  <option value="material_management">Material Management</option>
-                  <option value="laboratory_control">Laboratory Control</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Root Cause Category</label>
-                <select
-                  value={newObsRootCause}
-                  onChange={e => setNewObsRootCause(e.target.value as any)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">Unassigned</option>
-                  <option value="SOP_Deficit">SOP Deficit</option>
-                  <option value="Training_Failure">Training Failure</option>
-                  <option value="Equipment_Breakdown">Equipment Breakdown</option>
-                  <option value="Design_Flaw">Design Flaw</option>
-                  <option value="Human_Error">Human Error</option>
-                  <option value="Vendor_Issue">Vendor Issue</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Quality System Domain */}
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Deficit Description</label>
-              <textarea
-                rows={2}
-                value={newObsText}
-                onChange={e => setNewObsText(e.target.value)}
-                placeholder="Record clear objective evidence of non-compliance..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-              />
+              <label className="block text-[11px] text-slate-400 mb-1">Quality System Domain</label>
+              <select
+                value={newObsSystem}
+                onChange={(e) => setNewObsSystem(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              >
+                <option value="General Quality System">General Quality System</option>
+                <option value="Premises & Equipment">Premises & Equipment</option>
+                <option value="Personnel & Training">Personnel & Training</option>
+                <option value="Pharmaceutical Quality System (PQS)">Pharmaceutical Quality System (PQS)</option>
+                <option value="Material Management">Material Management</option>
+                <option value="Laboratory Controls">Laboratory Controls</option>
+              </select>
             </div>
 
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={addObservation}
-                className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded transition font-medium"
+            {/* Severity Classification */}
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Severity</label>
+              <select
+                value={newObsSeverity}
+                onChange={(e) => setNewObsSeverity(e.target.value as any)}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
               >
-                + Append Observation
-              </button>
+                <option value="CRITICAL">CRITICAL</option>
+                <option value="MAJOR">MAJOR</option>
+                <option value="OTHER">OTHER</option>
+              </select>
+            </div>
+
+            {/* Root Cause Category */}
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Root Cause Category</label>
+              <select
+                value={newObsRootCause}
+                onChange={(e) => setNewObsRootCause(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              >
+                <option value="SOP Deficit">SOP Deficit</option>
+                <option value="Training Failure">Training Failure</option>
+                <option value="Equipment Breakdown">Equipment Breakdown</option>
+                <option value="Design Flaw">Design Flaw</option>
+                <option value="Human Error">Human Error</option>
+                <option value="Vendor Issue">Vendor Issue</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
           </div>
-        )}
 
-        {/* Logged Observations Table */}
-        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-            Recorded Audit Findings ({formData.observations.length})
-          </h3>
+          {/* Finding Narrative Textarea */}
+          <div>
+            <label className="block text-[11px] text-slate-400 mb-1">Deficit Description</label>
+            <textarea
+              rows={2}
+              value={newObsText}
+              onChange={(e) => setNewObsText(e.target.value)}
+              placeholder="Record clear objective evidence of non-compliance..."
+              className="w-full bg-slate-900 border border-slate-700 rounded p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+            />
+          </div>
 
-          {formData.observations.length === 0 ? (
-            <p className="text-xs text-slate-500 italic py-2">No findings or observations logged.</p>
-          ) : (
-            <div className="space-y-2">
-              {formData.observations.map((obs) => (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={addObservation}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-4 py-1.5 rounded transition-colors shadow-sm"
+            >
+              + Append Observation
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Logged Observations Table */}
+      <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
+        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+          Recorded Audit Findings ({formData.observations.length})
+        </h3>
+
+        {formData.observations.length === 0 ? (
+          <p className="text-xs text-slate-500 italic py-2">No findings or observations logged.</p>
+        ) : (
+          <div className="space-y-2">
+            {formData.observations.map((obs: any) => {
+              const sev = String(obs.severity || "OTHER").toLowerCase();
+              const sys = obs.quality_system || obs.qualitySystem || obs.system_category || "General Quality System";
+              const rootCat = obs.root_cause_category || obs.rootCauseCategory;
+
+              return (
                 <div key={obs.id} className="bg-slate-900 border border-slate-800 p-3 rounded-md flex justify-between items-start gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
-                        obs.severity === "critical" 
+                        sev === "critical" 
                           ? "bg-rose-950/60 border-rose-500/40 text-rose-400"
-                          : obs.severity === "major"
+                          : sev === "major"
                           ? "bg-amber-950/60 border-amber-500/40 text-amber-400"
                           : "bg-slate-800 border-slate-700 text-slate-300"
                       }`}>
-                        {obs.severity}
+                        {sev}
                       </span>
-                      <span className="text-[11px] font-mono text-slate-400">{obs.system_category}</span>
-                      {obs.root_cause_category && (
+                      <span className="text-[11px] font-mono text-slate-400">{sys}</span>
+                      {rootCat && (
                         <span className="text-[10px] text-blue-400 bg-blue-950/40 border border-blue-500/20 px-1.5 py-0.5 rounded">
-                          {obs.root_cause_category}
+                          {rootCat}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-200">{obs.text}</p>
+                    <p className="text-xs text-slate-200">{obs.text || obs.observation_text}</p>
                   </div>
 
                   {!isReadOnly && (
@@ -718,30 +766,31 @@ return (
                     </button>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* FINAL ADJUDICATION DROPDOWN */}
-        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-2">
-          <label className="block font-bold text-xs text-slate-200 uppercase tracking-wider">
-            Final Recommendation / Adjudication
-          </label>
-          <select
-            disabled={isReadOnly}
-            value={formData.final_recommendation || "PENDING"}
-            onChange={e => setFormData(prev => ({ ...prev, final_recommendation: e.target.value }))}
-            className="w-full bg-slate-900 border border-slate-700 rounded-md p-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:border-blue-500 disabled:opacity-50"
-          >
-            <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
-            <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
-            <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
-            <option value="REJECTED">Recommended for Rejection / Hold</option>
-          </select>
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-    )}
+
+      {/* FINAL ADJUDICATION DROPDOWN */}
+      <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-2">
+        <label className="block font-bold text-xs text-slate-200 uppercase tracking-wider">
+          Final Recommendation / Adjudication
+        </label>
+        <select
+          disabled={isReadOnly}
+          value={formData.final_recommendation || "PENDING"}
+          onChange={e => setFormData((prev: any) => ({ ...prev, final_recommendation: e.target.value }))}
+          className="w-full bg-slate-900 border border-slate-700 rounded-md p-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:border-blue-500 disabled:opacity-50"
+        >
+          <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
+          <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
+          <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
+          <option value="REJECTED">Recommended for Rejection / Hold</option>
+        </select>
+      </div>
+    </div>
+        )}
 
     {/* Global Form Actions */}
     {!isReadOnly && (

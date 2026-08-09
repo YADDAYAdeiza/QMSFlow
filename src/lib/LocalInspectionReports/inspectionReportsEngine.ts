@@ -179,14 +179,21 @@ export async function executeInspectionReportTransition({
             .delete(inspectionObservationsAnalytics)
             .where(eq(inspectionObservationsAnalytics.reportId, upsertedReport.id));
 
-          const analyticsRows = obsList.map((obs: any) => ({
-            reportId: upsertedReport.id,
-            companyId: app.companyId,
-            qualitySystem: obs.qualitySystem || obs.system || "General Quality System",
-            severity: String(obs.severity || "OTHER").toUpperCase(),
-            rootCauseCategory: obs.rootCauseCategory || obs.rootCause || "Uncategorized",
-            observationText: obs.text || obs.observation || "Observation recorded without description.",
-          }));
+          // Replace this line inside analyticsRows map in executeInspectionReportTransition:
+            const analyticsRows = obsList.map((obs: any) => ({
+              reportId: upsertedReport.id,
+              companyId: app.companyId,
+              qualitySystem: obs.qualitySystem || obs.quality_system || obs.system || "General Quality System",
+              severity: String(obs.severity || "OTHER").toUpperCase(),
+              // Check snake_case, camelCase, and direct keys
+              rootCauseCategory: 
+                obs.root_cause_category || 
+                obs.rootCauseCategory || 
+                obs.root_cause || 
+                obs.rootCause || 
+                "Uncategorized",
+              observationText: obs.observationText || obs.observation_text || obs.text || obs.observation || "Observation recorded without description.",
+            }));
 
           await tx.insert(inspectionObservationsAnalytics).values(analyticsRows);
         }
