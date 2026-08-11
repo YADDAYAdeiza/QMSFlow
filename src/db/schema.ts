@@ -215,7 +215,7 @@ export const inspectionSchedules = pgTable("inspection_schedules", {
   applicationId: integer("application_id")
     .references(() => applications.id, { onDelete: "cascade" })
     .notNull(),
-  batchId: uuid("batch_id").references(() => scheduleBatches.id),
+  batchId: uuid("batch_id").references(() => scheduleBatches.id, { onDelete: "cascade" }), // <--- ADD THIS
   scheduledDate: timestamp("scheduled_date", { mode: "string" }).notNull(), // using string mode to easily parse date formats without zone shifting
   status: varchar("status", { length: 50 }).default("SCHEDULED"),
   createdBy: uuid("created_by"),

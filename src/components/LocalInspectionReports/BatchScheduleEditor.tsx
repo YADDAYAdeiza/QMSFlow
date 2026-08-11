@@ -134,7 +134,7 @@ export default function BatchScheduleEditor({
   };
 
   // --- Save Batch Updates & Send Remaining Active Schedule IDs ---
-  const handleSaveChanges = async () => {
+  const handleSaveChanges = async (): Promise<boolean> => {
     setSaveError(null);
 
     const payloadUpdates = rows.map((r) => {
@@ -161,38 +161,40 @@ export default function BatchScheduleEditor({
       };
     });
 
-    // Extract current list of remaining schedule IDs
     const activeScheduleIds = rows.map((r) => r.scheduleId);
 
-    startTransition(async () => {
-      try {
-        const response = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            updates: payloadUpdates,
-            activeScheduleIds,
-            batchId,
-            startDate,
-            endDate,
-          }),
-        });
+    try {
+      const response = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          updates: payloadUpdates,
+          activeScheduleIds,
+          batchId,
+          startDate,
+          endDate,
+        }),
+      });
 
-        const result = await response.json();
-        if (!response.ok || !result.success) {
-          throw new Error(result.error || "Failed to save batch schedule.");
-        }
-
-        setIsEditMode(false);
-        router.refresh();
-      } catch (err: any) {
-        setSaveError(err.message || "Error saving batch schedule changes.");
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to save batch schedule.");
       }
-    });
+
+      setIsEditMode(false);
+      router.refresh();
+      return true;
+    } catch (err: any) {
+      setSaveError(err.message || "Error saving batch schedule changes.");
+      return false;
+    }
   };
 
   const getInspectorName = (id: string) =>
     inspectorPool.find((ins) => ins.id === id)?.full_name || "Unknown Staff";
+
+  // Dynamic active schedule list derived directly from active rows
+  const currentActiveScheduleIds = rows.map((r) => r.scheduleId);
 
   return (
     <div>
@@ -258,7 +260,7 @@ export default function BatchScheduleEditor({
               {isEditMode && (
                 <button
                   type="button"
-                  onClick={handleSaveChanges}
+                  onClick={() => startTransition(() => { handleSaveChanges(); })}
                   disabled={isPending}
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-xs font-bold rounded-md shadow-xs cursor-pointer transition-colors"
                 >
@@ -275,7 +277,7 @@ export default function BatchScheduleEditor({
                   title={`Annexure 08 (${startDate} to ${endDate})`}
                   startDate={startDate}
                   endDate={endDate}
-                  scheduleIds={scheduleIds}
+                  scheduleIds={currentActiveScheduleIds}
                   history={batchHistory}
                   isRework={isRework}
                   userId={userId}
@@ -517,7 +519,7 @@ export default function BatchScheduleEditor({
             </div>
             <div className="border-b border-black w-48 mx-auto mb-1"></div>
             <p className="uppercase">Pharm (Mrs.) Uba Florence</p>
-            <p className="text-[11px] font-normal">Divisional Deputy Director (IRSD)</p>
+            <p className="text-[11px] font-normal">Divisional Deputy Director</p>
           </div>
 
           {/* Approved By */}
@@ -538,7 +540,7 @@ export default function BatchScheduleEditor({
             </div>
             <div className="border-b border-black w-52 mx-auto mb-1"></div>
             <p className="uppercase">MUDASHIRU, I. A.</p>
-            <p className="text-[11px] font-normal">Divisional Deputy Director i/c (VMAP)</p>
+            <p className="text-[11px] font-normal">Divisional Deputy Director</p>
           </div>
         </div>
 

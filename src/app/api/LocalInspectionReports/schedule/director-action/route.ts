@@ -92,17 +92,25 @@ export async function POST(request: Request) {
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. Locate all linked inspection schedules in batch range
+        // 2. Fetch ONLY scheduled items that are currently active in this date range
+        // AND belong to valid, un-deleted schedules
         const scheduledItems = await tx
           .select({ 
             scheduleId: inspectionSchedules.id,
             applicationId: inspectionSchedules.applicationId 
           })
           .from(inspectionSchedules)
+          .innerJoin(applications, eq(inspectionSchedules.applicationId, applications.id))
           .where(
             and(
               gte(inspectionSchedules.scheduledDate, batch.startDate),
-              lte(inspectionSchedules.scheduledDate, batch.endDate)
+              lte(inspectionSchedules.scheduledDate, batch.endDate),
+              // 🔒 CRITICAL: Only advance applications that are currently staged for batch approval
+              inArray(applications.currentPoint, [
+                "Divisional Deputy Director Technical Assignment",
+                "Divisional Deputy Director IRSD Routing",
+                "PENDING_BATCH_RECOMMENDATION"
+              ])
             )
           );
 
@@ -110,14 +118,13 @@ export async function POST(request: Request) {
           .map((item) => item.applicationId)
           .filter((id): id is number => id !== null);
 
-        // 3. Advance applications to Staff Technical Review desk AND synchronize details JSONB
+        // 3. Advance ONLY the validated applications to Staff Technical Review
         if (applicationIds.length > 0) {
           await tx
             .update(applications)
             .set({
               currentPoint: inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
               status: "INSPECTION_SCHEDULED",
-              // 🔒 Keeps details.inspectionWorkflowMeta.currentStepKey synchronized with database column
               details: sql`jsonb_set(
                 COALESCE(${applications.details}, '{}'::jsonb), 
                 '{inspectionWorkflowMeta,currentStepKey}', 
