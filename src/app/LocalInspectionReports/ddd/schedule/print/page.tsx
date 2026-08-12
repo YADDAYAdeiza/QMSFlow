@@ -165,23 +165,23 @@ export default async function PrintInspectionSchedulePage({
   }
 
   // Bind query by explicit batch range or FK
-  const dateOrBatchCondition = activeBatch?.id 
-    ? or(
-        and(
+// Build conditions strictly querying by batchId if available, or fall back to date window
+    const dateOrBatchCondition = activeBatch?.id 
+      ? or(
+          eq(inspectionSchedules.batchId, activeBatch.id),
+          and(
+            gte(inspectionSchedules.scheduledDate, defaultStart),
+            lte(inspectionSchedules.scheduledDate, defaultEnd)
+          )
+        )
+      : and(
           gte(inspectionSchedules.scheduledDate, defaultStart),
           lte(inspectionSchedules.scheduledDate, defaultEnd)
-        ),
-        // If your schema has batchId column on inspectionSchedules:
-        // eq(inspectionSchedules.batchId, activeBatch.id)
-      )
-    : and(
-        gte(inspectionSchedules.scheduledDate, defaultStart),
-        lte(inspectionSchedules.scheduledDate, defaultEnd)
-      );
+        );
 
-  if (dateOrBatchCondition) {
-    baseWhereConditions.push(dateOrBatchCondition);
-  }
+    if (dateOrBatchCondition) {
+      baseWhereConditions.push(dateOrBatchCondition);
+    }
 
   // Fetch Scheduled Items
   const rawSchedules = await db

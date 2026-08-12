@@ -108,13 +108,12 @@ export async function PUT(request: Request) {
 
       // 2. Perform Updates for Active / Retained Schedule Rows
       for (const row of updates) {
-        // Update primary schedule row properties (date, driver, and bind batchId)
         await tx
           .update(inspectionSchedules)
           .set({
             scheduledDate: row.scheduledDate,
             ...(row.driver !== undefined && { driver: row.driver }),
-            ...(batchId && { batchId }), // 🔒 Explicitly updates batch_id column in database
+            ...(batchId ? { batchId } : {}), // 👈 Binds batchId directly
             updatedAt: new Date(),
           })
           .where(eq(inspectionSchedules.id, row.scheduleId));
