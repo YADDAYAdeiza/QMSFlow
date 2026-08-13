@@ -15,7 +15,61 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. Wipe existing team assignments and schedule rows for this application if undergoing rework
+    // ------------------------------------------------------------------
+    // STEP A: Auto-resolve or create batch shell for this target date
+    // ------------------------------------------------------------------
+    const targetDate = new Date(scheduledDate);
+    const startOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1)
+      .toISOString()
+      .split('T')[0];
+    const endOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0)
+      .toISOString()
+      .split('T')[0];
+
+    // Find existing batch shell for this date range
+    let { data: existingBatch } = await supabase
+      .from('schedule_batches')
+      .select('id')
+      .gte('start_date', startOfMonth)
+      .lte('end_date', endOfMonth)
+      .limit(1)
+      .maybeSingle();
+
+    let assignedBatchId = existingBatch?.id || null;
+
+    // Create batch shell if missing
+    if (!assignedBatchId) {
+      const { data: newBatch, error: batchError } = await supabase
+        .from('schedule_batches')
+        .insert({
+          batch_reference: `SCHEDULE-${startOfMonth}-${endOfMonth}`,
+          title: `VMAP Inspection Schedule (${startOfMonth} to ${endOfMonth})`,
+          start_date: startOfMonth,
+          end_date: endOfMonth,
+          status: 'PENDING_RECOMMENDATION',
+          current_point: 'Divisional Deputy Director IRSD Routing',
+          history: []
+        })
+        .select('id')
+        .single();
+
+      if (!batchError && newBatch) {
+        assignedBatchId = newBatch.id;
+      } else {
+        // Fallback check in case of concurrent creation race condition
+        const { data: reFetched } = await supabase
+          .from('schedule_batches')
+          .select('id')
+          .eq('start_date', startOfMonth)
+          .eq('end_date', endOfMonth)
+          .maybeSingle();
+        assignedBatchId = reFetched?.id || null;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // STEP B: Wipe existing team assignments and schedule rows for rework
+    // ------------------------------------------------------------------
     const { data: existingSchedules } = await supabase
       .from('inspection_schedules')
       .select('id')
@@ -35,13 +89,16 @@ export async function POST(request: Request) {
         .eq('application_id', applicationId);
     }
 
-    // 2. Insert master metadata entry into inspection_schedules
+    // ------------------------------------------------------------------
+    // STEP C: Insert master schedule entry WITH batch_id bound
+    // ------------------------------------------------------------------
     const { data: scheduleData, error: scheduleError } = await supabase
       .from('inspection_schedules')
       .insert({
         application_id: applicationId,
         scheduled_date: scheduledDate,
-        status: 'SCHEDULED'
+        status: 'SCHEDULED',
+        batch_id: assignedBatchId // 👈 Guarantees batch_id is populated at creation
       })
       .select('id')
       .single();
@@ -51,14 +108,14 @@ export async function POST(request: Request) {
     const newScheduleUUID = scheduleData.id;
     const arrayInsertions = [];
 
-    // 3. Map Team Leader
+    // Map Team Leader
     arrayInsertions.push({
       schedule_id: newScheduleUUID,
       inspector_id: teamLeader,
       role: 'TEAM_LEADER'
     });
 
-    // 4. Map Co-Inspectors
+    // Map Co-Inspectors
     if (coInspectors && Array.isArray(coInspectors)) {
       coInspectors.forEach((id: string) => {
         arrayInsertions.push({
@@ -69,7 +126,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // 5. Enforce QMS constraint: Max 2 trainee inspectors
+    // Enforce QMS constraint: Max 2 trainee inspectors
     if (traineeInspectors && Array.isArray(traineeInspectors)) {
       if (traineeInspectors.length > 2) {
         return NextResponse.json(
@@ -86,14 +143,14 @@ export async function POST(request: Request) {
       });
     }
 
-    // 6. Batch execute all team assignments
+    // Batch execute all team assignments
     const { error: bridgeError } = await supabase
       .from('inspection_team_assignments')
       .insert(arrayInsertions);
 
     if (bridgeError) throw bridgeError;
 
-    // 7. Update main application JSONB tracking
+    // Update main application JSONB tracking
     const { data: existingApp, error: fetchError } = await supabase
       .from('applications')
       .select('details')
@@ -122,7 +179,7 @@ export async function POST(request: Request) {
       allInspectorIds: [teamLeader, ...coInspectorList, ...traineeList]
     };
 
-    // 8. HOLD application at DDD_TECHNICAL_ASSIGNMENT until Director Batch Approval!
+    // HOLD application at DDD_TECHNICAL_ASSIGNMENT until Director Batch Approval!
     const { error: updateError } = await supabase
       .from('applications')
       .update({ 
@@ -134,7 +191,11 @@ export async function POST(request: Request) {
 
     if (updateError) throw updateError;
 
-    return NextResponse.json({ success: true, scheduleId: newScheduleUUID });
+    return NextResponse.json({ 
+      success: true, 
+      scheduleId: newScheduleUUID,
+      batchId: assignedBatchId 
+    });
 
   } catch (error: any) {
     console.error('QMS Scheduler Engine Fault:', error);

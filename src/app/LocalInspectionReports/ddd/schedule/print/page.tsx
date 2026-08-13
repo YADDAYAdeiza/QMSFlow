@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { db } from "@/db";
 import { 
   inspectionSchedules, 
@@ -7,7 +9,7 @@ import {
   users,
   scheduleBatches 
 } from "@/db/schema";
-import { eq, gte, lte, and, asc, inArray, notInArray, or } from "drizzle-orm";
+import { eq, gte, lte, and, asc, inArray, notInArray, or, isNull } from "drizzle-orm";
 import { format, parseISO } from "date-fns";
 import React from "react";
 import BatchScheduleEditor, { 
@@ -16,8 +18,6 @@ import BatchScheduleEditor, {
 } from "@/components/LocalInspectionReports/BatchScheduleEditor";
 import { createClient } from "@/utils/supabase/server";
 
-export const dynamic = "force-dynamic";
-
 export default async function PrintInspectionSchedulePage({
   searchParams,
 }: {
@@ -25,12 +25,10 @@ export default async function PrintInspectionSchedulePage({
 }) {
   const { batchId, startDate, endDate, readOnly } = (await searchParams) || {};
 
-  // Fetch current authenticated user & details
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const userId = user?.id;
 
-  // Determine if the viewer should have read-only access
   const userRole = user?.user_metadata?.role || "";
   const isReadOnly = 
     readOnly === "true" || 
@@ -38,7 +36,7 @@ export default async function PrintInspectionSchedulePage({
     userRole === "Director VMAP" || 
     userRole === "DIRECTOR";
 
-  // 1. Resolve Active Batch Record (Prefer direct batchId, fallback to date matching)
+  // 1. Resolve Active Batch Record
   let activeBatch = null;
 
   if (batchId) {
@@ -129,7 +127,23 @@ export default async function PrintInspectionSchedulePage({
 
   const isApproved = activeBatch?.status === "APPROVED";
 
-  // 2. Fetch Inspector Pool
+  // ------------------------------------------------------------------
+  // STEP 2: Retroactive Auto-Backfill of Null batch_id Columns
+  // ------------------------------------------------------------------
+  if (activeBatch?.id) {
+    await db
+      .update(inspectionSchedules)
+      .set({ batchId: activeBatch.id })
+      .where(
+        and(
+          gte(inspectionSchedules.scheduledDate, defaultStart),
+          lte(inspectionSchedules.scheduledDate, defaultEnd),
+          isNull(inspectionSchedules.batchId)
+        )
+      );
+  }
+
+  // Fetch Inspector Pool
   const rawUsers = await db
     .select({
       id: users.id,
@@ -145,13 +159,11 @@ export default async function PrintInspectionSchedulePage({
     is_available: true,
   }));
 
-  // 3. Construct Dynamic Query Filter based on Batch Link / Status
+  // 3. Query schedules matching active batchId OR date window
   const baseWhereConditions = [
-    // 🔒 Exclude cancelled / rejected items
     notInArray(applications.status, ["REJECTED", "CANCELLED"]),
   ];
 
-  // If batchId is provided or batch is approved, bypass rigid currentPoint filtering so post-approval applications still render
   if (!isApproved && !isReadOnly) {
     baseWhereConditions.push(
       inArray(applications.currentPoint, [
@@ -164,26 +176,23 @@ export default async function PrintInspectionSchedulePage({
     );
   }
 
-  // Bind query by explicit batch range or FK
-// Build conditions strictly querying by batchId if available, or fall back to date window
-    const dateOrBatchCondition = activeBatch?.id 
-      ? or(
-          eq(inspectionSchedules.batchId, activeBatch.id),
-          and(
-            gte(inspectionSchedules.scheduledDate, defaultStart),
-            lte(inspectionSchedules.scheduledDate, defaultEnd)
-          )
-        )
-      : and(
+  const dateOrBatchCondition = activeBatch?.id 
+    ? or(
+        eq(inspectionSchedules.batchId, activeBatch.id),
+        and(
           gte(inspectionSchedules.scheduledDate, defaultStart),
           lte(inspectionSchedules.scheduledDate, defaultEnd)
-        );
+        )
+      )
+    : and(
+        gte(inspectionSchedules.scheduledDate, defaultStart),
+        lte(inspectionSchedules.scheduledDate, defaultEnd)
+      );
 
-    if (dateOrBatchCondition) {
-      baseWhereConditions.push(dateOrBatchCondition);
-    }
+  if (dateOrBatchCondition) {
+    baseWhereConditions.push(dateOrBatchCondition);
+  }
 
-  // Fetch Scheduled Items
   const rawSchedules = await db
     .select({
       scheduleId: inspectionSchedules.id,
@@ -201,7 +210,6 @@ export default async function PrintInspectionSchedulePage({
 
   const scheduleIds = rawSchedules.map((s) => s.scheduleId);
 
-  // 4. Fetch Team Assignments
   let assignments: Array<{ scheduleId: string; inspectorId: string; role: string }> = [];
   if (scheduleIds.length > 0) {
     assignments = await db
@@ -214,7 +222,6 @@ export default async function PrintInspectionSchedulePage({
       .where(inArray(inspectionTeamAssignments.scheduleId, scheduleIds));
   }
 
-  // 5. Transform Data
   const initialRows: EditableScheduleItem[] = rawSchedules.map((row, index) => {
     const rowAssignments = assignments.filter((a) => a.scheduleId === row.scheduleId);
     const teamLeader = rowAssignments.find((a) => a.role === "TEAM_LEADER")?.inspectorId || "";

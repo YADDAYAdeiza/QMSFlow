@@ -40,19 +40,16 @@ export async function PUT(request: Request) {
       if (Array.isArray(activeScheduleIds) && startDate && endDate) {
         let removedSchedules: { id: string; applicationId: number | null }[] = [];
 
-        // 🎯 Construct conditions to scope deletions strictly to this batch range / ID
         const scopeConditions: SQL[] = [
           gte(inspectionSchedules.scheduledDate, startDate),
           lte(inspectionSchedules.scheduledDate, endDate),
         ];
 
-        // 🔒 If batchId is supplied, explicitly bind the scope condition to batchId
         if (batchId) {
           scopeConditions.push(eq(inspectionSchedules.batchId, batchId));
         }
 
         if (activeScheduleIds.length > 0) {
-          // Find schedules in scope NOT present in activeScheduleIds
           removedSchedules = await tx
             .select({ 
               id: inspectionSchedules.id,
@@ -66,7 +63,6 @@ export async function PUT(request: Request) {
               )
             );
         } else {
-          // If activeScheduleIds is empty, all items in this batch scope were removed
           removedSchedules = await tx
             .select({ 
               id: inspectionSchedules.id,
@@ -82,17 +78,14 @@ export async function PUT(request: Request) {
           .filter((id): id is number => id !== null);
 
         if (removedScheduleIds.length > 0) {
-          // A. Wipe child team assignments first to respect FK constraints
           await tx
             .delete(inspectionTeamAssignments)
             .where(inArray(inspectionTeamAssignments.scheduleId, removedScheduleIds));
 
-          // B. Delete target schedule records
           await tx
             .delete(inspectionSchedules)
             .where(inArray(inspectionSchedules.id, removedScheduleIds));
 
-          // C. Reset parent applications back to 'Staff Technical Field Review' / 'INSPECTION_PENDING'
           if (removedApplicationIds.length > 0) {
             await tx
               .update(applications)
@@ -113,17 +106,15 @@ export async function PUT(request: Request) {
           .set({
             scheduledDate: row.scheduledDate,
             ...(row.driver !== undefined && { driver: row.driver }),
-            ...(batchId ? { batchId } : {}), // 👈 Binds batchId directly
+            ...(batchId ? { batchId } : {}), // 🔒 Binds batchId directly
             updatedAt: new Date(),
           })
           .where(eq(inspectionSchedules.id, row.scheduleId));
 
-        // Wipe existing team assignments for this row
         await tx
           .delete(inspectionTeamAssignments)
           .where(eq(inspectionTeamAssignments.scheduleId, row.scheduleId));
 
-        // Re-insert updated team assignments
         if (row.inspectors && row.inspectors.length > 0) {
           const newAssignments = row.inspectors.map((ins) => ({
             scheduleId: row.scheduleId,
