@@ -9,7 +9,7 @@ import {
   scheduleBatches,
   users 
 } from "@/db/schema";
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -135,14 +135,19 @@ export default async function InspectorWorkspacePage() {
           gte(inspectionSchedules.scheduledDate, scheduleBatches.startDate),
           lte(inspectionSchedules.scheduledDate, scheduleBatches.endDate)
         )
-      )
-      .where(
-        and(
-          eq(inspectionTeamAssignments.inspectorId, userRecord.id),
-          eq(applications.currentPoint, inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title),
-          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
-        )
-      );
+      ).where(
+  and(
+    eq(inspectionTeamAssignments.inspectorId, userRecord.id),
+    inArray(applications.currentPoint, [
+      "Staff Technical Field Review",
+      "STAFF_TECHNICAL_REVIEW",
+      "Field Inspection In Progress",
+      "Draft Report",
+      "Inspection Drafted"
+    ]),
+    eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
+  )
+);
 
     // 🔒 Deduplicate assignments by scheduleId to guard against overlapping batch date ranges
     const uniqueAssignmentsMap = new Map<string | number, typeof rawAssignments[number]>();

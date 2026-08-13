@@ -48,10 +48,18 @@ const BASE_CHECKLIST_TEMPLATE = {
 
 export default async function LocalReportPage({ params }: PageProps) {
   // 🔐 Authenticated session validation
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+ const supabase = await createClient();
+  
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data?.user || null;
+  } catch (err) {
+    console.error("Supabase Auth server fetch failed:", err);
+  }
 
-  if (authError || !user) {
+  // If user failed to fetch due to network error or expired session, safely redirect
+  if (!user) {
     redirect("/login");
   }
 
