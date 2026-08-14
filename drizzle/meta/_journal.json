@@ -50,6 +50,13 @@
       "when": 1781948330155,
       "tag": "0006_closed_dust",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786700038490,
+      "tag": "0007_nifty_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

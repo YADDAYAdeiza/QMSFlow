@@ -5,7 +5,7 @@ import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { useRouter } from "next/navigation";
 import { zodResolver } from '@hookform/resolvers/zod';
 import { lodFormSchema } from '@/lib/validations';
-import { submitLODApplication, getApplications } from '@/lib/actions/index'; 
+import { submitLODApplication } from '@/lib/actions/index'; 
 import FileUpload from './FileUpload'; 
 import { CompanySearch } from './CompanySearch';
 import { 
@@ -155,8 +155,13 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
   const [localCompanyId, setLocalCompanyId] = useState<number | null>(initialData?.localCompanyId || null);
   const [foreignFactoryId, setForeignFactoryId] = useState<number | null>(initialData?.foreignFactoryId || null);
 
-  const isLocalAutofilled = !!localCompanyId;
-  const isForeignAutofilled = !!foreignFactoryId;
+  // 💡 TRACK WHETHER SELECTED ENTRIES ARE NEW RECOMMENDATIONS
+  const [isLocalNew, setIsLocalNew] = useState<boolean>(false);
+  const [isForeignNew, setIsForeignNew] = useState<boolean>(false);
+
+  // 💡 ONLY LOCK FIELDS IF ID EXISTS AND IT IS NOT A NEW RECOMMENDATION
+  const isLocalAutofilled = Boolean(localCompanyId && !isLocalNew);
+  const isForeignAutofilled = Boolean(foreignFactoryId && !isForeignNew);
 
   const defaultValues = useMemo(() => ({
     appNumber: initialData?.appNumber || "", 
@@ -202,6 +207,8 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
       setAvailableLines(initialData.productLines || []);
       setLocalCompanyId(initialData.localCompanyId || null);
       setForeignFactoryId(initialData.foreignFactoryId || null);
+      setIsLocalNew(false);
+      setIsForeignNew(false);
       initialized.current = true;
     }
   }, [initialData, reset, defaultValues]);
@@ -210,6 +217,8 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     reset(defaultValues);
     setLocalCompanyId(null);
     setForeignFactoryId(null);
+    setIsLocalNew(false);
+    setIsForeignNew(false);
     setShowSuccess(false);
     initialized.current = false;
     router.push(path);
@@ -223,22 +232,32 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     setValue("divisions", updated, { shouldDirty: true, shouldValidate: true });
   };
 
-  const onSubmit = async (data: any) => {
-    console.log("🚀 FORM SUBMITTED: Processing database commit step...");
-    const payload = {
-      ...data,
-      localCompanyId,
-      foreignFactoryId
-    };
-    const result = await submitLODApplication(payload, CURRENT_USER.id, CURRENT_USER.name, CURRENT_USER.role);
+const onSubmit = async (data: any) => {
+  const payload = {
+    ...data,
+    // Map form values to server expectations
+    localCompanyName: data.companyName,
+    localCompanyAddress: data.companyAddress,
+    foreignFactoryName: data.facilityName,
+    foreignFactoryAddress: data.facilityAddress,
+    userComment: data.lodRemarks,
+    applicationType: data.type,
     
-    if (result.success) {
-      console.log("💾 Database write verified successfully!");
-      setShowSuccess(true);
-    } else {
-      console.log("❌ Error committed during structural database validation execution step.");
-    }
+    localCompanyId,
+    foreignFactoryId,
   };
+
+  const result = await submitLODApplication(
+    payload, 
+    CURRENT_USER.id, 
+    CURRENT_USER.name, 
+    CURRENT_USER.role
+  );
+
+  if (result.success) {
+    setShowSuccess(true);
+  }
+};
 
   return (
     <div className="max-w-4xl mx-auto pb-20 relative">
@@ -317,10 +336,10 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
               <input 
                 {...register("appNumber")} 
                 placeholder="Generating Application ID reference..."
-                readOnly // <--- Locks down the field entirely
+                readOnly
                 className={cn(
                   "w-full p-5 pl-12 rounded-[1.5rem] text-xs font-bold font-mono outline-none border-2 border-transparent transition-all",
-                  "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" // <--- Gives a visual read-only state matching your design patterns
+                  "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none"
                 )}
               />
             </div>
@@ -342,11 +361,12 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
               <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
                 <Building2 className="w-4 h-4" /> Local Applicant
               </h3>
-              {isLocalAutofilled && (
+              {(isLocalAutofilled || isLocalNew) && (
                 <button
                   type="button"
                   onClick={() => {
                     setLocalCompanyId(null);
+                    setIsLocalNew(false);
                     setValue("companyName", "");
                     setValue("companyAddress", "");
                     setValue("notificationEmail", "");
@@ -359,11 +379,17 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             </div>
 
             {!isUpdate && !isLocalAutofilled && (
-              <CompanySearch category="LOCAL" onSelect={(company) => {
-                  setLocalCompanyId(company.id);
+              <CompanySearch 
+                category="LOCAL" 
+                onSelect={(company) => {
+                  setLocalCompanyId(company.id ?? null);
+                  setIsLocalNew(Boolean(company.isNew));
+
                   setValue("companyName", company.name, { shouldDirty: true });
-                  setValue("companyAddress", company.address, { shouldDirty: true });
-                  if (company.email) setValue("notificationEmail", company.email, { shouldDirty: true });
+                  setValue("companyAddress", company.address || "", { shouldDirty: true });
+                  if (company.email) {
+                    setValue("notificationEmail", company.email, { shouldDirty: true });
+                  }
                 }}
               />
             )}
@@ -406,11 +432,12 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
               <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2">
                 <Globe className="w-4 h-4" /> Manufacturing Site
               </h3>
-              {isForeignAutofilled && (
+              {(isForeignAutofilled || isForeignNew) && (
                 <button
                   type="button"
                   onClick={() => {
                     setForeignFactoryId(null);
+                    setIsForeignNew(false);
                     setValue("facilityName", "");
                     setValue("facilityAddress", "");
                     setAvailableLines([]);
@@ -423,10 +450,14 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
             </div>
 
             {!isUpdate && !isForeignAutofilled && (
-              <CompanySearch category="FOREIGN" onSelect={(factory) => {
-                  setForeignFactoryId(factory.id);
+              <CompanySearch 
+                category="FOREIGN" 
+                onSelect={(factory) => {
+                  setForeignFactoryId(factory.id ?? null);
+                  setIsForeignNew(Boolean(factory.isNew));
+
                   setValue("facilityName", factory.name, { shouldDirty: true });
-                  setValue("facilityAddress", factory.address, { shouldDirty: true });
+                  setValue("facilityAddress", factory.address || "", { shouldDirty: true });
                   setAvailableLines(factory.product_lines || factory.productLines || []);
                 }}
               />

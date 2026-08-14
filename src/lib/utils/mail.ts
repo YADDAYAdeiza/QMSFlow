@@ -1,57 +1,64 @@
 import nodemailer from "nodemailer";
 
-// Configure your SMTP Transporter using environment variables
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.SMTP_PORT || "465"),
-  secure: true, // Configured to use explicit secure SSL/TLS connection pathway
-  auth: {
-    user: process.env.SMTP_USER, 
-    pass: process.env.SMTP_PASS, 
-  },
-  tls: {
-    ciphers: "SSLv3",
-    rejectUnauthorized: false
-  }
-});
-
 export async function sendOversightEmail(appDetails: {
   appNumber: string;
   type: string;
   companyName: string;
   facilityName: string;
   lodRemarks?: string;
-  customRecipient?: string; 
+  customRecipient?: string;
 }) {
   console.log("\n================ [EMAIL DISPATCH PIPELINE START] ================");
   console.log(`⏱️  Timestamp: ${new Date().toISOString()}`);
   console.log(`📥 Initiating dispatch for Application: ${appDetails.appNumber}`);
-  
+
   try {
     const senderEmail = process.env.SMTP_USER;
-    const recipientEmail = appDetails.customRecipient || process.env.DIRECTOR_EMAIL || "director@nafdac.gov.ng";
-    
+    const recipientEmail =
+      appDetails.customRecipient ||
+      process.env.DIRECTOR_EMAIL ||
+      "director@nafdac.gov.ng";
+
     // Explicit oversight copy target
     const ccOversight = "adeiza.yusuf@nafdac.gov.ng";
 
-    // hardcoded Vercel URL landing address as requested
+    // Hardcoded portal landing address
     const portalLandingPageUrl = "https://qms-flow.vercel.app";
 
     console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
     console.log(`👉 Target Destination: ${recipientEmail}`);
     console.log(`👁️  Oversight CC Monitored at: ${ccOversight}`);
     console.log(`🔗 Redirect Target Configured: ${portalLandingPageUrl}`);
-    console.log(`⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${process.env.SMTP_PORT || "465"}`);
+    console.log(
+      `⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${
+        process.env.SMTP_PORT || "465"
+      }`
+    );
 
     if (!senderEmail || !process.env.SMTP_PASS) {
       console.log("❌ ERROR: Missing SMTP credentials in Environment settings!");
       return { success: false, error: "SMTP credentials are misconfigured." };
     }
-    console.log('Sent to: ', recipientEmail);
+
+    // Instantiate transporter inside the execution block to capture live env variables
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || "smtp.gmail.com",
+      port: parseInt(process.env.SMTP_PORT || "465"),
+      secure: true,
+      auth: {
+        user: senderEmail,
+        pass: process.env.SMTP_PASS,
+      },
+      tls: {
+        ciphers: "SSLv3",
+        rejectUnauthorized: false,
+      },
+    });
+
     const mailOptions = {
       from: `"VMAP Digital Portal" <${senderEmail}>`,
       to: recipientEmail,
-      cc: ccOversight, // Injected CC parameter here for persistent tracking
+      cc: ccOversight,
       subject: `🚨 LIVE PROCESSING ALERT: Application #${appDetails.appNumber}`,
       html: `
         <div style="font-family: sans-serif; padding: 20px; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 16px;">
@@ -78,14 +85,18 @@ export async function sendOversightEmail(appDetails: {
               <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Manufacturing Site:</td>
               <td style="padding: 8px 0; color: #334155; text-transform: uppercase;">${appDetails.facilityName}</td>
             </tr>
-            ${appDetails.lodRemarks ? `
+            ${
+              appDetails.lodRemarks
+                ? `
             <tr>
               <td style="padding: 8px 0; font-weight: bold; color: #64748b; vertical-align: top;">Specialist Notes:</td>
               <td style="padding: 8px 0; color: #475569; background: #f8fafc; padding: 10px; border-radius: 8px; font-style: italic;">
                 "${appDetails.lodRemarks}"
               </td>
             </tr>
-            ` : ""}
+            `
+                : ""
+            }
           </table>
 
           <!-- Interactive Action Redirection Button -->
@@ -106,7 +117,7 @@ export async function sendOversightEmail(appDetails: {
 
     console.log("⚡ Connecting to server and attempting handshake transmission...");
     const info = await transporter.sendMail(mailOptions);
-    
+
     console.log("✅ SUCCESS: Email passed verification checks and handshakes completed!");
     console.log(`🆔 Message ID Reference: ${info.messageId}`);
     console.log("================ [EMAIL DISPATCH PIPELINE END] ================\n");

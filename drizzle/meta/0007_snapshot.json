@@ -1,6 +1,6 @@
 {
-  "id": "1ed2db43-9b5e-42f8-bf24-ebc9111821c7",
-  "prevId": "b781cb26-2703-4487-8f6b-99d02019fc27",
+  "id": "f8c6ede4-ac45-4dd3-bd6f-f38c91eca908",
+  "prevId": "076083c6-e70a-4fd4-865b-c200a0b2a9b5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -32,15 +32,15 @@
           "primaryKey": false,
           "notNull": false
         },
-        "facility_id": {
-          "name": "facility_id",
+        "foreign_factory_id": {
+          "name": "foreign_factory_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "foreign_factory_id": {
-          "name": "foreign_factory_id",
-          "type": "integer",
+        "facility_id": {
+          "name": "facility_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -49,7 +49,7 @@
           "type": "varchar(100)",
           "primaryKey": false,
           "notNull": false,
-          "default": "'Director Review'"
+          "default": "'Divisional Deputy Director'"
         },
         "status": {
           "name": "status",
@@ -94,19 +94,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "applications_facility_id_facilities_id_fk": {
-          "name": "applications_facility_id_facilities_id_fk",
-          "tableFrom": "applications",
-          "tableTo": "facilities",
-          "columnsFrom": [
-            "facility_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "applications_foreign_factory_id_companies_id_fk": {
           "name": "applications_foreign_factory_id_companies_id_fk",
           "tableFrom": "applications",
@@ -118,6 +105,19 @@
             "id"
           ],
           "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "applications_facility_id_facilities_id_fk": {
+          "name": "applications_facility_id_facilities_id_fk",
+          "tableFrom": "applications",
+          "tableTo": "facilities",
+          "columnsFrom": [
+            "facility_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -364,8 +364,93 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "uuid",
           "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "latitude": {
+          "name": "latitude",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "longitude": {
+          "name": "longitude",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "facilities_company_id_companies_id_fk": {
+          "name": "facilities_company_id_companies_id_fk",
+          "tableFrom": "facilities",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.inspection_observations_analytics": {
+      "name": "inspection_observations_analytics",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "uuid",
+          "primaryKey": false,
           "notNull": true
         },
         "company_id": {
@@ -374,71 +459,132 @@
           "primaryKey": false,
           "notNull": true
         },
-        "name": {
-          "name": "name",
-          "type": "varchar(255)",
+        "quality_system": {
+          "name": "quality_system",
+          "type": "varchar(100)",
           "primaryKey": false,
           "notNull": true
         },
-        "address": {
-          "name": "address",
+        "severity": {
+          "name": "severity",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "root_cause_category": {
+          "name": "root_cause_category",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observation_text": {
+          "name": "observation_text",
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "latitude": {
-          "name": "latitude",
-          "type": "numeric(10, 8)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "longitude": {
-          "name": "longitude",
-          "type": "numeric(11, 8)",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "now()"
         }
       },
       "indexes": {
-        "unique_facility_per_company": {
-          "name": "unique_facility_per_company",
+        "idx_obs_report_id": {
+          "name": "idx_obs_report_id",
+          "columns": [
+            {
+              "expression": "report_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_obs_company_id": {
+          "name": "idx_obs_company_id",
           "columns": [
             {
               "expression": "company_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_obs_quality_system": {
+          "name": "idx_obs_quality_system",
+          "columns": [
             {
-              "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "address",
+              "expression": "quality_system",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_obs_severity": {
+          "name": "idx_obs_severity",
+          "columns": [
+            {
+              "expression": "severity",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_obs_root_cause": {
+          "name": "idx_obs_root_cause",
+          "columns": [
+            {
+              "expression": "root_cause_category",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "facilities_company_id_companies_id_fk": {
-          "name": "facilities_company_id_companies_id_fk",
-          "tableFrom": "facilities",
+        "inspection_observations_analytics_report_id_local_inspection_reports_id_fk": {
+          "name": "inspection_observations_analytics_report_id_local_inspection_reports_id_fk",
+          "tableFrom": "inspection_observations_analytics",
+          "tableTo": "local_inspection_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "inspection_observations_analytics_company_id_companies_id_fk": {
+          "name": "inspection_observations_analytics_company_id_companies_id_fk",
+          "tableFrom": "inspection_observations_analytics",
           "tableTo": "companies",
           "columnsFrom": [
             "company_id"
@@ -472,6 +618,12 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "batch_id": {
+          "name": "batch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "scheduled_date": {
           "name": "scheduled_date",
@@ -508,6 +660,19 @@
           "tableTo": "applications",
           "columnsFrom": [
             "application_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "inspection_schedules_batch_id_schedule_batches_id_fk": {
+          "name": "inspection_schedules_batch_id_schedule_batches_id_fk",
+          "tableFrom": "inspection_schedules",
+          "tableTo": "schedule_batches",
+          "columnsFrom": [
+            "batch_id"
           ],
           "columnsTo": [
             "id"
@@ -604,12 +769,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "inspector_id": {
-          "name": "inspector_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "report_doc_number": {
           "name": "report_doc_number",
           "type": "varchar(100)",
@@ -618,35 +777,81 @@
         },
         "type_of_inspection": {
           "name": "type_of_inspection",
-          "type": "varchar(10)",
+          "type": "varchar(20)",
           "primaryKey": false,
           "notNull": true
         },
-        "current_status": {
-          "name": "current_status",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'LOD_INTAKE'"
-        },
-        "checklist_raw": {
-          "name": "checklist_raw",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "report_html": {
-          "name": "report_html",
-          "type": "text",
+        "facility_state": {
+          "name": "facility_state",
+          "type": "varchar(100)",
           "primaryKey": false,
           "notNull": false
         },
-        "version_history": {
-          "name": "version_history",
-          "type": "jsonb",
+        "critical_count": {
+          "name": "critical_count",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "default": "'[]'::jsonb"
+          "notNull": true,
+          "default": 0
+        },
+        "major_count": {
+          "name": "major_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "other_count": {
+          "name": "other_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "total_observations": {
+          "name": "total_observations",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "final_recommendation": {
+          "name": "final_recommendation",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "capa_required": {
+          "name": "capa_required",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "capa_issued_at": {
+          "name": "capa_issued_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "capa_submitted_at": {
+          "name": "capa_submitted_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "capa_closed_at": {
+          "name": "capa_closed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "capa_turnaround_days": {
+          "name": "capa_turnaround_days",
+          "type": "int GENERATED ALWAYS AS (EXTRACT(DAY FROM (capa_closed_at - capa_issued_at))) STORED",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -663,7 +868,53 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_reports_recommendation": {
+          "name": "idx_reports_recommendation",
+          "columns": [
+            {
+              "expression": "final_recommendation",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_reports_critical_count": {
+          "name": "idx_reports_critical_count",
+          "columns": [
+            {
+              "expression": "critical_count",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_reports_capa_days": {
+          "name": "idx_reports_capa_days",
+          "columns": [
+            {
+              "expression": "capa_turnaround_days",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "local_inspection_reports_application_id_applications_id_fk": {
           "name": "local_inspection_reports_application_id_applications_id_fk",
@@ -689,19 +940,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "local_inspection_reports_inspector_id_users_id_fk": {
-          "name": "local_inspection_reports_inspector_id_users_id_fk",
-          "tableFrom": "local_inspection_reports",
-          "tableTo": "users",
-          "columnsFrom": [
-            "inspector_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -787,12 +1025,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "facility_id": {
-          "name": "facility_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "name": {
           "name": "name",
           "type": "varchar(255)",
@@ -801,11 +1033,11 @@
         }
       },
       "indexes": {
-        "unique_line_per_facility": {
-          "name": "unique_line_per_facility",
+        "unique_line_per_factory": {
+          "name": "unique_line_per_factory",
           "columns": [
             {
-              "expression": "facility_id",
+              "expression": "company_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -836,10 +1068,79 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.product_lines_local": {
+      "name": "product_lines_local",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
         },
-        "product_lines_facility_id_facilities_id_fk": {
-          "name": "product_lines_facility_id_facilities_id_fk",
-          "tableFrom": "product_lines",
+        "facility_id": {
+          "name": "facility_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "unique_line_per_facility": {
+          "name": "unique_line_per_facility",
+          "columns": [
+            {
+              "expression": "facility_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "product_lines_local_facility_id_facilities_id_fk": {
+          "name": "product_lines_local_facility_id_facilities_id_fk",
+          "tableFrom": "product_lines_local",
           "tableTo": "facilities",
           "columnsFrom": [
             "facility_id"
@@ -878,18 +1179,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "classification": {
-          "name": "classification",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target_species": {
-          "name": "target_species",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -920,6 +1209,78 @@
           "name": "products_line_id_product_lines_id_fk",
           "tableFrom": "products",
           "tableTo": "product_lines",
+          "columnsFrom": [
+            "line_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.products_local": {
+      "name": "products_local",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "line_id": {
+          "name": "line_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "classification": {
+          "name": "classification",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target_species": {
+          "name": "target_species",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "products_local_line_id_product_lines_local_id_fk": {
+          "name": "products_local_line_id_product_lines_local_id_fk",
+          "tableFrom": "products_local",
+          "tableTo": "product_lines_local",
           "columnsFrom": [
             "line_id"
           ],
@@ -1024,7 +1385,7 @@
         },
         "facility_id": {
           "name": "facility_id",
-          "type": "integer",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -1172,6 +1533,105 @@
           "nullsNotDistinct": false,
           "columns": [
             "application_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.schedule_batches": {
+      "name": "schedule_batches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "batch_reference": {
+          "name": "batch_reference",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_date": {
+          "name": "start_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_date": {
+          "name": "end_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING_RECOMMENDATION'"
+        },
+        "current_point": {
+          "name": "current_point",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Divisional Deputy Director IRSD Routing'"
+        },
+        "endorsed_by": {
+          "name": "endorsed_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_by": {
+          "name": "approved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "history": {
+          "name": "history",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'[]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "schedule_batches_batch_reference_unique": {
+          "name": "schedule_batches_batch_reference_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "batch_reference"
           ]
         }
       },
