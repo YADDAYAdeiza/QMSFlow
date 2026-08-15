@@ -29,8 +29,8 @@ export async function POST(req: Request) {
     const estimatedInspectionDays = body.estimatedInspectionDays ?? 3;
     const notificationEmail = body.notificationEmail;
     
-    // Updated default list to reflect: ["VMD", "PAD", "AFPD", "IRSD"]
-    const assignedDivisions = body.assignedDivisions || ['VMD', 'PAD', 'AFPD', 'IRSD'];
+    // Standardized division array replacement: ["VMD", "PAD", "AFPD", "IRSD"]
+    const assignedDivisions = body.assignedDivisions || ["VMD", "PAD", "AFPD", "IRSD"];
     const productLines = body.productLines || [];
 
     if (!companyName || !address) {
@@ -119,7 +119,7 @@ export async function POST(req: Request) {
         throw new Error('Failed to resolve valid Facility ID.');
       }
 
-      // 3. Resolve Product Lines & Products (with adjacent fields inserted)
+      // 3. Resolve Product Lines & Products
       if (Array.isArray(productLines)) {
         for (const lineData of productLines) {
           const lineName = lineData.lineName || lineData.name;
@@ -164,7 +164,6 @@ export async function POST(req: Request) {
                 );
 
               if (!existingProd) {
-                // Insert new product record with classification and targetSpecies
                 await tx.insert(productsLocal).values({
                   lineId: line.id,
                   name: prodName,
@@ -172,7 +171,6 @@ export async function POST(req: Request) {
                   targetSpecies: targetSpecies ?? null,
                 });
               } else {
-                // Update adjacent fields if they were missing or updated
                 await tx
                   .update(productsLocal)
                   .set({
@@ -187,32 +185,35 @@ export async function POST(req: Request) {
         }
       }
 
-     // 4. Applications: Create main tracking entry
-        const [application] = await tx
-          .insert(applications)
-          .values({
-            applicationNumber,
-            type,
-            companyId: company.id,
-            facilityId: facility.id,
-            currentPoint: 'Staff Technical Field Review', // Matches dashboard unassigned filter
-            status: 'INSPECTION_PENDING',               // Matches dashboard status requirement
-            details: {
-              targetDirectorate,
-              estimatedInspectionDays,
-              notificationEmail,
-              assignedDivisions,
-              productLines,
-            },
-          })
-          .returning();
+      // Standardized role title (Divisional Deputy Director instead of DDD)
+      const initialPoint = 'Divisional Deputy Director Technical Field Review';
 
-        // 5. QMS Timelines: Start time tracking
-        await tx.insert(qmsTimelines).values({
-          applicationId: application.id,
-          point: 'Staff Technical Field Review', // Aligned with initial workflow point
-          startTime: new Date(),
-        });
+      // 4. Create Application Tracking Record
+      const [application] = await tx
+        .insert(applications)
+        .values({
+          applicationNumber,
+          type,
+          companyId: company.id,
+          facilityId: facility.id,
+          currentPoint: initialPoint,
+          status: 'INSPECTION_PENDING',
+          details: {
+            targetDirectorate,
+            estimatedInspectionDays,
+            notificationEmail,
+            assignedDivisions,
+            productLines,
+          },
+        })
+        .returning();
+
+      // 5. QMS Timing Enforcement: Record start time for SLA tracking
+      await tx.insert(qmsTimelines).values({
+        applicationId: application.id,
+        point: initialPoint,
+        startTime: new Date(),
+      });
 
       return application;
     });

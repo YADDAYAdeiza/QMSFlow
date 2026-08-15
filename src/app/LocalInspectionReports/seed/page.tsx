@@ -170,24 +170,39 @@ export default function ApplicationCreationPage() {
   };
 
   const updateProductValue = (
-    lineIndex: number,
-    prodIndex: number,
-    field: keyof Product,
-    value: any,
-    option?: any
-  ) => {
-    setProductLines((prev) => {
-      const updated = [...prev];
-      const currentProd = updated[lineIndex].products[prodIndex];
-      updated[lineIndex].products[prodIndex] = {
-        ...currentProd,
-        [field]: value,
-        ...(option?.id ? { id: option.id } : {}),
-        ...(option?.classification ? { classification: option.classification } : {}),
-      };
-      return updated;
-    });
-  };
+  lineIndex: number,
+  prodIndex: number,
+  field: keyof Product,
+  value: any,
+  option?: any
+) => {
+  // --- DEBUG LOG ---
+  console.log("--> updateProductValue triggered:", {
+    field,
+    value,
+    option,
+    targetSpeciesFromOption: option?.targetSpecies,
+  });
+
+  setProductLines((prev) => {
+    const updated = [...prev];
+    const currentProd = updated[lineIndex].products[prodIndex];
+
+    const nextProd: Product = {
+      ...currentProd,
+      [field]: value,
+    };
+
+    if (option) {
+      if (option.id) nextProd.id = option.id;
+      if (option.classification) nextProd.classification = option.classification;
+      if (option.targetSpecies) nextProd.targetSpecies = option.targetSpecies; // Ensure this assignment exists!
+    }
+
+    updated[lineIndex].products[prodIndex] = nextProd;
+    return updated;
+  });
+};
 
   const resetForm = () => {
     setSelectedCompanyId(null);
@@ -244,12 +259,12 @@ export default function ApplicationCreationPage() {
         text: `Application #${appNum} created successfully! You can track this ID in your records.`,
       });
 
-      resetForm();
-    } catch (err: any) {
-      setLog({ type: "error", text: err.message || "Network error encountered." });
-    } finally {
-      setLoading(false);
-    }
+        resetForm();
+      } catch (err: any) {
+        setLog({ type: "error", text: err.message || "Network error encountered." });
+      } finally {
+        setLoading(false);
+      }
   };
 
   return (
@@ -280,65 +295,63 @@ export default function ApplicationCreationPage() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Section 1: Corporate & Facility Information */}
-            <div className="bg-slate-800/40 p-4 border border-slate-700/60 rounded-lg space-y-4">
-              <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-                1. Company & Facility Site Identification
-              </h3>
+          <div className="bg-slate-800/40 p-4 border border-slate-700/60 rounded-lg space-y-4">
+            <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+              1. Company & Facility Site Identification
+            </h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1 font-medium">
-                    Corporate / Parent Company
-                  </label>
-                  <Combobox
-                    value={companyName}
-                    onChange={handleCompanyChange}
-                    fetchUrl="/api/LocalInspectionReports/Combo/companies"
-                    placeholder="e.g. Wata Pharma Ltd."
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1 font-medium">
-                    Facility / Plant Name
-                  </label>
-                  <Combobox
-                    value={facilityName}
-                    onChange={handleFacilityChange}
-                    // Only pass a fetchUrl if an existing company ID was selected
-                    fetchUrl={
-                      selectedCompanyId
-                        ? `/api/LocalInspectionReports/Combo/facilities?companyId=${selectedCompanyId}`
-                        : ""
-                    }
-                    placeholder={
-                      companyName.trim()
-                        ? selectedCompanyId
-                          ? "Select facility or type new plant name..."
-                          : "Type new facility name..."
-                        : "Type or select a company first..."
-                    }
-                    // Enable input as long as companyName is typed (even for brand-new companies)
-                    disabled={!companyName.trim()} 
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1 font-medium">
-                    Target Directorate
-                  </label>
-                  <select
-                    value={targetDirectorate}
-                    onChange={(e) => handleDirectorateChange(e.target.value as DirectorateCategory)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-blue-400 font-bold focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="VMD">VMD (Veterinary Medicine)</option>
-                    <option value="PAD">PAD (Pesticides & Agro-chemicals)</option>
-                    <option value="AFPD">AFPD (Animal Feed & Premix)</option>
-                    <option value="IRSD">IRSD (Inspection, Relations & Stakeholders)</option>
-                  </select>
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">
+                  Corporate / Parent Company
+                </label>
+                <Combobox
+                  value={companyName}
+                  onChange={handleCompanyChange}
+                  fetchUrl="/api/LocalInspectionReports/Combo/companies"
+                  placeholder="e.g. Wata Pharma Ltd."
+                />
               </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1 font-medium">
+                  Facility / Plant Name
+                </label>
+                <Combobox
+                  value={facilityName}
+                  onChange={handleFacilityChange}
+                  fetchUrl={
+                    selectedCompanyId
+                      ? `/api/LocalInspectionReports/Combo/facilities?companyId=${selectedCompanyId}`
+                      : ""
+                  }
+                  placeholder={
+                    companyName.trim()
+                      ? selectedCompanyId
+                        ? "Select facility or type new plant name..."
+                        : "Type new facility name..."
+                      : "Type or select a company first..."
+                  }
+                  disabled={!companyName.trim()} 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">
+                  Target Directorate
+                </label>
+                <select
+                  value={targetDirectorate}
+                  onChange={(e) => handleDirectorateChange(e.target.value as DirectorateCategory)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-blue-400 font-bold focus:outline-none focus:border-blue-500"
+                >
+                  <option value="VMD">VMD (Veterinary Medicine)</option>
+                  <option value="PAD">PAD (Pesticides & Agro-chemicals)</option>
+                  <option value="AFPD">AFPD (Animal Feed & Premix)</option>
+                  <option value="IRSD">IRSD (Inspection, Relations & Stakeholders)</option>
+                </select>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-2">
