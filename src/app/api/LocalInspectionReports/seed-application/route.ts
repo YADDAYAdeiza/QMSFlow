@@ -185,9 +185,8 @@ export async function POST(req: Request) {
         }
       }
 
-      // Standardized role title (Divisional Deputy Director instead of DDD)
-      const initialPoint = 'Divisional Deputy Director Technical Field Review';
-
+      // Standardized role title for initial schedule routing
+const initialPoint = 'Divisional Deputy Director Technical Assignment';
       // 4. Create Application Tracking Record
       const [application] = await tx
         .insert(applications)

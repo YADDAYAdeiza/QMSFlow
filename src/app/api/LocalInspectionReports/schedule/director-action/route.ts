@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { scheduleBatches, inspectionSchedules, applications } from "@/db/schema";
-import { eq, and, gte, lte, inArray, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
@@ -9,6 +9,8 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { batchId, action, comments, userId, userRole } = body;
+
+    console.log("This is batchId", batchId);
 
     if (!batchId || !action) {
       return NextResponse.json(
@@ -38,9 +40,8 @@ export async function POST(request: Request) {
 
     // --- ACTION HANDLER 1: Endorsements & Resubmissions ---
     if (action === "RECOMMEND" || action === "RESUBMIT" || action === "RECOMMEND_RESUBMIT") {
-      const auditAction = action === "RESUBMIT" 
-        ? "RESUBMITTED_AFTER_REWORK" 
-        : "RECOMMENDED_FOR_APPROVAL";
+      const auditAction =
+        action === "RESUBMIT" ? "RESUBMITTED_AFTER_REWORK" : "RECOMMENDED_FOR_APPROVAL";
 
       const newHistoryEntry = {
         action: auditAction,
@@ -50,22 +51,41 @@ export async function POST(request: Request) {
         timestamp: new Date().toISOString(),
       };
 
-      await db
-        .update(scheduleBatches)
-        .set({
-          status: inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL,
-          currentPoint: inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW.currentPoint,
-          endorsedBy: validUserId,
-          history: [...currentHistory, newHistoryEntry],
-          updatedAt: new Date(),
-        })
-        .where(eq(scheduleBatches.id, batchId));
+      await db.transaction(async (tx) => {
+        // 1. Update batch status and history
+        await tx
+          .update(scheduleBatches)
+          .set({
+            status: inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL,
+            currentPoint: inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW.currentPoint,
+            endorsedBy: validUserId,
+            history: [...currentHistory, newHistoryEntry],
+            updatedAt: new Date(),
+          })
+          .where(eq(scheduleBatches.id, batchId));
+
+        // 2. 🎯 Scoped Batch Binding:
+        // If specific activeScheduleIds were passed in the payload, bind ONLY those.
+        // Otherwise, fallback to binding any schedules explicitly carrying this batchId.
+        if (Array.isArray(body.activeScheduleIds) && body.activeScheduleIds.length > 0) {
+          await tx
+            .update(inspectionSchedules)
+            .set({ batchId: batch.id })
+            .where(inArray(inspectionSchedules.id, body.activeScheduleIds));
+        } else {
+          await tx
+            .update(inspectionSchedules)
+            .set({ batchId: batch.id })
+            .where(eq(inspectionSchedules.batchId, batch.id));
+        }
+      });
 
       return NextResponse.json({
         success: true,
-        message: action === "RESUBMIT" 
-          ? "Schedule batch successfully resubmitted to the Director for approval."
-          : "Schedule batch successfully routed to the Director for approval.",
+        message:
+          action === "RESUBMIT"
+            ? "Schedule batch successfully resubmitted to the Director for approval."
+            : "Schedule batch successfully routed to the Director for approval.",
       });
     }
 
@@ -92,24 +112,21 @@ export async function POST(request: Request) {
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. Fetch ONLY scheduled items that are currently active in this date range
-        // AND belong to valid, un-deleted schedules
+        // 2. Fetch ONLY scheduled items explicitly tied to this batch
         const scheduledItems = await tx
-          .select({ 
+          .select({
             scheduleId: inspectionSchedules.id,
-            applicationId: inspectionSchedules.applicationId 
+            applicationId: inspectionSchedules.applicationId,
           })
           .from(inspectionSchedules)
           .innerJoin(applications, eq(inspectionSchedules.applicationId, applications.id))
           .where(
             and(
-              gte(inspectionSchedules.scheduledDate, batch.startDate),
-              lte(inspectionSchedules.scheduledDate, batch.endDate),
-              // 🔒 CRITICAL: Only advance applications that are currently staged for batch approval
+              eq(inspectionSchedules.batchId, batchId),
               inArray(applications.currentPoint, [
                 "Divisional Deputy Director Technical Assignment",
                 "Divisional Deputy Director IRSD Routing",
-                "PENDING_BATCH_RECOMMENDATION"
+                "PENDING_BATCH_RECOMMENDATION",
               ])
             )
           );

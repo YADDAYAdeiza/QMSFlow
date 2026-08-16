@@ -52,10 +52,10 @@ export default function RecommendApprovalModal({
       return;
     }
 
-    // 🔒 Synchronously disable immediately before async transition kicks in
+    // Disable state before transition initiates
     setIsSubmitting(true);
 
-    // Validate UUID format before passing to backend
+    // Validate UUID format before submitting
     const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
 
     startTransition(async () => {

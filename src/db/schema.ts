@@ -136,6 +136,9 @@ export const products = pgTable(
   })
 );
 
+// import { pgTable, uuid, text, timestamp } from "drizzle-orm/pg-core";
+// import { productLinesLocal } from "./schema"; // adjust path as needed
+
 export const productsLocal = pgTable("products_local", {
   id: uuid("id").primaryKey().defaultRandom(),
   lineId: uuid("line_id").references(() => productLinesLocal.id, {
@@ -144,8 +147,11 @@ export const productsLocal = pgTable("products_local", {
   name: text("name").notNull(),
   classification: text("classification"),
   targetSpecies: text("target_species"),
-  createdAt: timestamp("created_at", { mode: "string" }).defaultNow(),
-  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
 });
 
 export const productsLocalRelations = relations(productsLocal, ({ one }) => ({

@@ -60,7 +60,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
           inArray(applications.status, ["INSPECTION_PENDING", "INSPECTION_SCHEDULED", "APPROVED", "CAPA_APPROVED"]),
           inArray(applications.currentPoint, [
             "Staff Technical Field Review",
-            "Divisional Deputy Director Technical Assignment", // 👈 Fixed name here
+            "Divisional Deputy Director Technical Assignment",
             "Divisional Deputy Director Technical Endorsement",
             "Divisional Deputy Director IRSD Routing",
             "Divisional Deputy Director IRSD Concurrence",
@@ -89,12 +89,12 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
   };
 
   const unassigned = records.filter(
-    app => app.currentPoint === "Staff Technical Field Review" && app.status === "INSPECTION_PENDING"
+    app => app.currentPoint === "Divisional Deputy Director Technical Assignment" && app.status === "INSPECTION_PENDING"
   );
   
   const assigned = records.filter(
     app => 
-      (app.currentPoint && app.currentPoint.includes("Divisional Deputy Director")) ||
+      (app.currentPoint && app.currentPoint.includes("Divisional Deputy Director") && app.status !== "INSPECTION_PENDING") ||
       (app.status === "INSPECTION_SCHEDULED" && hasDivisionalDeputyDirectorHistory(app))
   );
   
@@ -209,7 +209,6 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                       </span>
                     </td>
                     <td className="p-4 text-right whitespace-nowrap space-x-2">
-                      {/* Show Assign Task button alongside Audit Trail for Unassigned items */}
                       {activeTab === "unassigned" && (
                         <Link
                           href={`/LocalInspectionReports/ddd/applications/${app.id}`}

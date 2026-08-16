@@ -9,7 +9,7 @@ import {
   users,
   scheduleBatches 
 } from "@/db/schema";
-import { eq, gte, lte, and, asc, inArray, notInArray, or, isNull } from "drizzle-orm";
+import { eq, gte, lte, and, asc, or, isNull, inArray, notInArray, SQL } from "drizzle-orm";
 import { format, parseISO } from "date-fns";
 import React from "react";
 import BatchScheduleEditor, { 
@@ -127,22 +127,6 @@ export default async function PrintInspectionSchedulePage({
 
   const isApproved = activeBatch?.status === "APPROVED";
 
-  // ------------------------------------------------------------------
-  // STEP 2: Retroactive Auto-Backfill of Null batch_id Columns
-  // ------------------------------------------------------------------
-  if (activeBatch?.id) {
-    await db
-      .update(inspectionSchedules)
-      .set({ batchId: activeBatch.id })
-      .where(
-        and(
-          gte(inspectionSchedules.scheduledDate, defaultStart),
-          lte(inspectionSchedules.scheduledDate, defaultEnd),
-          isNull(inspectionSchedules.batchId)
-        )
-      );
-  }
-
   // Fetch Inspector Pool
   const rawUsers = await db
     .select({
@@ -159,8 +143,10 @@ export default async function PrintInspectionSchedulePage({
     is_available: true,
   }));
 
-  // 3. Query schedules matching active batchId OR date window
-  const baseWhereConditions = [
+  // ------------------------------------------------------------------
+  // STEP 2: Query schedules matching active batchId directly
+  // ------------------------------------------------------------------
+  const baseWhereConditions: SQL[] = [
     notInArray(applications.status, ["REJECTED", "CANCELLED"]),
   ];
 
@@ -176,22 +162,23 @@ export default async function PrintInspectionSchedulePage({
     );
   }
 
-  const dateOrBatchCondition = activeBatch?.id 
-    ? or(
-        eq(inspectionSchedules.batchId, activeBatch.id),
-        and(
-          gte(inspectionSchedules.scheduledDate, defaultStart),
-          lte(inspectionSchedules.scheduledDate, defaultEnd)
-        )
-      )
-    : and(
+  if (activeBatch?.id) {
+  baseWhereConditions.push(
+    or(
+      eq(inspectionSchedules.batchId, activeBatch.id),
+      and(
+        isNull(inspectionSchedules.batchId),
         gte(inspectionSchedules.scheduledDate, defaultStart),
         lte(inspectionSchedules.scheduledDate, defaultEnd)
-      );
-
-  if (dateOrBatchCondition) {
-    baseWhereConditions.push(dateOrBatchCondition);
-  }
+      )
+    )!
+  );
+} else {
+  baseWhereConditions.push(
+    gte(inspectionSchedules.scheduledDate, defaultStart),
+    lte(inspectionSchedules.scheduledDate, defaultEnd)
+  );
+}
 
   const rawSchedules = await db
     .select({
