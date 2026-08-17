@@ -268,7 +268,7 @@ export async function submitLODApplication(
           companyId: localCompany.id,
           foreignFactoryId: foreignCompany.id,
           facilityId: facility.id,
-          currentPoint: "Divisional Deputy Director",
+          currentPoint: "Director Review",
           status: "PENDING_DIRECTOR",
           details: {
             assignedDivisions: assignedDivs,
@@ -308,7 +308,7 @@ export async function submitLODApplication(
         applicationId: newApplication.id,
         staffId,
         division: assignedDivs[0] || "VMD",
-        point: "Divisional Deputy Director",
+        point: "Director Review",
         startTime: new Date(),
         details: { action: "APPLICATION_SUBMITTED" },
       });
@@ -393,7 +393,7 @@ async function sendNotificationEmail(
             </tr>
             <tr>
               <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9;"><strong>Current Workflow Stage:</strong></td>
-              <td style="padding: 8px; border: 1px solid #ddd;">Divisional Deputy Director</td>
+              <td style="padding: 8px; border: 1px solid #ddd;">Director Review</td>
             </tr>
           </table>
           <p>You can track the live evaluation timeline through your portal dashboard.</p>
