@@ -24,6 +24,7 @@ export interface ProductInput {
 
 export interface ProductLineInput {
   lineName: string;
+  riskCategory?: string;
   products: ProductInput[];
 }
 
@@ -38,9 +39,16 @@ export interface SubmitLODPayload {
   facilityAddress?: string;
   foreignFactoryAddress?: string;
   
+  latitude?: string | number;
+  longitude?: string | number;
   facilityLatitude?: number;
   facilityLongitude?: number;
+  
+  facilityType?: string;
+  siteScope?: string;
+  
   productLines: ProductLineInput[];
+  divisions?: string[];
   
   type?: string;
   applicationType?: string;
@@ -72,6 +80,10 @@ export async function submitLODApplication(
     const appType = payload.applicationType || payload.type || "Facility Verification";
     const userRemarks = payload.userComment || payload.lodRemarks || "";
     const staffId = userId || payload.submittedByStaffId || null;
+    const assignedDivs = payload.divisions && payload.divisions.length > 0 ? payload.divisions : ["VMD"];
+
+    const latVal = payload.facilityLatitude ?? (payload.latitude ? parseFloat(String(payload.latitude)) : null);
+    const lngVal = payload.facilityLongitude ?? (payload.longitude ? parseFloat(String(payload.longitude)) : null);
 
     if (!localName) {
       throw new Error("Local Applicant Company Name is required.");
@@ -145,11 +157,20 @@ export async function submitLODApplication(
             name: foreignName,
             address: foreignAddr,
             companyId: foreignCompany.id,
-            latitude: payload.facilityLatitude ?? null,
-            longitude: payload.facilityLongitude ?? null,
+            latitude: Number.isNaN(latVal) ? null : latVal,
+            longitude: Number.isNaN(lngVal) ? null : lngVal,
           })
           .returning();
         facility = insertedFacility;
+      } else {
+        // Update coordinates or details if provided fresh
+        await tx
+          .update(facilities)
+          .set({
+            latitude: Number.isNaN(latVal) ? facility.latitude : (latVal ?? facility.latitude),
+            longitude: Number.isNaN(lngVal) ? facility.longitude : (lngVal ?? facility.longitude),
+          })
+          .where(eq(facilities.id, facility.id));
       }
 
       // 5. Process Product Lines & Products (Facility-Anchored)
@@ -167,6 +188,20 @@ export async function submitLODApplication(
         if (riskMaster) {
           if (riskMaster.complexityScore > maxComplexity) maxComplexity = riskMaster.complexityScore;
           if (riskMaster.criticalityScore > maxCriticality) maxCriticality = riskMaster.criticalityScore;
+        } else if (line.riskCategory) {
+          // Fallback evaluation if explicit category was submitted from form dropdown
+          const fallbackMap: Record<string, { comp: number; crit: number }> = {
+            "VACCINES / BIOLOGICALS": { comp: 3, crit: 3 },
+            "STERILE INJECTABLES": { comp: 3, crit: 2 },
+            "POWDER BETA-LACTAMS": { comp: 2, crit: 3 },
+            "TABLETS (GENERAL)": { comp: 1, crit: 2 },
+            "MULTIVITAMINS": { comp: 1, crit: 1 },
+          };
+          const mapped = fallbackMap[line.riskCategory];
+          if (mapped) {
+            if (mapped.comp > maxComplexity) maxComplexity = mapped.comp;
+            if (mapped.crit > maxCriticality) maxCriticality = mapped.crit;
+          }
         }
 
         let productLine = await tx.query.productLinesLocal.findFirst({
@@ -233,11 +268,13 @@ export async function submitLODApplication(
           companyId: localCompany.id,
           foreignFactoryId: foreignCompany.id,
           facilityId: facility.id,
-          currentPoint: "Director Review",
+          currentPoint: "Divisional Deputy Director",
           status: "PENDING_DIRECTOR",
           details: {
-            assignedDivisions: ["VMD"],
+            assignedDivisions: assignedDivs,
             productLines: payload.productLines,
+            facilityType: payload.facilityType || "Pharma",
+            siteScope: payload.siteScope || "New Manufacturing Site",
             notificationEmail: payload.notificationEmail,
             poaUrl: payload.poaUrl,
             inspectionReportUrl: payload.inspectionReportUrl,
@@ -270,8 +307,8 @@ export async function submitLODApplication(
       await tx.insert(qmsTimelines).values({
         applicationId: newApplication.id,
         staffId,
-        division: "VMD",
-        point: "Director Review",
+        division: assignedDivs[0] || "VMD",
+        point: "Divisional Deputy Director",
         startTime: new Date(),
         details: { action: "APPLICATION_SUBMITTED" },
       });
@@ -356,7 +393,7 @@ async function sendNotificationEmail(
             </tr>
             <tr>
               <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9;"><strong>Current Workflow Stage:</strong></td>
-              <td style="padding: 8px; border: 1px solid #ddd;">Director Review</td>
+              <td style="padding: 8px; border: 1px solid #ddd;">Divisional Deputy Director</td>
             </tr>
           </table>
           <p>You can track the live evaluation timeline through your portal dashboard.</p>

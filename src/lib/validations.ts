@@ -10,7 +10,7 @@ export const lodFormSchema = z.object({
   companyName: z.string().min(1, "Local company name is required"),
   companyAddress: z.string().min(1, "Local address is required"),
   
-  // Updated: Made optional but strictly validated if provided
+  // Optional Notification Email
   notificationEmail: z.string()
     .trim()
     .toLowerCase()
@@ -21,6 +21,13 @@ export const lodFormSchema = z.object({
   facilityName: z.string().min(1, "Foreign factory name is required"),
   facilityAddress: z.string().min(1, "Foreign physical address is required"),
   
+  // Facility Type Options Update
+  facilityType: z.enum(["Pharma", "Food/Feed", "Pesticide", "Premixes"]).default("Pharma"),
+
+  // Optional Lat/Lng Fields
+  latitude: z.string().optional().or(z.literal("")),
+  longitude: z.string().optional().or(z.literal("")),
+
   lodRemarks: z.string().min(5, "Please provide brief intake remarks (min. 5 chars)"),
 
   productLines: z.array(z.object({
@@ -33,15 +40,11 @@ export const lodFormSchema = z.object({
 
   divisions: z.array(z.string()).min(1, "Select at least one division (e.g., VMD) for routing"),
   
-  // URLs from FileUpload
   poaUrl: z.string().optional().default(""),
   inspectionReportUrl: z.string().optional().default(""),
 
-  // INTEGRATED OVERSIGHT EMAIL TOGGLE FIELD
   sendEmailNotification: z.boolean().optional().default(false),
 }).superRefine((data, ctx) => {
-  // Logic: If 'Facility Verification', poaUrl MUST exist. 
-  // If 'Inspection Report Review (Foreign)', inspectionReportUrl MUST exist.
   if (data.type === "Facility Verification") {
     if (!data.poaUrl || data.poaUrl.length <= 5) {
       ctx.addIssue({

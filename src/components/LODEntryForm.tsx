@@ -11,7 +11,7 @@ import { CompanySearch } from './CompanySearch';
 import { 
   Plus, Trash2, Globe, Building2, Save, Loader2, 
   MessageSquare, Share2, X, ChevronDown, Mail, RefreshCcw,
-  CheckCircle2, ArrowRight, Activity, ShieldAlert, Layers, Hash
+  CheckCircle2, ArrowRight, Activity, ShieldAlert, Layers, Hash, MapPin
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,13 @@ const RISK_CATEGORIES = [
   { name: "LIQUID Pesticides and Agrochemicals", comp: 1, crit: 1 },
   { name: "SOLID Pesticides and Agrochemicals", comp: 1, crit: 1 },
   { name: "Aerosol Pesticides and Agrochemicals", comp: 1, crit: 1 },
+];
+
+const FACILITY_TYPE_OPTIONS = [
+  "Pharma",
+  "Food/Feed",
+  "Pesticide",
+  "Premixes"
 ];
 
 const getRiskLevel = (score: number) => {
@@ -155,11 +162,9 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
   const [localCompanyId, setLocalCompanyId] = useState<number | null>(initialData?.localCompanyId || null);
   const [foreignFactoryId, setForeignFactoryId] = useState<number | null>(initialData?.foreignFactoryId || null);
 
-  // 💡 TRACK WHETHER SELECTED ENTRIES ARE NEW RECOMMENDATIONS
   const [isLocalNew, setIsLocalNew] = useState<boolean>(false);
   const [isForeignNew, setIsForeignNew] = useState<boolean>(false);
 
-  // 💡 ONLY LOCK FIELDS IF ID EXISTS AND IT IS NOT A NEW RECOMMENDATION
   const isLocalAutofilled = Boolean(localCompanyId && !isLocalNew);
   const isForeignAutofilled = Boolean(foreignFactoryId && !isForeignNew);
 
@@ -171,6 +176,9 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     notificationEmail: initialData?.notificationEmail || "",
     facilityName: initialData?.facilityName || "", 
     facilityAddress: initialData?.facilityAddress || "", 
+    facilityType: initialData?.facilityType || "Pharma",
+    latitude: initialData?.latitude || "",
+    longitude: initialData?.longitude || "",
     siteScope: initialData?.siteScope || "New Manufacturing Site",
     lodRemarks: "",
     productLines: initialData?.productLines || [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
@@ -188,7 +196,6 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     defaultValues
   });
 
-  // Automatically construct and append the official NAFDAC/VMAP/{uuid} format on structural mount
   useEffect(() => {
     if (!initialData?.appNumber && !isUpdate) {
       const uniqueId = crypto.randomUUID();
@@ -232,32 +239,30 @@ export default function LODEntryForm({ initialData, isUpdate = false }: { initia
     setValue("divisions", updated, { shouldDirty: true, shouldValidate: true });
   };
 
-const onSubmit = async (data: any) => {
-  const payload = {
-    ...data,
-    // Map form values to server expectations
-    localCompanyName: data.companyName,
-    localCompanyAddress: data.companyAddress,
-    foreignFactoryName: data.facilityName,
-    foreignFactoryAddress: data.facilityAddress,
-    userComment: data.lodRemarks,
-    applicationType: data.type,
-    
-    localCompanyId,
-    foreignFactoryId,
+  const onSubmit = async (data: any) => {
+    const payload = {
+      ...data,
+      localCompanyName: data.companyName,
+      localCompanyAddress: data.companyAddress,
+      foreignFactoryName: data.facilityName,
+      foreignFactoryAddress: data.facilityAddress,
+      userComment: data.lodRemarks,
+      applicationType: data.type,
+      localCompanyId,
+      foreignFactoryId,
+    };
+
+    const result = await submitLODApplication(
+      payload, 
+      CURRENT_USER.id, 
+      CURRENT_USER.name, 
+      CURRENT_USER.role
+    );
+
+    if (result.success) {
+      setShowSuccess(true);
+    }
   };
-
-  const result = await submitLODApplication(
-    payload, 
-    CURRENT_USER.id, 
-    CURRENT_USER.name, 
-    CURRENT_USER.role
-  );
-
-  if (result.success) {
-    setShowSuccess(true);
-  }
-};
 
   return (
     <div className="max-w-4xl mx-auto pb-20 relative">
@@ -323,7 +328,7 @@ const onSubmit = async (data: any) => {
               <ShieldAlert className="w-4 h-4" /> Validation Warnings Found
             </h5>
             <p className="text-[10px] text-rose-500 font-medium">
-              Please check all document uploads, required fields, and line classifications before submitting.
+              Please check all document uploads, required fields, coordinates, and line classifications before submitting.
             </p>
           </div>
         )}
@@ -416,7 +421,7 @@ const onSubmit = async (data: any) => {
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
               <input 
                 {...register("notificationEmail")} 
-                placeholder="Email" 
+                placeholder="Email (Optional)" 
                 readOnly={isLocalAutofilled}
                 className={cn(
                   "w-full p-4 pl-10 rounded-xl text-sm font-bold shadow-sm border-none transition-all",
@@ -440,6 +445,9 @@ const onSubmit = async (data: any) => {
                     setIsForeignNew(false);
                     setValue("facilityName", "");
                     setValue("facilityAddress", "");
+                    setValue("facilityType", "Pharma");
+                    setValue("latitude", "");
+                    setValue("longitude", "");
                     setAvailableLines([]);
                   }}
                   className="text-[9px] font-black text-rose-600 bg-rose-50 px-3 py-1 rounded-full hover:bg-rose-100 transition-all flex items-center gap-1"
@@ -458,22 +466,45 @@ const onSubmit = async (data: any) => {
 
                   setValue("facilityName", factory.name, { shouldDirty: true });
                   setValue("facilityAddress", factory.address || "", { shouldDirty: true });
+                  setValue("facilityType", factory.facilityType || "Pharma", { shouldDirty: true });
+                  setValue("latitude", factory.latitude || "", { shouldDirty: true });
+                  setValue("longitude", factory.longitude || "", { shouldDirty: true });
                   setAvailableLines(factory.product_lines || factory.productLines || []);
                 }}
               />
             )}
             
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
-                <Layers className="w-3 h-3" /> Site Scope Configuration
-              </label>
-              <select 
-                {...register("siteScope")} 
-                className="w-full bg-white p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm cursor-pointer border border-transparent focus:border-blue-200"
-              >
-                <option value="New Manufacturing Site">New Manufacturing Site</option>
-                <option value="Additional Manufacturing Site">Additional Manufacturing Site</option>
-              </select>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
+                  <Layers className="w-3 h-3" /> Site Scope
+                </label>
+                <select 
+                  {...register("siteScope")} 
+                  className="w-full bg-white p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm cursor-pointer border border-transparent focus:border-blue-200"
+                >
+                  <option value="New Manufacturing Site">New Site</option>
+                  <option value="Additional Manufacturing Site">Additional Site</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
+                  <Building2 className="w-3 h-3" /> Facility Type
+                </label>
+                <select 
+                  {...register("facilityType")} 
+                  disabled={isForeignAutofilled}
+                  className={cn(
+                    "w-full p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm transition-all",
+                    isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white border border-transparent focus:border-blue-200"
+                  )}
+                >
+                  {FACILITY_TYPE_OPTIONS.map((ft) => (
+                    <option key={ft} value={ft}>{ft}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <input 
@@ -494,6 +525,34 @@ const onSubmit = async (data: any) => {
                 isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
               )} 
             />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-400" />
+                <input 
+                  {...register("latitude")} 
+                  placeholder="Latitude (Optional)" 
+                  readOnly={isForeignAutofilled}
+                  className={cn(
+                    "w-full p-3.5 pl-9 rounded-xl text-xs font-mono shadow-sm border-none transition-all",
+                    isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+                  )} 
+                />
+              </div>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-400" />
+                <input 
+                  {...register("longitude")} 
+                  placeholder="Longitude (Optional)" 
+                  readOnly={isForeignAutofilled}
+                  className={cn(
+                    "w-full p-3.5 pl-9 rounded-xl text-xs font-mono shadow-sm border-none transition-all",
+                    isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+                  )} 
+                />
+              </div>
+            </div>
+
             <FileUpload 
               label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} 
               onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true, shouldValidate: true })} 

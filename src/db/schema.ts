@@ -38,15 +38,26 @@ export const companies = pgTable(
   })
 );
 
+// Optional helper type for PostGIS geography handling if needed later
+const geographyPoint = customType<{ data: { type: "Point"; coordinates: [number, number] } }>({
+  dataType() {
+    return "geography(Point, 4326)";
+  },
+});
+
 export const facilities = pgTable("facilities", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   address: text("address"),
-  companyId: integer("company_id").references(() => companies.id, {
+  companyId: uuid("company_id").references(() => companies.id, {
     onDelete: "cascade",
   }),
+  // --- NEW FIELDS ADDED ---
+  facilityType: varchar("facility_type", { length: 100 }).notNull().default("Veterinary Pharmaceuticals"),
   latitude: doublePrecision("latitude"),
   longitude: doublePrecision("longitude"),
+  geom: geographyPoint("geom"), // PostGIS column handled automatically by the database trigger
+  // ------------------------
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
