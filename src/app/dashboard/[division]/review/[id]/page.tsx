@@ -74,7 +74,7 @@ export default async function TechnicalReviewPage(props: PageProps) {
 
   // 3. STAFF ASSIGNMENT LOCK (File-level security)
   // Check if this specific file is actually assigned to this user
-  const isHubVetting = appData.currentPoint === "IRSD Staff Vetting";
+  const isHubVetting = appData.currentPoint === "IRSD Staff Compliance Vetting";
   const staffIdToLookup = isHubVetting ? details.irsd_reviewer_id : details.staff_reviewer_id;
 
   if (authUser.id !== staffIdToLookup && profile.role !== "Admin") {

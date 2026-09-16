@@ -15,7 +15,7 @@ import { createClient } from "@/utils/supabase/client";
 import RejectionModal from "@/components/RejectionModal";
 import { RiskExecutiveSummary } from "@/components/analytics/RiskExecutiveSummary";
 
-const supabase = await createClient();
+const supabase = createClient();
 
 export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUserId }: any) {
   const [remarks, setRemarks] = useState("");
@@ -29,7 +29,6 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   const isInspection = app.isInspection;
   const docTitle = app.docTitle;
 
-  // --- RISK DATA NORMALIZATION ---
   const complianceRisk = useMemo(() => {
     const baseRisk = app?.complianceRisk || {};
     const ledger = details.findings_ledger || [];
@@ -49,7 +48,6 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     };
   }, [app, details]);
 
-  // --- AUDIT TRAIL FORMATTING ---
   const trail = useMemo(() => {
     const comments = details.comments || [];
     return [...comments].map(c => ({
@@ -60,7 +58,6 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     })).reverse();
   }, [details.comments]);
 
-  // --- PDF DOCUMENT CONFIGURATION ---
   const docConfig = useMemo(() => {
     const appNumber = app.applicationNumber;
     const date = new Date().toLocaleDateString('en-GB');
@@ -96,7 +93,6 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         products: flatProducts.length > 0 ? flatProducts : (details.products || [])
       };
 
-      // Explicitly checking if site scope matches Additional Manufacturing Site configuration
       const isAdditionalSite = details.siteScope === "Additional Manufacturing Site";
       const SelectedComponent = isAdditionalSite ? ClearanceLetterAMS : ClearanceLetter;
 
@@ -141,17 +137,13 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   };
 
   return (
-    /**
-     * FIX: Changed 'inset-0' to specific bounds. 
-     * 'top-20' matches the 80px (h-20) height of your DirectorLayout navbar.
-     */
     <div className="fixed top-20 bottom-0 left-0 right-0 flex bg-slate-100 overflow-hidden font-sans">
       
       {/* LEFT SIDE: PREVIEWER */}
       <div className="w-1/2 p-6 h-full">
-        <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-200 w-full h-full overflow-hidden relative">
+        <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-200 w-full h-full overflow-hidden relative flex flex-col">
           <div className="absolute top-6 left-6 right-6 z-20 flex justify-center">
-            <div className="bg-slate-900/90 backdrop-blur-xl p-1.5 rounded-full flex gap-1 shadow-2xl">
+            <div className="bg-slate-900/95 backdrop-blur-xl p-1.5 rounded-full flex gap-1 shadow-2xl">
               <button 
                 onClick={() => setViewMode('dossier')} 
                 className={`px-4 py-2 rounded-full text-[9px] font-black uppercase flex items-center gap-2 transition-all duration-300 ${viewMode === 'dossier' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
@@ -166,7 +158,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
               </button>
             </div>
           </div>
-          <div className="h-full w-full pt-4">
+          <div className="h-full w-full pt-16 flex-1">
             {viewMode === 'draft' ? (
               <BlobProvider document={docConfig.component}>
                 {({ url, loading }) => loading ? (
@@ -175,13 +167,19 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
                   </div>
                 ) : <iframe src={`${url}#toolbar=0`} className="w-full h-full border-none" /> }
               </BlobProvider>
-            ) : <iframe src={`${pdfUrl}#toolbar=0`} className="w-full h-full border-none" /> }
+            ) : pdfUrl ? (
+              <iframe src={`${pdfUrl}#toolbar=0`} className="w-full h-full border-none" />
+            ) : (
+              <div className="h-full flex items-center justify-center font-black uppercase text-[10px] text-slate-400 italic text-slate-400">
+                No source document attachment found.
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* RIGHT SIDE: DECISION PANEL */}
-      <div className="w-1/2 p-10 overflow-y-auto custom-scrollbar">
+      <div className="w-1/2 p-10 overflow-y-auto custom-scrollbar h-full">
         <div className="max-w-xl mx-auto space-y-8 pb-20">
           <header className="flex justify-between items-end">
             <div>

@@ -52,6 +52,7 @@ export default function BatchHistoryModal({
         return "bg-slate-100 text-slate-800 border-slate-300";
     }
   };
+  
 
   return (
     <>

@@ -10,8 +10,6 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { batchId, action, comments, userId, userRole } = body;
 
-    console.log("This is batchId", batchId);
-
     if (!batchId || !action) {
       return NextResponse.json(
         { success: false, error: "Missing required approval payload parameters." },
@@ -64,9 +62,7 @@ export async function POST(request: Request) {
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. 🎯 Scoped Batch Binding:
-        // If specific activeScheduleIds were passed in the payload, bind ONLY those.
-        // Otherwise, fallback to binding any schedules explicitly carrying this batchId.
+        // 2. Scoped Batch Binding
         if (Array.isArray(body.activeScheduleIds) && body.activeScheduleIds.length > 0) {
           await tx
             .update(inspectionSchedules)

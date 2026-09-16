@@ -37,18 +37,19 @@ export async function PUT(request: Request) {
 
     await db.transaction(async (tx) => {
       // 1. Handle Deletions / Removals from Batch
-      if (Array.isArray(activeScheduleIds) && startDate && endDate) {
+      if (Array.isArray(activeScheduleIds) && (batchId || (startDate && endDate))) {
         let removedSchedules: { id: string; applicationId: number | null }[] = [];
 
-        // 🎯 Construct conditions to scope deletions strictly to this batch range / ID
-        const scopeConditions: SQL[] = [
-          gte(inspectionSchedules.scheduledDate, startDate),
-          lte(inspectionSchedules.scheduledDate, endDate),
-        ];
+        // Construct conditions to scope deletions strictly
+        const scopeConditions: SQL[] = [];
 
-        // 🔒 If batchId is supplied, explicitly bind the scope condition to batchId
         if (batchId) {
           scopeConditions.push(eq(inspectionSchedules.batchId, batchId));
+        } else if (startDate && endDate) {
+          scopeConditions.push(
+            gte(inspectionSchedules.scheduledDate, startDate),
+            lte(inspectionSchedules.scheduledDate, endDate)
+          );
         }
 
         if (activeScheduleIds.length > 0) {
@@ -92,7 +93,7 @@ export async function PUT(request: Request) {
             .delete(inspectionSchedules)
             .where(inArray(inspectionSchedules.id, removedScheduleIds));
 
-          // C. Reset parent applications back to 'Staff Technical Field Review' / 'INSPECTION_PENDING'
+          // C. Reset parent applications back to 'Divisional Deputy Director Technical Assignment' / 'INSPECTION_PENDING'
           if (removedApplicationIds.length > 0) {
             await tx
               .update(applications)
@@ -114,7 +115,7 @@ export async function PUT(request: Request) {
           .set({
             scheduledDate: row.scheduledDate,
             ...(row.driver !== undefined && { driver: row.driver }),
-            ...(batchId && { batchId }), // 🔒 Explicitly updates batch_id column in database
+            ...(batchId && { batchId }), // Explicitly update batchId
             updatedAt: new Date(),
           })
           .where(eq(inspectionSchedules.id, row.scheduleId));

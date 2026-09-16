@@ -4,7 +4,6 @@ import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionSc
 import { eq, or, and, desc } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
-// import BatchHistoryModal from "./BatchHistoryModal";
 import { AlertTriangle, CheckCircle, Clock, Edit3, Eye } from "lucide-react";
 import BatchHistoryModal from "@/app/LocalInspectionReports/Director/schedules/BatchHistoryModal";
 
@@ -36,8 +35,14 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
     .leftJoin(users, eq(scheduleBatches.endorsedBy, users.id))
     .where(
       or(
-        // Rework Required (Returned by Director)
-        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED),
+        // Rework Required sitting on IRSD Desk
+        and(
+          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED),
+          eq(
+            scheduleBatches.currentPoint,
+            inspectionScheduleBatchWorkflow.steps.REWORK_REQUIRED.currentPoint
+          )
+        ),
         // Pending Director Review
         eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL),
         // Approved Logs
@@ -122,7 +127,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div>
-            <span className="font-bold">Attention Required:</span> The Director has returned one or more schedule batches with notes. Click <strong>"Open & Modify Schedule"</strong> to adjust assignments or dates and re-recommend for approval.
+            <span className="font-bold">Attention Required:</span> The Director has returned one or more schedule batches with notes. Click <strong>"Modify & Resubmit"</strong> to adjust assignments or dates and re-recommend for approval.
           </div>
         </div>
       )}
@@ -147,7 +152,6 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
                 {currentList.map((batch) => {
-                  // Extract latest rework comment if available
                   const historyArr = (batch.history as any[]) || [];
                   const lastReworkNote = historyArr
                     .slice()
@@ -188,14 +192,12 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
                         )}
                       </td>
                       <td className="p-4 text-right space-x-2 whitespace-nowrap">
-                        {/* History Modal */}
                         <BatchHistoryModal
                           batchReference={batch.batchReference}
                           title={batch.title}
                           history={batch.history as any}
                         />
 
-                        {/* Action Link based on Status */}
                         {batch.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED ? (
                           <Link
                             href={`/LocalInspectionReports/ddd/schedule/print?startDate=${batch.startDate}&endDate=${batch.endDate}`}

@@ -1,30 +1,53 @@
-  // @/config/workflows/inspectionReportWorkflow.ts
+// @/config/workflows/facilityVerificationWorkflow.ts
 
-  export const inspectionReportWorkflow = {
-    workflowType: "INSPECTION_REVIEW_REPORT",
+export type Directorate = "VMAP" | "FSAN";
+
+export interface WorkflowStep {
+  key: string;
+  title: string;
+  directorate: Directorate;
+  division?: string;
+  role: string;
+  nextStepKey: string | null;
+  prevStepKey: string | null;
+  statusLabel: string;
+}
+
+export interface DirectorateWorkflow {
+  workflowType: string;
+  directorate: Directorate;
+  steps: Record<string, WorkflowStep>;
+}
+
+export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow> = {
+  VMAP: {
+    workflowType: "INSPECTION_REVIEW_REPORT_VMAP",
+    directorate: "VMAP",
     steps: {
       LOD: {
         key: "LOD",
         title: "Letter of Deliberation Intake",
-        division: "REGISTRATION",
+        directorate: "VMAP",
+        division: "LOD",
         role: "LOD_Officer",
-        nextStepKey: "DIRECTOR_INTAKE",
+        nextStepKey: "DIRECTOR_INTAKE", 
         prevStepKey: null,
         statusLabel: "LOD_INTAKE"
       },
       DIRECTOR_INTAKE: {
         key: "DIRECTOR_INTAKE",
-        title: "Director Initial Allocation",
+        title: "Director Initial Assignment",
+        directorate: "VMAP",
         division: "DIRECTORATE",
         role: "Director",
         nextStepKey: "DDD_TECHNICAL_ASSIGNMENT",
         prevStepKey: "LOD",
-        statusLabel: "PENDING_DIRECTOR_ALLOCATION"
+        statusLabel: "PENDING_DIRECTOR_ASSIGNMENT"
       },
       DDD_TECHNICAL_ASSIGNMENT: {
         key: "DDD_TECHNICAL_ASSIGNMENT",
         title: "Divisional Deputy Director Technical Assignment",
-        division: "VMD", // Automatically maps to Veterinary Medicines Division
+        directorate: "VMAP",
         role: "Divisional Deputy Director",
         nextStepKey: "STAFF_TECHNICAL_REVIEW",
         prevStepKey: "DIRECTOR_INTAKE",
@@ -33,6 +56,7 @@
       STAFF_TECHNICAL_REVIEW: {
         key: "STAFF_TECHNICAL_REVIEW",
         title: "Staff Technical Field Review",
+        directorate: "VMAP",
         division: "VMD",
         role: "Technical Staff Reviewer",
         nextStepKey: "DDD_TECHNICAL_REVIEW",
@@ -42,6 +66,7 @@
       DDD_TECHNICAL_REVIEW: {
         key: "DDD_TECHNICAL_REVIEW",
         title: "Divisional Deputy Director Technical Endorsement",
+        directorate: "VMAP",
         division: "VMD",
         role: "Divisional Deputy Director",
         nextStepKey: "DDD_IRSD_INTAKE",
@@ -51,6 +76,7 @@
       DDD_IRSD_INTAKE: {
         key: "DDD_IRSD_INTAKE",
         title: "Divisional Deputy Director IRSD Routing",
+        directorate: "VMAP",
         division: "IRSD",
         role: "Divisional Deputy Director",
         nextStepKey: "IRSD_STAFF_VETTING",
@@ -60,6 +86,7 @@
       IRSD_STAFF_VETTING: {
         key: "IRSD_STAFF_VETTING",
         title: "IRSD Staff Compliance Vetting",
+        directorate: "VMAP",
         division: "IRSD",
         role: "IRSD Staff Reviewer",
         nextStepKey: "DDD_IRSD_REVIEW",
@@ -69,6 +96,7 @@
       DDD_IRSD_REVIEW: {
         key: "DDD_IRSD_REVIEW",
         title: "Divisional Deputy Director IRSD Concurrence",
+        directorate: "VMAP",
         division: "IRSD",
         role: "Divisional Deputy Director",
         nextStepKey: "DIRECTOR_FINAL_SIGN_OFF",
@@ -78,6 +106,7 @@
       DIRECTOR_FINAL_SIGN_OFF: {
         key: "DIRECTOR_FINAL_SIGN_OFF",
         title: "Director Final Approval & Sign-Off",
+        directorate: "VMAP",
         division: "DIRECTORATE",
         role: "Director",
         nextStepKey: "FINALIZED",
@@ -87,6 +116,7 @@
       FINALIZED: {
         key: "FINALIZED",
         title: "Report Approved and Archived",
+        directorate: "VMAP",
         division: "ARCHIVE",
         role: "System",
         nextStepKey: null,
@@ -94,4 +124,29 @@
         statusLabel: "APPROVED_AND_ARCHIVED"
       }
     }
-  };
+  },
+  FSAN: {
+    workflowType: "INSPECTION_REVIEW_REPORT_FSAN",
+    directorate: "FSAN",
+    steps: {}
+  }
+};
+
+/**
+ * Safely resolves the workflow object with fallback to VMAP
+ */
+export function getWorkflowByDirectorate(directorate?: string | null): DirectorateWorkflow {
+  if (directorate === "FSAN") return inspectionReportWorkflows.FSAN;
+  return inspectionReportWorkflows.VMAP;
+}
+
+/**
+ * Resolves a specific step given a directorate and current step key
+ */
+export function getWorkflowStep(
+  directorate: string | null | undefined,
+  stepKey: string
+): WorkflowStep | null {
+  const workflow = getWorkflowByDirectorate(directorate);
+  return workflow.steps[stepKey] ?? null;
+}

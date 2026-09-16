@@ -2,11 +2,10 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { applications, users, riskAssessments } from "@/db/schema";
-import { eq, and } from "drizzle-orm"; // Added and
+import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import DirectorReviewClient from "./DirectorReviewClient";
-import { createClient } from "@/utils/supabase/client";
-const supabase = await createClient();
+import { createClient } from "@/utils/supabase/server";
 
 export default async function DirectorReviewPage({ 
   params 
@@ -19,8 +18,8 @@ export default async function DirectorReviewPage({
   const appId = parseInt(id);
   if (isNaN(appId)) return notFound();
 
-  // 1. Fetch Application and Director Record in parallel
-  // We look for a user with the role 'Director' to get their real UUID
+  const supabase = await createClient();
+
   const [app, directorUser] = await Promise.all([
     db.query.applications.findFirst({
       where: eq(applications.id, appId),
@@ -28,7 +27,6 @@ export default async function DirectorReviewPage({
     }),
     db.query.users.findFirst({
       where: eq(users.role, "Director") 
-      // If you have multiple directors, you might need: eq(users.email, "director@nafdac.gov.ng")
     })
   ]);
 
@@ -82,7 +80,6 @@ export default async function DirectorReviewPage({
     <DirectorReviewClient 
       app={cleanApp} 
       usersList={usersList}
-      // PASS THE REAL UUID FROM THE DATABASE
       currentUserId={directorUser.id} 
       stream={activeStream}
       pdfUrl={finalPdfUrl}

@@ -1,140 +1,182 @@
 "use server";
 
-import { db } from "@/db"; 
-import {
-  companies,
-  facilities,
-  companyAffiliations,
-  productLinesLocal,
-  productsLocal,
-  productLineRisks,
-  applications,
-  riskAssessments,
-  qmsTimelines,
+import { db } from "@/db";
+import { 
+  companies, facilities, companyAffiliations, productLinesLocal, 
+  productsLocal, applications, qmsTimelines, riskAssessments, users, productLineRisks 
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { and, eq, isNull, sql, desc } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { lodFormSchema } from "@/lib/validations";
+import { getWorkflowByDirectorate } from "@/config/workflows/facilityVerificationWorkflow";
 import nodemailer from "nodemailer";
-import { sendOversightEmail } from "@/lib/utils/mail";
 
-export interface ProductInput {
-  name: string;
-  classification?: string;
-  targetSpecies?: string;
-}
+const normalize = (str: string) => str?.trim().toUpperCase() || "";
 
-export interface ProductLineInput {
-  lineName: string;
-  products: ProductInput[];
-}
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
+  port: parseInt(process.env.SMTP_PORT || "465"),
+  secure: true,
+  auth: {
+    user: process.env.SMTP_USER, 
+    pass: process.env.SMTP_PASS, 
+  },
+  tls: {
+    ciphers: "SSLv3",
+    rejectUnauthorized: false
+  }
+});
 
-export interface SubmitLODPayload {
-  companyName?: string;
-  localCompanyName?: string;
-  companyAddress?: string;
-  localCompanyAddress?: string;
-  
-  facilityName?: string;
-  foreignFactoryName?: string;
-  facilityAddress?: string;
-  foreignFactoryAddress?: string;
-  
-  facilityLatitude?: number;
-  facilityLongitude?: number;
-  productLines: ProductLineInput[];
-  
-  type?: string;
-  applicationType?: string;
-  
-  notificationEmail?: string;
-  poaUrl?: string;
-  inspectionReportUrl?: string;
-  archivedPath?: string;
-  
+export async function sendDirectorOversightEmail(appDetails: {
+  appNumber: string;
+  type: string;
+  companyName: string;
+  facilityName: string;
+  directorate: string;
   lodRemarks?: string;
-  userComment?: string;
-  
-  submittedByStaffId?: string;
-  sendEmailNotification?: boolean;
+  customRecipient?: string;
+}) {
+  try {
+    const senderEmail = process.env.SMTP_USER;
+    const directorEmail = appDetails.customRecipient || process.env.DIRECTOR_EMAIL || "director@nafdac.gov.ng";
+
+    if (!senderEmail || !process.env.SMTP_PASS) {
+      return { success: false, error: "SMTP credentials are misconfigured." };
+    }
+
+    const mailOptions = {
+      from: `"${appDetails.directorate} Portal" <${senderEmail}>`,
+      to: directorEmail,
+      subject: `🚨 LIVE PROCESSING ALERT [${appDetails.directorate}]: Application #${appDetails.appNumber}`,
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 16px;">
+          <h2 style="color: #0f172a; text-transform: uppercase; font-size: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">
+            Director Oversight Notification (${appDetails.directorate})
+          </h2>
+          <table style="width: 100%; font-size: 13px; border-collapse: collapse; margin-top: 20px;">
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b; width: 140px;">Directorate:</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #0284c7;">${appDetails.directorate}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b;">App Number:</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #1e3a8a;">${appDetails.appNumber}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Review Type:</td>
+              <td style="padding: 8px 0; color: #334155;">${appDetails.type}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Local Applicant:</td>
+              <td style="padding: 8px 0; color: #334155; text-transform: uppercase;">${appDetails.companyName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Manufacturing Site:</td>
+              <td style="padding: 8px 0; color: #334155; text-transform: uppercase;">${appDetails.facilityName}</td>
+            </tr>
+          </table>
+        </div>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error: any) {
+    console.error("Error dispatching email:", error);
+    return { success: false, error: error.message || "Failed to dispatch email." };
+  }
 }
 
 export async function submitLODApplication(
-  payload: SubmitLODPayload,
-  userId?: string,
-  userName?: string,
-  userRole?: string
+  rawData: any,
+  userId: string, 
+  userName: string, 
+  userRole: string
 ) {
+  const validated = lodFormSchema.safeParse(rawData);
+  if (!validated.success) return { success: false, error: "Validation Failed" };
+
+  const data = validated.data;
+  const normalizedAppNumber = normalize(data.appNumber);
+  const shouldNotifyDirector = !!data.sendEmailNotification; 
+
   try {
-    // 💡 Normalize field names seamlessly between client and backend conventions
-    const localName = (payload.localCompanyName || payload.companyName || "").trim();
-    const localAddr = (payload.localCompanyAddress || payload.companyAddress || "").trim();
-    const foreignName = (payload.foreignFactoryName || payload.facilityName || "").trim();
-    const foreignAddr = (payload.foreignFactoryAddress || payload.facilityAddress || "").trim();
-    const appType = payload.applicationType || payload.type || "Facility Verification";
-    const userRemarks = payload.userComment || payload.lodRemarks || "";
-    const staffId = userId || payload.submittedByStaffId || null;
-
-    if (!localName) {
-      throw new Error("Local Applicant Company Name is required.");
-    }
-    if (!foreignName) {
-      throw new Error("Foreign Manufacturing Site Name is required.");
-    }
-
     const result = await db.transaction(async (tx) => {
-      // 1. Upsert Local Company (Applicant)
-      let localCompany = await tx.query.companies.findFirst({
-        where: and(
-          eq(companies.name, localName),
-          eq(companies.address, localAddr)
-        ),
+      const existingApp = await tx.query.applications.findFirst({
+        where: eq(applications.applicationNumber, normalizedAppNumber)
+      });
+      
+      const submittingUser = await tx.query.users.findFirst({
+        where: eq(users.id, userId)
       });
 
-      if (!localCompany) {
-        const [inserted] = await tx
-          .insert(companies)
-          .values({
-            name: localName,
-            address: localAddr,
-            category: "LOCAL",
-          })
-          .returning();
-        localCompany = inserted;
+      console.log('This is the submitting user', submittingUser);
+
+      const isUpdate = !!existingApp;
+      const userDivision = submittingUser?.division || "REGISTRATION";
+      const appDirectorate = (data as any).directorate || submittingUser?.directorate || existingApp?.directorate || "VMAP";
+      
+      // Resolve workflow state configuration based on directorate
+      const workflowConfig = getWorkflowByDirectorate(appDirectorate);
+      const initialStep = workflowConfig.steps["DIRECTOR_INTAKE"] || workflowConfig.steps["LOD"];
+      
+      const targetPoint = initialStep?.title || "Director Initial Allocation";
+      const nextStatus = initialStep?.statusLabel || "PENDING_DIRECTOR_ALLOCATION";
+
+      const isActuallyRound2 = isUpdate && (existingApp.status === 'TECHNICAL_PASSED' || (existingApp.details as any)?.isComplianceReview === true);
+
+      // 1. Upsert Local Company (Applicant)
+      const localCompName = normalize(data.companyName || (data as any).localCompanyName);
+      const localCompAddress = (data.companyAddress || (data as any).localCompanyAddress)?.trim() || "";
+      
+      let localComp = await tx.query.companies.findFirst({
+        where: and(eq(companies.name, localCompName), eq(companies.category, 'LOCAL'), eq(companies.address, localCompAddress))
+      });
+
+      if (!localComp) {
+        await tx.insert(companies).values({ 
+          name: localCompName, 
+          address: localCompAddress, 
+          category: 'LOCAL' 
+        })
+        .onConflictDoNothing();
+        
+        localComp = await tx.query.companies.findFirst({
+          where: and(eq(companies.name, localCompName), eq(companies.category, 'LOCAL'), eq(companies.address, localCompAddress))
+        });
       }
 
       // 2. Upsert Foreign Company (Manufacturer Entity)
+      const foreignCompName = normalize(data.facilityName || (data as any).foreignFactoryName);
+      const foreignCompAddress = (data.facilityAddress || (data as any).foreignFactoryAddress)?.trim() || "";
+
       let foreignCompany = await tx.query.companies.findFirst({
-        where: and(
-          eq(companies.name, foreignName),
-          eq(companies.address, foreignAddr)
-        ),
+        where: and(eq(companies.name, foreignCompName), eq(companies.category, 'FOREIGN'), eq(companies.address, foreignCompAddress))
       });
 
       if (!foreignCompany) {
-        const [inserted] = await tx
-          .insert(companies)
-          .values({
-            name: foreignName,
-            address: foreignAddr,
-            category: "FOREIGN",
-          })
-          .returning();
-        foreignCompany = inserted;
-      }
-
-      // 3. Maintain Many-to-Many Relationship via companyAffiliations
-      await tx
-        .insert(companyAffiliations)
-        .values({
-          localCompanyId: localCompany.id,
-          foreignFactoryId: foreignCompany.id,
+        await tx.insert(companies).values({ 
+          name: foreignCompName, 
+          address: foreignCompAddress, 
+          category: 'FOREIGN' 
         })
         .onConflictDoNothing();
 
-      // 4. Upsert Physical Facility under Foreign Company
+        foreignCompany = await tx.query.companies.findFirst({
+          where: and(eq(companies.name, foreignCompName), eq(companies.category, 'FOREIGN'), eq(companies.address, foreignCompAddress))
+        });
+      }
+
+      await tx.insert(companyAffiliations).values({ 
+        localCompanyId: localComp!.id, 
+        foreignFactoryId: foreignCompany!.id 
+      }).onConflictDoNothing();
+
+      // 3. Upsert Physical Facility under Foreign Company
       let facility = await tx.query.facilities.findFirst({
         where: and(
-          eq(facilities.companyId, foreignCompany.id),
-          eq(facilities.name, foreignName)
+          eq(facilities.companyId, foreignCompany!.id),
+          eq(facilities.name, foreignCompName)
         ),
       });
 
@@ -142,22 +184,22 @@ export async function submitLODApplication(
         const [insertedFacility] = await tx
           .insert(facilities)
           .values({
-            name: foreignName,
-            address: foreignAddr,
-            companyId: foreignCompany.id,
-            latitude: payload.facilityLatitude ?? null,
-            longitude: payload.facilityLongitude ?? null,
+            name: foreignCompName,
+            address: foreignCompAddress,
+            companyId: foreignCompany!.id,
+            latitude: (data as any).latitude ? parseFloat(String((data as any).latitude)) : null,
+            longitude: (data as any).longitude ? parseFloat(String((data as any).longitude)) : null,
           })
           .returning();
         facility = insertedFacility;
       }
 
-      // 5. Process Product Lines & Products (Facility-Anchored)
-      let maxComplexity = 1;
-      let maxCriticality = 1;
+      // 4. Products & Intrinsic Risk Calculation using local schema tables
+      let maxComp = 1;
+      let maxCrit = 1;
 
-      for (const line of payload.productLines || []) {
-        const trimmedLineName = (line.lineName || "").trim();
+      for (const lineEntry of data.productLines) {
+        const trimmedLineName = (lineEntry.lineName || "").trim();
         if (!trimmedLineName) continue;
 
         const riskMaster = await tx.query.productLineRisks.findFirst({
@@ -165,8 +207,22 @@ export async function submitLODApplication(
         });
 
         if (riskMaster) {
-          if (riskMaster.complexityScore > maxComplexity) maxComplexity = riskMaster.complexityScore;
-          if (riskMaster.criticalityScore > maxCriticality) maxCriticality = riskMaster.criticalityScore;
+          maxComp = Math.max(maxComp, riskMaster.complexityScore);
+          maxCrit = Math.max(maxCrit, riskMaster.criticalityScore);
+        } else if (lineEntry.riskCategory) {
+          const categoryKey = normalize(lineEntry.riskCategory);
+          const fallbackMap: Record<string, { comp: number; crit: number }> = {
+            "VACCINES / BIOLOGICALS": { comp: 3, crit: 3 },
+            "STERILE INJECTABLES": { comp: 3, crit: 2 },
+            "POWDER BETA-LACTAMS": { comp: 2, crit: 3 },
+            "TABLETS (GENERAL)": { comp: 1, crit: 2 },
+            "MULTIVITAMINS": { comp: 1, crit: 1 },
+          };
+          const mapped = fallbackMap[categoryKey];
+          if (mapped) {
+            maxComp = Math.max(maxComp, mapped.comp);
+            maxCrit = Math.max(maxCrit, mapped.crit);
+          }
         }
 
         let productLine = await tx.query.productLinesLocal.findFirst({
@@ -187,189 +243,174 @@ export async function submitLODApplication(
           productLine = insertedLine;
         }
 
-        for (const prod of line.products || []) {
-          const trimmedProdName = (prod.name || "").trim();
-          if (!trimmedProdName) continue;
+        if (lineEntry.products) {
+          for (const prod of lineEntry.products) {
+            const trimmedProdName = (prod.name || "").trim();
+            if (!trimmedProdName) continue;
 
-          const existingProduct = await tx.query.productsLocal.findFirst({
-            where: and(
-              eq(productsLocal.lineId, productLine.id),
-              eq(productsLocal.name, trimmedProdName)
-            ),
-          });
-
-          if (!existingProduct) {
-            await tx.insert(productsLocal).values({
-              lineId: productLine.id,
-              name: trimmedProdName,
-              classification: prod.classification ?? null,
-              targetSpecies: prod.targetSpecies ?? null,
+            const existingProduct = await tx.query.productsLocal.findFirst({
+              where: and(
+                eq(productsLocal.lineId, productLine.id),
+                eq(productsLocal.name, trimmedProdName)
+              ),
             });
+
+            if (!existingProduct) {
+              await tx.insert(productsLocal).values({
+                lineId: productLine.id,
+                name: trimmedProdName,
+                classification: prod.classification ?? null,
+                targetSpecies: prod.targetSpecies ?? null,
+              });
+            }
           }
         }
       }
 
-      // 6. Generate Unique Application Number & Save Application
-      const year = new Date().getFullYear();
-      const randomSequence = Math.floor(100000 + Math.random() * 900000);
-      const applicationNumber = `NAFDAC/VMD/LOD/${year}/${randomSequence}`;
+      // 5. Comment & Detail Threading
+      const existingDetails = (existingApp?.details as any) || {};
+      const newComment = {
+        from: userName,
+        role: userRole,
+        text: data.lodRemarks || (isUpdate ? "Technical details updated." : "Application initiated."),
+        round: isActuallyRound2 ? 2 : 1,
+        action: isActuallyRound2 ? "COMPLIANCE_DATA_UPDATE" : "INTAKE_DIRECTIVE",
+        timestamp: new Date().toISOString()
+      };
 
-      const initialComments = userRemarks
-        ? [
-            {
-              from: userName || localName,
-              role: userRole || "Divisional Deputy Director",
-              text: userRemarks,
-              timestamp: new Date().toISOString(),
-            },
-          ]
-        : [];
+      const enhancedDetails = {
+        ...data,
+        directorate: appDirectorate,
+        comments: [...(existingDetails.comments || []), newComment],
+        isComplianceReview: isActuallyRound2 
+      };
 
-      const [newApplication] = await tx
-        .insert(applications)
-        .values({
-          applicationNumber,
-          type: appType,
-          companyId: localCompany.id,
-          foreignFactoryId: foreignCompany.id,
+      let appId: number;
+
+      if (isUpdate && existingApp) {
+        appId = existingApp.id;
+        
+        await tx.update(applications)
+          .set({
+            status: nextStatus,
+            currentPoint: targetPoint,
+            directorate: appDirectorate,
+            details: enhancedDetails,
+            type: data.type,
+            updatedAt: sql`now()`
+          })
+          .where(eq(applications.id, appId));
+
+        await tx.update(qmsTimelines)
+          .set({ endTime: sql`now()` })
+          .where(and(eq(qmsTimelines.applicationId, appId), isNull(qmsTimelines.endTime)));
+
+      } else {
+        const [newApp] = await tx.insert(applications).values({
+          applicationNumber: normalizedAppNumber,
+          type: data.type,
+          directorate: appDirectorate,
+          companyId: localComp!.id,
+          foreignFactoryId: foreignCompany!.id,
           facilityId: facility.id,
-          currentPoint: "Director Review",
-          status: "PENDING_DIRECTOR",
-          details: {
-            assignedDivisions: ["VMD"],
-            productLines: payload.productLines,
-            notificationEmail: payload.notificationEmail,
-            poaUrl: payload.poaUrl,
-            inspectionReportUrl: payload.inspectionReportUrl,
-            archived_path: payload.archivedPath,
-            comments: initialComments,
-          },
-        })
-        .returning();
+          status: nextStatus,
+          currentPoint: targetPoint,
+          details: enhancedDetails
+        }).returning();
+        appId = newApp.id;
+      }
 
-      // 7. Risk Assessment linked directly to physical facility UUID
-      const combinedRiskScore = maxComplexity * maxCriticality;
-      let intrinsicLevel = "LOW";
-      if (combinedRiskScore >= 12) intrinsicLevel = "HIGH";
-      else if (combinedRiskScore >= 6) intrinsicLevel = "MEDIUM";
-
-      await tx.insert(riskAssessments).values({
-        facilityId: facility.id,
-        applicationId: newApplication.id,
-        complexityScore: maxComplexity,
-        criticalityScore: maxCriticality,
-        intrinsicLevel,
-        sraStatus: "FALSE",
-        majorDeficiencies: 0,
-        criticalDeficiencies: 0,
-        otherDeficiencies: 0,
-        status: "PARTIAL",
-      });
-
-      // 8. QMS SLA Timing Initialization
       await tx.insert(qmsTimelines).values({
-        applicationId: newApplication.id,
-        staffId,
-        division: "VMD",
-        point: "Director Review",
-        startTime: new Date(),
-        details: { action: "APPLICATION_SUBMITTED" },
+        applicationId: appId,
+        staffId: userId,
+        division: userDivision as any, 
+        point: targetPoint,
+        startTime: sql`now()`
       });
 
-      return newApplication;
+      // 6. Risk Assessment Logic
+      const score = maxComp * maxCrit;
+      let intrinsicLevel = "LOW";
+      if (score >= 12) intrinsicLevel = "HIGH";
+      else if (score >= 6) intrinsicLevel = "MEDIUM";
+
+      await tx.insert(riskAssessments)
+        .values({
+          facilityId: facility.id,
+          applicationId: appId,
+          complexityScore: maxComp,
+          criticalityScore: maxCrit,
+          intrinsicLevel,
+          status: isActuallyRound2 ? 'DRAFT' : 'PARTIAL'
+        })
+        .onConflictDoUpdate({
+          target: [riskAssessments.applicationId],
+          set: {
+            facilityId: facility.id,
+            complexityScore: maxComp,
+            criticalityScore: maxCrit,
+            intrinsicLevel,
+            updatedAt: sql`now()`
+          }
+        });
+
+      revalidatePath("/dashboard/director");
+      revalidatePath("/dashboard/lod");
+      
+      return { 
+        success: true, 
+        id: appId, 
+        appNumber: normalizedAppNumber, 
+        type: data.type, 
+        directorate: appDirectorate,
+        lodRemarks: data.lodRemarks, 
+        companyName: data.companyName, 
+        facilityName: data.facilityName 
+      };
     });
 
-    // 9a. External Email: Applicant Receipt Acknowledgment
-    if (payload.notificationEmail) {
-      await sendNotificationEmail(
-        payload.notificationEmail,
-        result.applicationNumber,
-        localName
-      );
-    }
-
-    // 9b. Internal Email: Director Oversight & CC Tracking (Only if enabled or present)
-    if (payload.sendEmailNotification ?? true) {
-      await sendOversightEmail({
-        appNumber: result.applicationNumber,
-        type: appType,
-        companyName: localName,
-        facilityName: foreignName,
-        lodRemarks: userRemarks,
+    if (result.success && shouldNotifyDirector) {
+      const directorUser = await db.query.users.findFirst({
+        where: and(eq(users.role, "Director"), eq(users.directorate, result.directorate))
       });
+
+      try {
+        await sendDirectorOversightEmail({
+          appNumber: result.appNumber,
+          type: result.type,
+          directorate: result.directorate,
+          companyName: result.companyName,
+          facilityName: result.facilityName,
+          lodRemarks: result.lodRemarks,
+          customRecipient: directorUser?.email 
+        });
+      } catch (err) {
+        console.error("Non-blocking notification system error captured:", err);
+      }
     }
 
-    return {
-      success: true,
-      data: result,
-      message: "LOD Application submitted successfully.",
-    };
-  } catch (error: any) {
-    console.error("Error submitting LOD Application:", error);
-    return {
-      success: false,
-      error: error?.message || "Failed to submit LOD Application.",
-    };
+    return { success: true, id: result.id };
+  } catch (e: any) {
+    console.error("LOD Submission Error:", e);
+    return { success: false, error: e.message };
   }
 }
 
-async function sendNotificationEmail(
-  toEmail: string,
-  appNumber: string,
-  companyName: string
-) {
+export async function getApplications() {
   try {
-    const senderEmail = process.env.SMTP_USER;
-
-    if (!senderEmail || !process.env.SMTP_PASS) {
-      console.error("❌ ERROR: Missing SMTP credentials in environment variables.");
-      return;
-    }
-
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: parseInt(process.env.SMTP_PORT || "465"),
-      secure: true,
-      auth: {
-        user: senderEmail,
-        pass: process.env.SMTP_PASS,
+    const data = await db.query.applications.findMany({
+      columns: {
+        id: true,
+        applicationNumber: true,
+        directorate: true,
       },
-      tls: {
-        ciphers: "SSLv3",
-        rejectUnauthorized: false,
-      },
+      orderBy: [desc(applications.id)],
+      limit: 50,
     });
-
-    const info = await transporter.sendMail({
-      from: `"Veterinary Medicine Division (VMD)" <${senderEmail}>`,
-      to: toEmail,
-      subject: `Application Receipt Acknowledgment: ${appNumber}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
-          <h2 style="color: #0066cc; margin-top: 0;">Application Submitted Successfully</h2>
-          <p>Dear <strong>${companyName}</strong>,</p>
-          <p>Your application has been successfully logged into the regulatory workflow system.</p>
-          <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-            <tr>
-              <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; width: 35%;"><strong>Application Number:</strong></td>
-              <td style="padding: 8px; border: 1px solid #ddd;">${appNumber}</td>
-            </tr>
-            <tr>
-              <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9;"><strong>Current Workflow Stage:</strong></td>
-              <td style="padding: 8px; border: 1px solid #ddd;">Director Review</td>
-            </tr>
-          </table>
-          <p>You can track the live evaluation timeline through your portal dashboard.</p>
-          <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-          <p style="font-size: 12px; color: #666;">
-            <strong>Veterinary Medicine Division (VMD)</strong><br/>NAFDAC QMS Automated Dispatch
-          </p>
-        </div>
-      `,
-    });
-
-    console.log(`✅ Email successfully dispatched to ${toEmail}. Message ID: ${info.messageId}`);
-  } catch (emailError) {
-    console.error("❌ Failed to send acknowledgment email:", emailError);
+    
+    return data;
+  } catch (error) {
+    console.error("Failed to fetch applications:", error);
+    return [];
   }
 }

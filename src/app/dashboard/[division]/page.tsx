@@ -2,11 +2,12 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
 import { qmsTimelines, applications, companies, users } from "@/db/schema";
-import { eq, and, isNull, ilike, or } from "drizzle-orm";
+import { eq, and, isNull, ilike, or, inArray } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server"; 
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import DossierLink from "@/components/DossierLink";
+import { getWorkflowStep } from "@/config/workflows/facilityVerificationWorkflow";
 import { 
   Clock, 
   LayoutDashboard, 
@@ -14,7 +15,8 @@ import {
   Inbox, 
   ArrowRightCircle, 
   Factory, 
-  Landmark 
+  Landmark,
+  RefreshCw 
 } from 'lucide-react';
 
 export default async function StaffDashboard({ 
@@ -46,10 +48,8 @@ export default async function StaffDashboard({
   }
 
   const userDivision = (profile.division || "VMD").toUpperCase();
-  
-  console.log('Profile Division and role: ', profile.division, profile.role )
-  console.log('Profile: ', profile)
   const requestedDivision = urlDivision.toUpperCase();
+  const userDirectorate = (profile.directorate || (userDivision === "FSAN" ? "FSAN" : "VMAP")).toUpperCase();
 
   // Enforce Zoned Access
   if (userDivision !== requestedDivision && profile.role !== "Admin") {
@@ -58,7 +58,27 @@ export default async function StaffDashboard({
 
   const staffName = profile.name || "Specialist";
 
-  // 2. FETCH TASKS (Scoped to Staff ID and Division)
+  // 2. RESOLVE WORKFLOW STEPS DYNAMICALLY
+  const staffTechStep = getWorkflowStep(userDirectorate, "STAFF_TECHNICAL_REVIEW");
+  const irsdVettingStep = getWorkflowStep(userDirectorate, "IRSD_STAFF_VETTING");
+
+  const validPoints = [
+    staffTechStep?.title,
+    irsdVettingStep?.title,
+    // Include legacy or alternate text variants safely if needed
+    'Technical DD Review Return',
+    'AFPD Staff Vetting',
+    'PAD Staff Vetting'
+  ].filter(Boolean) as string[];
+
+  const validStatuses = [
+    staffTechStep?.statusLabel,
+    irsdVettingStep?.statusLabel,
+    'UNDER_TECHNICAL_REVIEW',
+    'UNDER_IRSD_VETTING'
+  ].filter(Boolean) as string[];
+
+  // 3. FETCH TASKS (Scoped to Staff ID, Division, Workflow Points, and Status Labels)
   const staffTasksRaw = await db
     .select({
       id: qmsTimelines.id,
@@ -68,6 +88,7 @@ export default async function StaffDashboard({
       applicationNumber: applications.applicationNumber,
       applicationDetails: applications.details, 
       companyName: companies.name,
+      status: applications.status,
     })
     .from(qmsTimelines)
     .innerJoin(applications, eq(qmsTimelines.applicationId, applications.id))
@@ -77,22 +98,23 @@ export default async function StaffDashboard({
         ilike(qmsTimelines.division, userDivision),
         eq(qmsTimelines.staffId, authUser.id),
         or(
-          eq(qmsTimelines.point, 'Technical Review'),
-          eq(qmsTimelines.point, 'Staff Technical Review'),
-          eq(qmsTimelines.point, 'Technical DD Review Return'),
-          eq(qmsTimelines.point, 'IRSD Staff Vetting'),
-          eq(qmsTimelines.point, 'AFPD Staff Vetting'),
-          eq(qmsTimelines.point, 'PAD Staff Vetting')
+          inArray(qmsTimelines.point, validPoints),
+          inArray(applications.status, validStatuses)
         ),
         isNull(qmsTimelines.endTime)
       )
     );
 
-  // 3. QMS TIMER & WORKFLOW LOGIC
+  // 4. QMS TIMER & WORKFLOW LOGIC
   const safeTasks = (staffTasksRaw ?? []).map(task => {
     const details = (task.applicationDetails as any) || {};
     
-    // QMS Desk Time Calculation
+    // Check if task was reassigned based on comment actions trail
+    const comments = details.comments || [];
+    const isReassignedTask = comments.some((c: any) => 
+      c.action === "REASSIGNED_HUB_VETTER" || c.action === "REASSIGNED_TECHNICAL_STAFF"
+    );
+
     const start = task.startTime ? new Date(task.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
     const minutes = Math.floor(elapsedMs / 60000);
@@ -105,11 +127,6 @@ export default async function StaffDashboard({
         ? `${hours}h ${minutes % 60}m` 
         : `${minutes}m`;
 
-    /**
-     * LOGIC FIX: 
-     * If it's a Facility Verification but has no inspection report yet, 
-     * we treat it as a Dossier Review (Administrative phase).
-     */
     const isComplianceReview = 
       details.isComplianceReview === true || 
       (details.type === "Facility Verification" && !!details.inspectionReportUrl) ||
@@ -119,6 +136,7 @@ export default async function StaffDashboard({
       ...task,
       displayTime,
       isComplianceReview,
+      isReassignedTask,
       displayCompanyName: task.companyName || "Unknown Entity",
       displayAppNumber: task.applicationNumber || "No Reference",
       dossierUrl: details.inspectionReportUrl || details.poaUrl
@@ -168,7 +186,14 @@ export default async function StaffDashboard({
               ) : safeTasks.map((task) => (
                 <tr key={task.id} className="hover:bg-blue-50/30 transition-colors border-b border-slate-100 group">
                   <td className="p-6">
-                    <p className="font-mono text-sm font-bold text-blue-600">#{task.displayAppNumber}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-mono text-sm font-bold text-blue-600">#{task.displayAppNumber}</p>
+                      {task.isReassignedTask && (
+                        <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1">
+                          <RefreshCw className="w-2.5 h-2.5" /> Reassigned
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[11px] font-black text-slate-800 uppercase mt-1 tracking-tight">{task.displayCompanyName}</p>
                   </td>
 

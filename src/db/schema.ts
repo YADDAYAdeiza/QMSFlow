@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+
 // ==========================================
 // 1. MASTER TABLES & SYSTEM CONFIGURATIONS
 // ==========================================
@@ -166,33 +167,15 @@ export const applications = pgTable("applications", {
   id: serial("id").primaryKey(),
   applicationNumber: varchar("application_number", { length: 255 }).notNull().unique(),
   type: varchar("type", { length: 100 }).notNull(),
+  directorate: varchar("directorate", { length: 100 }).default("VMAP"),
   companyId: integer("company_id").references(() => companies.id),
-  foreignFactoryId: integer("foreign_factory_id").references(() => companies.id),
-  facilityId: uuid("facility_id").references(() => facilities.id, { onDelete: "set null" }), // <--- ADDED THIS
-  currentPoint: varchar("current_point", { length: 100 }).default("Divisional Deputy Director"),
-  status: text("status").default("PENDING"),
-  details: jsonb("details").$type<{
-    assignedDivisions: string[];
-    productLines: Array<{
-      lineName: string;
-      products: Array<{ name: string; classification?: string; targetSpecies?: string }>;
-    }>;
-    notificationEmail?: string;
-    lodRemarks?: string;
-    poaUrl?: string;
-    inspectionReportUrl?: string;
-    archived_path?: string;
-    comments: Array<{
-      from: string;
-      role: string;
-      text: string;
-      timestamp: string;
-      attachmentUrl?: string;
-    }>;
-    isComplianceReview?: boolean;
-  }>(),
+  currentPoint: varchar("current_point", { length: 100 }).default("Director Review"),
+  details: jsonb("details"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  status: text("status").default("PENDING"),
+  foreignFactoryId: integer("foreign_factory_id").references(() => companies.id),
+  facilityId: uuid("facility_id").references(() => facilities.id, { onDelete: "set null" }),
 });
 
 // 6. QMS Timelines
@@ -215,6 +198,7 @@ export const users = pgTable("users", {
   name: varchar("name", { length: 255 }).notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   role: varchar("role", { length: 50 }).default("Staff"),
+  directorate: varchar("directorate", { length: 100 }),
   division: varchar("division", { length: 100 }),
   linkedAt: timestamp("linked_at"),
   createdAt: timestamp("created_at").defaultNow(),

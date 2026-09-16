@@ -57,17 +57,16 @@ export const inspectionScheduleBatchWorkflow = {
       description: "Returned by Director to Head (IRSD) with remarks for revision.",
     },
 
-    // 💡 Added step mapping for active execution
     STAFF_TECHNICAL_REVIEW: {
       key: "STAFF_TECHNICAL_REVIEW",
       title: "Staff Technical Field Review",
-      division: "VMD",
+      division: "DIRECTORATE",
       role: "Technical Staff Reviewer",
       currentPoint: "Staff Technical Field Review",
       statusLabel: "UNDER_TECHNICAL_REVIEW",
       nextStepKey: "DDD_TECHNICAL_REVIEW",
       prevStepKey: "DIRECTOR_APPROVAL_REVIEW",
-      description: "Approved schedule dispatched to assigned inspectors for field execution.",
+      description: "Approved schedule dispatched to assigned inspectors across the Directorate for field execution.",
     },
 
     FINAL_APPROVED: {

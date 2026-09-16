@@ -4,7 +4,8 @@ import { db } from "@/db";
 import { applications, users, qmsTimelines, riskAssessments } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { sendOversightEmail } from "@/lib/utils/mail"; // Adjust the path to your sendOversightEmail utility file if needed
+import { sendOversightEmail } from "@/lib/utils/mail"; 
+import { getWorkflowStep } from "@/config/workflows/facilityVerificationWorkflow";
 
 /**
  * Submits a technical or compliance review to the Divisional Deputy Director.
@@ -17,7 +18,7 @@ export async function submitToDDD(
   isHubVetting: boolean,
   reportUrl: string, 
   complianceData: any,
-  sendEmail: boolean = false // <-- Added parameter matching frontend dispatch
+  sendEmail: boolean = false
 ) {
   try {
     // 1. Context & Permissions Check
@@ -46,7 +47,7 @@ export async function submitToDDD(
       // 2. Create the Audit Trail Entry
       const newComment = {
         from: user.name,
-        role: isHubVetting ? "IRSD Officer" : "Technical Specialist",
+        role: isHubVetting ? "IRSD Staff Reviewer" : "Technical Staff Reviewer",
         text: justification,
         action: isRound2 ? "COMPLIANCE_AUDIT_COMPLETED" : "TECHNICAL_VETTING_SUBMITTED",
         attachmentUrl: reportUrl || null, 
@@ -70,9 +71,13 @@ export async function submitToDDD(
         })
       };
 
-      // Define Workflow Routing
-      const targetPoint = isHubVetting ? "IRSD Staff Vetting Return" : "Technical DD Review Return";
-      const targetStatus = isHubVetting ? "AWAITING_HUB_ENDORSEMENT" : "PENDING_DD_RECOMMENDATION";
+      // Define Workflow Routing via Centralized Configuration Helpers
+      // Hub vetting goes to DDD_IRSD_REVIEW; standard technical review goes to DDD_TECHNICAL_REVIEW
+      const stepKey = isHubVetting ? "DDD_IRSD_REVIEW" : "DDD_TECHNICAL_REVIEW";
+      const workflowStep = getWorkflowStep("VMAP", stepKey);
+
+      const targetPoint = workflowStep ? workflowStep.title : (isHubVetting ? "Divisional Deputy Director IRSD Concurrence" : "Divisional Deputy Director Technical Endorsement");
+      const targetStatus = workflowStep ? workflowStep.statusLabel : (isHubVetting ? "PENDING_IRSD_CONCURRENCE" : "PENDING_TECHNICAL_ENDORSEMENT");
 
       await tx.update(applications).set({
         currentPoint: targetPoint,
@@ -116,17 +121,16 @@ export async function submitToDDD(
       });
 
       return {
-        appNumber: app.appNumber || appId.toString(),
-        type: isRound2 ? "Compliance Audit Review" : (isHubVetting ? "IRSD Hub Vetting" : "Technical Review"),
-        companyName: app.companyName || oldDetails.companyName || "N/A",
-        facilityName: app.facilityName || oldDetails.facilityName || "N/A",
+        appNumber: app.applicationNumber || app.appNumber || appId.toString(),
+        type: isRound2 ? "Compliance Audit Review" : (isHubVetting ? "IRSD Hub Concurrence" : "Technical Endorsement"),
+        companyName: app.companyName || oldDetails.applicantCompanyName || oldDetails.companyName || "N/A",
+        facilityName: app.facilityName || oldDetails.manufacturingSiteName || oldDetails.facilityName || "N/A",
         customRecipient: divisionalDD?.email,
       };
     });
 
     // 6. Conditionally Trigger Email Dispatch Post-Transaction
     if (sendEmail) {
-      // Non-blocking or awaited background notification dispatch
       sendOversightEmail({
         appNumber: txResult.appNumber,
         type: txResult.type,

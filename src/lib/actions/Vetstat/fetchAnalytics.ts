@@ -46,13 +46,13 @@ export async function getAMSRegionalAnalytics({
   // Execute both analytical queries simultaneously to boost performance
   // Parameters are now correctly mapped to the parameters declared above
   const [currentReq, prevReq] = await Promise.all([
-    supabase.rpc('get_ams_stats_v5', { 
+    supabase.rpc('get_ams_stats_v6', { 
       start_date: currentStart, 
       end_date: currentEnd, 
       species_filter: species,
       risk_filter: risk 
     }),
-    supabase.rpc('get_ams_stats_v5', { 
+    supabase.rpc('get_ams_stats_v6', { 
       start_date: prevStart, 
       end_date: prevEnd, 
       species_filter: species,

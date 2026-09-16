@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { UserCircle, Clock } from "lucide-react";
+import { UserCircle, Clock, Shield } from "lucide-react";
 import DeleteStaffButton from "./DeleteStaffButton";
 
 export default function StaffTableBody({ 
@@ -32,17 +32,27 @@ export default function StaffTableBody({
           <tr key={person.id} className="border-b border-slate-100 last:border-none group hover:bg-blue-50/30 transition-colors">
             <td className="p-6">
               <div className="flex items-center gap-3">
-                <UserCircle className="w-8 h-8 text-slate-300" />
+                <UserCircle className="w-8 h-8 text-slate-300 shrink-0" />
                 <div>
                   <p className="font-bold text-slate-800 text-sm uppercase italic">{person.name}</p>
                   <p className="text-[10px] text-slate-400 lowercase">{person.email}</p>
+                  <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider mt-0.5 flex items-center gap-1">
+                    <Shield className="w-2.5 h-2.5" /> {person.role || "Staff Technical Reviewer"}
+                  </p>
                 </div>
               </div>
             </td>
             <td className="p-6 text-center">
-              <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-[9px] font-black uppercase">
-                {person.division}
-              </span>
+              <div className="inline-flex flex-col items-center gap-1">
+                <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-[9px] font-black uppercase">
+                  {person.division}
+                </span>
+                {person.directorate && (
+                  <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest">
+                    {person.directorate}
+                  </span>
+                )}
+              </div>
             </td>
             <td className="p-6 text-center">
               {isConnected ? (

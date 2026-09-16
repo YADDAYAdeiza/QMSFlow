@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { calculateORR } from "@/lib/actions/riskEngine"; 
 import { createClient } from "@/utils/supabase/server";
 import nodemailer from "nodemailer";
+import { getWorkflowStep } from "@/config/workflows/facilityVerificationWorkflow";
 
 const RISK_CATEGORIES: Record<string, { complexity: number, criticality: number }> = {
   "VACCINES / BIOLOGICALS": { complexity: 3, criticality: 3 },
@@ -49,7 +50,7 @@ export async function sendOversightEmail(appDetails: {
   customRecipient?: string; 
 }) {
   console.log("\n================ [EMAIL DISPATCH PIPELINE START] ================");
-  console.log(`⏱️  Timestamp: ${new Date().toISOString()}`);
+  console.log(`⏱️ Timestamp: ${new Date().toISOString()}`);
   console.log(`📥 Initiating dispatch for Application: ${appDetails.appNumber}`);
   
   try {
@@ -60,11 +61,10 @@ export async function sendOversightEmail(appDetails: {
     const ccOversight = "adeiza.yusuf@nafdac.gov.ng";
     const portalLandingPageUrl = "https://qms-flow.vercel.app";
 
-
     console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
     console.log(`👉 Target Destination: ${recipientEmail}`);
-    console.log(`👁️  Oversight CC Monitored at: ${ccOversight}`);
-    console.log(`⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${process.env.SMTP_PORT || "465"}`);
+    console.log(`👁️ Oversight CC Monitored at: ${ccOversight}`);
+    console.log(`⚙️ SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${process.env.SMTP_PORT || "465"}`);
 
     if (!senderEmail || !process.env.SMTP_PASS) {
       console.log("❌ ERROR: Missing SMTP credentials in Environment settings!");
@@ -142,7 +142,7 @@ export async function sendOversightEmail(appDetails: {
 }
 
 /**
- * DD -> Staff: Moves the file to the staff's desk for technical work.
+ * Divisional Deputy Director -> Staff: Moves the file to the staff's desk for technical work.
  */
 export async function assignToStaff(appId: number, staffId: string, remarks: string) {
   try {
@@ -164,8 +164,13 @@ export async function assignToStaff(appId: number, staffId: string, remarks: str
       const timestamp = new Date();
 
       const isIRSD = staffMember.division === "IRSD";
-      const targetPoint = isIRSD ? "IRSD Staff Vetting" : "Staff Technical Review";
-      const targetStatus = isIRSD ? "UNDER_HUB_VETTING" : "UNDER_TECHNICAL_REVIEW";
+      
+      // Use workflow configuration definitions
+      const stepKey = isIRSD ? "IRSD_STAFF_VETTING" : "STAFF_TECHNICAL_REVIEW";
+      const workflowStep = getWorkflowStep("VMAP", stepKey);
+
+      const targetPoint = workflowStep ? workflowStep.title : (isIRSD ? "IRSD Staff Compliance Vetting" : "Staff Technical Field Review");
+      const targetStatus = workflowStep ? workflowStep.statusLabel : (isIRSD ? "UNDER_IRSD_VETTING" : "UNDER_TECHNICAL_REVIEW");
 
       const currentAssignedId = isIRSD ? oldDetails.irsd_reviewer_id : oldDetails.staff_reviewer_id;
       const isReassignment = !!currentAssignedId;
@@ -182,7 +187,7 @@ export async function assignToStaff(appId: number, staffId: string, remarks: str
           isNull(qmsTimelines.endTime)
         ));
 
-      // 4. LOG IN COMMENTS
+      // 4. LOG IN COMMENTS (Stores the reassignment trail permanently)
       const assignmentComment = {
         from: `Divisional Deputy Director (${staffMember.division})`,
         role: "Divisional Deputy Director",
@@ -257,7 +262,7 @@ async function getDirectorDetails() {
 }
 
 /**
- * DD -> IRSD (Hub) OR DD IRSD -> Director (Final)
+ * Divisional Deputy Director -> IRSD (Hub) OR Divisional Deputy Director IRSD -> Director (Final)
  */
 export async function approveToDirector(
   appId: number, 
@@ -273,8 +278,11 @@ export async function approveToDirector(
 
       const isIRSD = actingUser.division === "IRSD";
       
-      const nextPoint = isIRSD ? "Director Final Review" : "IRSD Hub Clearance";
-      const nextStatus = isIRSD ? "PENDING_DIRECTOR_APPROVAL" : "UNDER_HUB_CLEARANCE";
+      const nextStepKey = isIRSD ? "DIRECTOR_FINAL_SIGN_OFF" : "DDD_IRSD_INTAKE";
+      const workflowStep = getWorkflowStep("VMAP", nextStepKey);
+
+      const nextPoint = workflowStep ? workflowStep.title : (isIRSD ? "Director Final Approval & Sign-Off" : "IRSD Hub Clearance");
+      const nextStatus = workflowStep ? workflowStep.statusLabel : (isIRSD ? "PENDING_FINAL_SIGN_OFF" : "UNDER_HUB_CLEARANCE");
       const actionLabel = isIRSD ? "ENDORSED_FOR_DIRECTOR_SIGN_OFF" : "TECHNICAL_CONCURRENCE_FORWARDED_TO_HUB";
       
       const dbTimestamp = new Date();
@@ -360,7 +368,6 @@ export async function approveToDirector(
         startTime: dbTimestamp,
       });
 
-      // 7. DISPATCH TO EXECUTIVE MANAGEMENT RECIPIENT
       if (targetNotificationEmail) {
         sendOversightEmail({
           appNumber: app.applicationNumber || `APP-${app.id}`,
@@ -384,7 +391,7 @@ export async function approveToDirector(
 }
 
 /**
- * DD -> Staff (Return for Rework)
+ * Divisional Deputy Director -> Staff (Return for Rework)
  */
 export async function returnToStaff(
   appId: number, 
@@ -415,8 +422,11 @@ export async function returnToStaff(
       const nextRound = (oldDetails.currentRound || 1) + 1;
 
       const isIRSD = ddUser.division === "IRSD";
-      const targetPoint = isIRSD ? "IRSD Staff Vetting" : "Staff Technical Review";
-      const targetStatus = isIRSD ? "HUB_VETTING_REWORK" : "PENDING_REWORK";
+      const stepKey = isIRSD ? "IRSD_STAFF_VETTING" : "STAFF_TECHNICAL_REVIEW";
+      const workflowStep = getWorkflowStep("VMAP", stepKey);
+
+      const targetPoint = workflowStep ? workflowStep.title : (isIRSD ? "IRSD Staff Vetting" : "Staff Technical Review");
+      const targetStatus = workflowStep ? workflowStep.statusLabel : (isIRSD ? "HUB_VETTING_REWORK" : "PENDING_REWORK");
 
       const reworkEntry = {
         from: ddUser.name,
@@ -489,7 +499,7 @@ export async function returnToStaff(
 }
 
 /**
- * DD IRSD -> IRSD Staff (Internal Hub Vetting)
+ * Divisional Deputy Director IRSD -> IRSD Staff (Internal Hub Vetting)
  */
 export async function assignToIRSDStaff(appId: number, irsdStaffId: string, instruction: string) {
   try {
@@ -507,19 +517,23 @@ export async function assignToIRSDStaff(appId: number, irsdStaffId: string, inst
       const oldDetails = (app.details as any) || {};
       const timestamp = new Date();
 
+      const workflowStep = getWorkflowStep("VMAP", "IRSD_STAFF_VETTING");
+      const targetPoint = workflowStep ? workflowStep.title : "IRSD Staff Compliance Vetting";
+      const targetStatus = workflowStep ? workflowStep.statusLabel : "UNDER_IRSD_VETTING";
+
       const vettingComment = {
-        from: "IRSD Deputy Director",
+        from: "Divisional Deputy Director",
         role: "Divisional Deputy Director",
         division: "IRSD",
         text: instruction,
-        action: "ASSIGNED_FOR_HUB_VETTING",
+        action: "ASSIGNED_FOR_IRSD_VETTING",
         timestamp: timestamp.toISOString()
       };
 
       await tx.update(applications)
         .set({
-          currentPoint: "IRSD Staff Vetting",
-          status: "UNDER_HUB_VETTING",
+          currentPoint: targetPoint,
+          status: targetStatus,
           updatedAt: timestamp,
           details: { 
             ...oldDetails, 
@@ -538,7 +552,7 @@ export async function assignToIRSDStaff(appId: number, irsdStaffId: string, inst
 
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
-        point: "IRSD Staff Vetting",
+        point: targetPoint,
         staffId: irsdStaffId, 
         division: "IRSD",
         startTime: timestamp,
@@ -547,7 +561,7 @@ export async function assignToIRSDStaff(appId: number, irsdStaffId: string, inst
       if (irsdStaff.email) {
         sendOversightEmail({
           appNumber: app.applicationNumber || `APP-${app.id}`,
-          type: "IRSD Hub Vetting Assignment",
+          type: "IRSD Staff Compliance Vetting Assignment",
           companyName: oldDetails.applicantCompanyName || "N/A",
           facilityName: oldDetails.manufacturingSiteName || "N/A",
           lodRemarks: instruction,
@@ -586,6 +600,10 @@ export async function forwardToHub(appId: number, remarks: string) {
       const oldDetails = (app.details as any) || {};
       const timestamp = new Date();
 
+      const workflowStep = getWorkflowStep("VMAP", "DDD_IRSD_INTAKE");
+      const targetPoint = workflowStep ? workflowStep.title : "IRSD Hub Clearance";
+      const targetStatus = workflowStep ? workflowStep.statusLabel : "PENDING_HUB_CLEARANCE";
+
       const hubComment = {
         from: `Divisional Deputy Director (${app.division})`,
         role: "Divisional Deputy Director",
@@ -604,7 +622,7 @@ export async function forwardToHub(appId: number, remarks: string) {
 
       await tx.insert(qmsTimelines).values({
         applicationId: appId,
-        point: "IRSD Hub Clearance",
+        point: targetPoint,
         staffId: hubDD.id, 
         division: "IRSD",
         startTime: timestamp,
@@ -612,8 +630,8 @@ export async function forwardToHub(appId: number, remarks: string) {
 
       await tx.update(applications)
         .set({
-          currentPoint: "IRSD Hub Clearance",
-          status: "PENDING_HUB_CLEARANCE",
+          currentPoint: targetPoint,
+          status: targetStatus,
           updatedAt: timestamp,
           details: {
             ...oldDetails,
@@ -658,9 +676,12 @@ export async function recallApplication(applicationId: string, actingDivision: s
   const divisionKey = actingDivision.toUpperCase();
   const timestamp = new Date();
 
-  const recallPoint = divisionKey === "IRSD" 
-    ? "IRSD Hub Clearance" 
-    : "Technical DD Review";
+  // Determine workflow step keys based on division
+  const stepKey = divisionKey === "IRSD" ? "DDD_IRSD_INTAKE" : "DDD_TECHNICAL_ASSIGNMENT";
+  const workflowStep = getWorkflowStep("VMAP", stepKey);
+
+  const recallPoint = workflowStep ? workflowStep.title : (divisionKey === "IRSD" ? "Divisional Deputy Director IRSD Routing" : "Divisional Deputy Director Technical Assignment");
+  const recallStatus = workflowStep ? workflowStep.statusLabel : (divisionKey === "IRSD" ? "PENDING_IRSD_ROUTING" : "PENDING_TECHNICAL_ASSIGNMENT");
 
   try {
     await db.transaction(async (tx) => {
@@ -698,23 +719,28 @@ export async function recallApplication(applicationId: string, actingDivision: s
         },
       ];
 
+      // Close out the staff member's active timeline
       await tx
         .update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(eq(qmsTimelines.id, activeTimeline.id));
 
+      // Reset application state back to the DDD assignment/intake step
       await tx
         .update(applications)
         .set({
           currentPoint: recallPoint,
+          status: recallStatus,
           details: { ...details, comments: updatedComments },
         })
         .where(eq(applications.id, numericAppId));
 
+      // Open a new timeline entry for the DDD's assignment desk
       await tx.insert(qmsTimelines).values({
         applicationId: numericAppId,
         staffId: loggedInUserId,
         division: divisionKey,
+        point: recallPoint,
         startTime: timestamp,
       });
     });

@@ -8,6 +8,9 @@ import AssignToDDDButton from "@/components/AssignToDDDButton";
 import DossierLink from "@/components/DossierLink"; 
 import { Inbox, ShieldAlert, CheckCircle2, ClipboardList, Factory, Landmark } from "lucide-react";
 import Link from "next/link";
+import { getWorkflowStep } from "@/config/workflows/facilityVerificationWorkflow";
+// Import your auth session helper if available, or fetch user directly
+// import { getCurrentUser } from "@/lib/auth";
 
 export default async function DirectorPage({ 
   searchParams 
@@ -15,18 +18,35 @@ export default async function DirectorPage({
   searchParams: Promise<{ view?: string }> 
 }) {
   const { view } = await searchParams;
-  const currentView = view === "final" ? "Director Final Review" : "Director Review";
+  
+  // 1. Fetch the current logged-in user to determine their directorate/division dynamically
+  // (Replace or adapt based on how your session/auth provides the logged-in user's ID or email)
+  // For demonstration, let's query the user or use session helper:
+  const sessionUser = await db.query.users.findFirst({
+    where: eq(users.role, 'Director') // Or filter by current session user ID/email
+  });
+
+  const userDirectorate = sessionUser?.directorate || sessionUser?.division || "VMAP";
+
+  // 2. Resolve workflow step titles dynamically via workflow configuration helper using the user's directorate
+  const reviewStep = getWorkflowStep(userDirectorate, "DIRECTOR_INTAKE");
+  const finalStep = getWorkflowStep(userDirectorate, "DIRECTOR_FINAL_SIGN_OFF");
+
+  const reviewPointTitle = reviewStep ? reviewStep.title : "Director Review";
+  const finalPointTitle = finalStep ? finalStep.title : "Director Final Review";
+
+  const currentView = view === "final" ? finalPointTitle : reviewPointTitle;
 
   const [{ now }] = await db.execute(sql`SELECT now() as now`);
   const serverTime = new Date(now as string).getTime();
 
-  // 1. Dynamic Badges calculating actual pending active items
+  // 3. Dynamic Badges calculating actual pending active items
   const reviewCountResult = await db
     .select({ value: count() })
     .from(applications)
     .innerJoin(qmsTimelines, and(
       eq(qmsTimelines.applicationId, applications.id),
-      eq(qmsTimelines.point, "Director Review"),
+      eq(qmsTimelines.point, reviewPointTitle),
       isNull(qmsTimelines.endTime)
     ));
 
@@ -35,7 +55,7 @@ export default async function DirectorPage({
     .from(applications)
     .innerJoin(qmsTimelines, and(
       eq(qmsTimelines.applicationId, applications.id),
-      eq(qmsTimelines.point, "Director Final Review"),
+      eq(qmsTimelines.point, finalPointTitle),
       isNull(qmsTimelines.endTime)
     ));
 
@@ -44,7 +64,7 @@ export default async function DirectorPage({
     final: finalCountResult[0]?.value || 0,
   };
 
-  // 2. Fetch Divisional Deputy Directors for layout delegation
+  // 4. Fetch Divisional Deputy Directors for layout delegation
   const availableHeads = await db
     .select({
       id: users.id,
@@ -54,7 +74,7 @@ export default async function DirectorPage({
     .from(users)
     .where(eq(users.role, 'Divisional Deputy Director'));
 
-  // 3. Enforce Strict QMS Desk clearance (Excludes records with an endTime populated)
+  // 5. Enforce Strict QMS Desk clearance (Excludes records with an endTime populated)
   const inbox = await db
     .select({
       id: applications.id,
@@ -81,20 +101,20 @@ export default async function DirectorPage({
               <Inbox className="w-5 h-5 text-white" />
             </div>
             <h1 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">
-              Director Workspace
+              Director Workspace ({userDirectorate})
             </h1>
           </div>
           
           <div className="flex gap-4 mt-6">
             <Link 
               href="?view=review" 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Review' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === reviewPointTitle ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
               <ClipboardList className="w-3 h-3" /> New Reviews ({counts.review})
             </Link>
             <Link 
               href="?view=final" 
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === 'Director Final Review' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${currentView === finalPointTitle ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-200'}`}
             >
               <CheckCircle2 className="w-3 h-3" /> Final Approvals ({counts.final})
             </Link>
@@ -122,7 +142,7 @@ export default async function DirectorPage({
             <div key={app.id} className="p-6 bg-white rounded-[2.5rem] shadow-sm border-2 border-slate-100 hover:border-blue-300 transition-all flex justify-between items-center group">
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-3">
-                    <p className={`font-mono font-bold text-xl ${currentView === 'Director Final Review' ? 'text-emerald-600' : 'text-blue-600'}`}>
+                    <p className={`font-mono font-bold text-xl ${currentView === finalPointTitle ? 'text-emerald-600' : 'text-blue-600'}`}>
                       #{app.nr}
                     </p>
                     
@@ -163,7 +183,7 @@ export default async function DirectorPage({
                 <div className="flex items-center gap-2">
                   <DossierLink url={savedUrl} />
                   
-                  {currentView === "Director Review" ? (
+                  {currentView === reviewPointTitle ? (
                     <AssignToDDDButton 
                       appId={app.id} 
                       defaultDivision={lodSuggestedDiv} 
@@ -187,7 +207,7 @@ export default async function DirectorPage({
         {inbox.length === 0 && (
           <div className="p-32 text-center bg-slate-100/30 rounded-[3rem] border-2 border-dashed border-slate-200">
             <p className="text-slate-400 font-bold italic uppercase text-[10px] tracking-[0.3em]">
-              Clean Desk: No {currentView === 'Director Review' ? 'New Reviews' : 'Pending Approvals'}
+              Clean Desk: No {currentView === reviewPointTitle ? 'New Reviews' : 'Pending Approvals'}
             </p>
           </div>
         )}

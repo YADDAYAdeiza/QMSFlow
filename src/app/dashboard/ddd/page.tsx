@@ -6,10 +6,11 @@ import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server"; 
 import DossierLink from "@/components/DossierLink";
 import { recallApplication } from "@/lib/actions/ddd";  
+import { getWorkflowStep } from "@/config/workflows/facilityVerificationWorkflow";
  
 import { 
   ArrowRightCircle, Clock, Inbox, Users, 
-  Landmark, Factory, ShieldCheck, RotateCcw, AlertOctagon 
+  Landmark, Factory, ShieldCheck, RotateCcw, AlertOctagon, AlertCircle 
 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -33,14 +34,16 @@ export default async function DDDInboxPage({
   
   const loggedInUserId = session.user.id; 
 
-  // 3. Resolve Profile-Driven Fallback Division
+  // 3. Resolve Profile-Driven Fallback Division & Directorate
   const userProfile = await db
-    .select({ division: users.division })
+    .select({ 
+      division: users.division,
+      directorate: users.directorate 
+    })
     .from(users)
     .where(eq(users.id, loggedInUserId))
     .then(res => res[0]);
 
-  // STOPS FALLBACK LEAKAGE: Removed the hardcoded || "VMD" string trap completely
   const userDefaultDivision = userProfile?.division?.toUpperCase();
   const actingDivision = as?.toUpperCase() || userDefaultDivision;
 
@@ -62,9 +65,43 @@ export default async function DDDInboxPage({
     );
   }
 
+  // Extract / Resolve Directorate for Workflow Configurations
+  const actingDirectorate = (userProfile?.directorate || (actingDivision === "FSAN" ? "FSAN" : "VMAP")).toUpperCase();
+
   const isAssignedView = view === "assigned";
   
-  // 4. Database Query
+  // 4. Resolve Workflow Titles Dynamically using the Directorate
+  const techAssignmentStep = getWorkflowStep(actingDirectorate, "DDD_TECHNICAL_ASSIGNMENT");
+  const techReviewStep = getWorkflowStep(actingDirectorate, "DDD_TECHNICAL_REVIEW");
+  const irsdIntakeStep = getWorkflowStep(actingDirectorate, "DDD_IRSD_INTAKE");
+  const irsdReviewStep = getWorkflowStep(actingDirectorate, "DDD_IRSD_REVIEW");
+
+  const incomingTitles = [
+    techAssignmentStep?.title,
+    techReviewStep?.title,
+    irsdIntakeStep?.title,
+    irsdReviewStep?.title,
+  ].filter(Boolean) as string[];
+
+  const incomingStatuses = [
+    techAssignmentStep?.statusLabel,
+    techReviewStep?.statusLabel,
+    irsdIntakeStep?.statusLabel,
+    irsdReviewStep?.statusLabel,
+    "REWORK_REQUIRED"
+  ].filter(Boolean) as string[];
+
+  // For the assigned monitoring view (staff active steps)
+  const staffAssignmentStep = getWorkflowStep(actingDirectorate, "STAFF_TECHNICAL_REVIEW");
+  const irsdVettingStep = getWorkflowStep(actingDirectorate, "IRSD_STAFF_VETTING");
+  
+  const assignedTitles = [
+    staffAssignmentStep?.title,
+    irsdVettingStep?.title,
+    "Staff Technical Field Review",
+  ].filter(Boolean) as string[];
+
+  // 5. Streamlined Database Query mapped to Workflow Titles & Division
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -84,19 +121,16 @@ export default async function DDDInboxPage({
       eq(qmsTimelines.division, actingDivision),
       isAssignedView 
         ? or(
-            eq(applications.currentPoint, 'Staff Technical Review'),
-            eq(applications.currentPoint, 'IRSD Staff Vetting') 
+            inArray(applications.currentPoint, assignedTitles),
+            inArray(qmsTimelines.point, assignedTitles)
           )
-        : or(
-            eq(qmsTimelines.staffId, loggedInUserId),
-            eq(applications.currentPoint, 'Technical DD Review'),
-            eq(applications.currentPoint, 'IRSD Hub Clearance'),
-            eq(applications.currentPoint, 'IRSD Staff Vetting Return'),
-            eq(applications.currentPoint, 'Technical DD Review Return') 
+        : and(
+            inArray(applications.currentPoint, incomingTitles),
+            inArray(applications.status, incomingStatuses)
           )
     ));
 
-  // 5. Secondary Staff Name Resolution Step (Strict Normalization)
+  // 6. Secondary Staff Name Resolution Step (Strict Normalization)
   let staffMap: Record<string, string> = {};
   
   if (isAssignedView && rawInbox.length > 0) {
@@ -116,7 +150,7 @@ export default async function DDDInboxPage({
     }
   }
 
-  // 6. Formatting & Runtime Evaluation Logic
+  // 7. Formatting & Runtime Evaluation Logic
   const inbox = rawInbox.map(app => {
     const start = app.startTime ? new Date(app.startTime).getTime() : Date.now();
     const elapsedMs = Math.max(0, Date.now() - start); 
@@ -132,17 +166,18 @@ export default async function DDDInboxPage({
 
     const details = (app.details as any) || {};
     const isRound2 = details.isComplianceReview === true || !!details.inspectionReportUrl;
+    const isRework = app.status === "REWORK_REQUIRED";
     
     const lookupKey = String(app.staffId || "").toLowerCase();
     const staffName = lookupKey ? staffMap[lookupKey] || null : null;
 
     const isReturningFromStaff = 
-      app.currentPoint === "Technical DD Review Return" || 
-      app.currentPoint === "IRSD Staff Vetting Return" ||
-      app.status === "PENDING_DD_RECOMMENDATION" ||
-      app.status === "AWAITING_HUB_ENDORSEMENT";
+      app.currentPoint === techReviewStep?.title || 
+      app.currentPoint === irsdReviewStep?.title ||
+      app.status === "PENDING_TECHNICAL_ENDORSEMENT" ||
+      app.status === "PENDING_IRSD_CONCURRENCE";
 
-    return { ...app, displayTime, isRound2, staffName, isReturningFromStaff };
+    return { ...app, displayTime, isRound2, isRework, staffName, isReturningFromStaff };
   });
 
   return (
@@ -200,21 +235,39 @@ export default async function DDDInboxPage({
               const lastComment = [...(details.comments || [])].reverse()[0];
 
               return (
-                <tr key={app.id} className="hover:bg-blue-50/30 transition-colors border-b border-slate-100 group">
+                <tr 
+                  key={app.id} 
+                  className={cn(
+                    "transition-colors border-b group",
+                    app.isRework 
+                      ? "bg-rose-50/70 hover:bg-rose-100/60 border-rose-100" 
+                      : "hover:bg-blue-50/30 border-slate-100"
+                  )}
+                >
                   <td className="p-6">
-                    <p className="font-mono text-sm font-bold text-blue-600">#{app.applicationNumber}</p>
+                    <p className={cn("font-mono text-sm font-bold", app.isRework ? "text-rose-600" : "text-blue-600")}>
+                      #{app.applicationNumber}
+                    </p>
                     <p className="text-[11px] font-black text-slate-800 uppercase mt-1 tracking-tight">{app.companyName}</p>
                   </td>
 
                   <td className="p-6">
                     <div className="flex flex-col gap-1.5">
-                      <span className={cn(
-                        "text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border",
-                        app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
-                      )}>
-                        {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
-                        {app.isRound2 ? 'Pass 2: Compliance' : 'Pass 1: Facility'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn(
+                          "text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit border",
+                          app.isRound2 ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
+                        )}>
+                          {app.isRound2 ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
+                          {app.isRound2 ? 'Pass 2: Compliance' : 'Pass 1: Facility'}
+                        </span>
+
+                        {app.isRework && (
+                          <span className="text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-fit bg-rose-100 text-rose-700 border border-rose-200">
+                            <AlertCircle className="w-3 h-3" /> Rework Required
+                          </span>
+                        )}
+                      </div>
                       
                       {isAssignedView && app.staffName ? (
                         <div className="text-[10px] font-black uppercase text-purple-700 bg-purple-50/60 px-2.5 py-1 rounded-lg w-fit border border-purple-200/40 flex items-center gap-1.5 tracking-tight mt-0.5">
@@ -223,10 +276,7 @@ export default async function DDDInboxPage({
                         </div>
                       ) : (
                         <span className="text-[9px] font-bold text-slate-400 uppercase italic">
-                          {app.currentPoint === 'Technical DD Review Return' || app.currentPoint === 'IRSD Staff Vetting Return'
-                            ? "Returned from Staff Evaluation"
-                            : app.currentPoint
-                          }
+                          {app.currentPoint}
                         </span>
                       )}
                     </div>
@@ -242,7 +292,7 @@ export default async function DDDInboxPage({
                   <td className="p-6 text-xs italic text-slate-400">
                     <div className="flex flex-col gap-2 max-w-md">
                        <DossierLink url={details.inspectionReportUrl || details.poaUrl} />
-                       <p className="line-clamp-1 border-l-2 border-slate-200 pl-2 text-slate-500">
+                       <p className={cn("line-clamp-1 border-l-2 pl-2", app.isRework ? "border-rose-300 text-rose-900 font-medium" : "border-slate-200 text-slate-500")}>
                          {lastComment?.text ? `"${lastComment.text}"` : "New assignment tracking session initiated."}
                        </p>
                     </div>
@@ -270,16 +320,20 @@ export default async function DDDInboxPage({
                           "inline-flex items-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-md group-hover:-translate-x-1",
                           isAssignedView 
                             ? "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50" 
-                            : app.isReturningFromStaff
-                              ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-100/50" 
-                              : "bg-slate-900 text-white hover:bg-blue-600" 
+                            : app.isRework
+                              ? "bg-rose-600 text-white hover:bg-rose-700 shadow-rose-100/50"
+                              : app.isReturningFromStaff
+                                ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-100/50" 
+                                : "bg-slate-900 text-white hover:bg-blue-600" 
                         )}
                       >
                         {isAssignedView 
                           ? 'Track' 
-                          : app.isReturningFromStaff 
-                            ? 'Recommend' 
-                            : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
+                          : app.isRework
+                            ? 'Re-assign'
+                            : app.isReturningFromStaff 
+                              ? 'Recommend' 
+                              : 'Assign'} <ArrowRightCircle className="w-4 h-4" />
                       </Link>
                     </div>
                   </td>

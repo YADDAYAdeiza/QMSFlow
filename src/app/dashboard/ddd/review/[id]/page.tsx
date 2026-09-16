@@ -17,7 +17,7 @@ export default async function Page({
   searchParams: Promise<{ as?: string }> 
 }) {
   const { id } = await params;
-  const { as } = await searchParams;
+  const { as } = await searchParams;  
   const appId = parseInt(id);
 
   const supabase = await createClient();
@@ -42,7 +42,7 @@ export default async function Page({
   if (!app) return <div className="p-20 text-center font-bold text-slate-400">Application Not Found</div>;
 
   // 2. Logic for Division and Staff
-  // Explicitly support all 4 divisions via the 'as' param
+  // Explicitly support all 4 VMAP divisions via the 'as' param
   const currentDiv = as?.toUpperCase() || "VMD";
   const staffList = await db.select().from(users).where(eq(sql`UPPER(${users.division})`, currentDiv));
   
@@ -64,19 +64,19 @@ export default async function Page({
 
   return (
     <div className="relative font-sans min-h-screen bg-slate-50">
-      {/* HUD: Acting Division Switcher - Supports all 4 Technical Divisions */}
+      {/* HUD: Acting Division Switcher - Supports VMD, PAD, AFPD, IRSD */}
       <div className="fixed top-4 right-8 z-[200] flex items-center gap-2 bg-white/90 backdrop-blur p-2 rounded-full border border-slate-200 shadow-2xl">
         <div className="flex items-center gap-2 px-3 py-1">
           <User className="w-3 h-3 text-blue-600" />
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-            DD: {session.user.email?.split('@')[0]}
+            Divisional Deputy Director: {session.user.email?.split('@')[0]}
           </span>
         </div>
         
         <div className="h-4 w-[1px] bg-slate-200 mx-1" />
         
         <div className="flex gap-1">
-          {["VMD", "AFPD", "PAD", "IRSD"].map((div) => (
+          {["VMD", "PAD", "AFPD", "IRSD"].map((div) => (
             <Link 
               key={div}
               href={`?as=${div.toLowerCase()}`} 

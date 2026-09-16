@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, Loader2, CheckCircle2, AlertCircle, ShieldAlert } from 'lucide-react';
 import { createClient } from '@/utils/supabase/client';
@@ -14,6 +14,18 @@ export default function ResetPasswordPage() {
 
   const router = useRouter();
   const supabase = createClient();
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        // Recovery session established successfully
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();

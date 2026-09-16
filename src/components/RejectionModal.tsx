@@ -1,8 +1,10 @@
 "use client"
 
 import React, { useState, useEffect, useTransition } from 'react';
-import { X, RotateCcw, AlertTriangle, Loader2, UserCircle2, MessageSquare } from 'lucide-react';
-import { returnToStaff } from '@/lib/actions/ddd';
+import { X, RotateCcw, Loader2, UserCircle2, MessageSquare, Workflow, Building2 } from 'lucide-react';
+import { returnToStaffFromDirector } from '@/lib/actions/director';
+import { fetchDivisionalDeputyDirector } from '@/lib/actions/director'; // Import the action
+
 
 interface RejectionModalProps {
   isOpen: boolean;
@@ -14,38 +16,74 @@ interface RejectionModalProps {
   onSuccess: () => void;
 }
 
+const DIVISIONS = [
+  { key: "VMD", label: "Veterinary Medicine Division (VMD)" },
+  { key: "AFPD", label: "Animal Feed Premix Division (AFPD)" },
+  { key: "PAD", label: "Pesticides & Allied Products Division (PAD)" },
+  { key: "IRSD", label: "Inspections, Relations & Stakeholder Division (IRSD)" },
+];
+
 export default function RejectionModal({ 
   isOpen, onClose, appId, currentDDId, currentStaffId, staffList, onSuccess 
 }: RejectionModalProps) {
-  console.log('This is currentStaffId: ', currentStaffId);
   const [remarks, setRemarks] = useState("");
+  const [targetDivision, setTargetDivision] = useState("VMD");
+  const [returnStepKey, setReturnStepKey] = useState("DDD_TECHNICAL_ASSIGNMENT");
   const [targetStaffId, setTargetStaffId] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  // Presets the staff ID and clears remarks when opening
-  // Inside RejectionModal.tsx, replace your useEffect with this:
+// Inside RejectionModal component:
 
+  // Auto-resolve recipient: Query database fresh for the target division's Divisional Deputy Director
   useEffect(() => {
-    if (isOpen && currentStaffId) {
-      // Check if the ID exists in the staffList to prevent invalid selection
-      const staffExists = staffList.some((s) => s.id === currentStaffId);
-      if (staffExists) {
-        setTargetStaffId(currentStaffId);
-      }
-    } else if (!isOpen) {
-      // Optional: Only clear if you want the modal to reset every time it closes
+    let isMounted = true;
+
+    if (!isOpen) {
       setRemarks("");
+      setReturnStepKey("DDD_TECHNICAL_ASSIGNMENT");
+      setTargetDivision("VMD");
+      setTargetStaffId("");
+      return;
     }
-  }, [isOpen, currentStaffId, staffList]);
+
+    async function resolveTarget() {
+      if (returnStepKey === "DDD_TECHNICAL_ASSIGNMENT") {
+        const res = await fetchDivisionalDeputyDirector(targetDivision);
+        if (isMounted) {
+          if (res.success && res.ddId) {
+            setTargetStaffId(res.ddId);
+          } else {
+            // Absolute fallback safeguard if database query returns empty
+            setTargetStaffId(currentDDId || "");
+          }
+        }
+      } else if (currentStaffId) {
+        if (isMounted) setTargetStaffId(currentStaffId);
+      }
+    }
+
+    resolveTarget();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, targetDivision, returnStepKey, currentStaffId, currentDDId]);
 
   if (!isOpen) return null;
 
   const handleReturn = () => {
     if (!remarks.trim()) return alert("QMS Requirement: Please provide specific reasons for return.");
-    if (!targetStaffId) return alert("Please select a recipient for the rework.");
+    if (!targetDivision) return alert("Please select a target division.");
 
     startTransition(async () => {
-      const res = await returnToStaff(appId, targetStaffId, remarks, currentDDId);
+      const res = await returnToStaffFromDirector(
+        appId, 
+        remarks, 
+        targetStaffId, 
+        currentDDId, 
+        returnStepKey, 
+        targetDivision
+      );
       if (res.success) {
         onSuccess();
       } else {
@@ -62,7 +100,7 @@ export default function RejectionModal({
             <div className="bg-white/20 p-2 rounded-xl"><RotateCcw className="w-5 h-5" /></div>
             <div>
               <h3 className="text-xs font-black uppercase tracking-widest text-white">Return for Rework</h3>
-              <p className="text-[10px] text-rose-100 font-bold uppercase opacity-80">Divisional Deputy Director Action</p>
+              <p className="text-[10px] text-rose-100 font-bold uppercase opacity-80">Directorate Action</p>
             </div>
           </div>
           <button onClick={onClose} className="hover:rotate-90 transition-transform"><X className="w-5 h-5" /></button>
@@ -71,19 +109,52 @@ export default function RejectionModal({
         <div className="p-8 space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">
-              <UserCircle2 className="w-3 h-3" /> Assign To (For Correction)
+              <Building2 className="w-3 h-3" /> Target Division Routing
             </label>
             <select 
-              value={targetStaffId}
-              onChange={(e) => setTargetStaffId(e.target.value)}
+              value={targetDivision}
+              onChange={(e) => setTargetDivision(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-500 appearance-none cursor-pointer"
             >
-              <option value="">Select recipient...</option>
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} — {s.role}</option>
+              {DIVISIONS.map((div) => (
+                <option key={div.key} value={div.key}>{div.label}</option>
               ))}
             </select>
           </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">
+              <Workflow className="w-3 h-3" /> Return Stage Level
+            </label>
+            <select 
+              value={returnStepKey}
+              onChange={(e) => setReturnStepKey(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-500 appearance-none cursor-pointer"
+            >
+              <option value="DDD_TECHNICAL_ASSIGNMENT">Divisional Deputy Director Re-Assignment</option>
+              <option value="REVIEW_OFFICER_REWORK">Direct to Review Officer</option>
+            </select>
+          </div>
+
+          {returnStepKey === "REVIEW_OFFICER_REWORK" && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">
+                <UserCircle2 className="w-3 h-3" /> Specific Desk Officer
+              </label>
+              <select 
+                value={targetStaffId}
+                onChange={(e) => setTargetStaffId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-500 appearance-none cursor-pointer"
+              >
+                <option value="">Select specific officer...</option>
+                {staffList
+                  .filter((s) => s.division === targetDivision)
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} — {s.role}</option>
+                  ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase text-slate-400 ml-2 flex items-center gap-2">

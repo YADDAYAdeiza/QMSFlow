@@ -71,10 +71,44 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
   const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
 
-  const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
-  const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
-  const isHubEntry = app?.currentPoint === 'IRSD Hub Clearance';
-  const isAssignmentPhase = app?.currentPoint === 'Technical DD Review' || isHubEntry;
+  // const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
+  // const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
+  // const isHubEntry = app?.currentPoint === 'IRSD Hub Clearance';
+  // const isAssignmentPhase = app?.currentPoint === 'Technical DD Review' || isHubEntry;
+  // const isReviewPhase = isTechnicalReturn || isIRSDStaffReturn;
+
+  // Database fields and programmatic identifiers
+  const currentPoint = app?.currentPoint || '';
+  const currentStatus = app?.status || '';
+  const currentStepKey = app?.currentStepKey || app?.stepKey || '';
+
+  // 1. Assignment Phase: Aligned with 'Technical DD Review', 'PENDING_DIRECTOR_ALLOCATION', and keys
+  const isAssignmentPhase = 
+    currentPoint === 'Technical DD Review' || 
+    currentPoint === 'Divisional Deputy Director Technical Assignment' ||
+    currentPoint === 'Divisional Deputy Director IRSD Routing' ||
+    currentStatus === 'PENDING_DIRECTOR_ALLOCATION' ||
+    currentStepKey === 'DDD_TECHNICAL_ASSIGNMENT';
+
+  // 2. Hub Entry / Delegation: Aligned with IRSD intake steps
+  const isHubEntry = 
+    currentPoint === 'Divisional Deputy Director IRSD Routing' || 
+    currentStepKey === 'DDD_IRSD_INTAKE';
+
+  // 3. Technical Return / Review Phase: Aligned with review steps and endorsement titles
+  const isTechnicalReturn = 
+    currentPoint === 'Technical DD Review Return' || 
+    currentPoint === 'Divisional Deputy Director Technical Endorsement' ||
+    currentStatus === 'PENDING_TECHNICAL_ENDORSEMENT' ||
+    currentStepKey === 'DDD_TECHNICAL_REVIEW';
+
+  // 4. IRSD Staff Return Phase
+  const isIRSDStaffReturn = 
+    currentPoint === 'Divisional Deputy Director IRSD Concurrence' || 
+    currentPoint === 'IRSD Staff Vetting Return' || 
+    currentStepKey === 'IRSD_STAFF_VETTING';
+
+  // 5. Consolidated Review Phase flag
   const isReviewPhase = isTechnicalReturn || isIRSDStaffReturn;
 
   const intrinsicLevel = app?.intrinsicLevel || "Low";
@@ -83,13 +117,20 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const findings = app?.findingsLedger || [];
 
   const appDivision = appDetails?.division || app?.division || "VMD";
-  const activeAssignmentDivision = isHubEntry ? "IRSD" : appDivision;
+  
+  // Explicitly check if the current acting mode from searchParams is IRSD
+  const isIRSDActing = currentActingAs.toLowerCase() === 'irsd';
+  
+  // Determine active assignment division based on IRSD mode or hub entry flags
+  const activeAssignmentDivision = isIRSDActing || isHubEntry ? "IRSD" : appDivision;
+
+  console.log('This is activeAssignmentDivision: ', activeAssignmentDivision);
 
   const filteredStaff = staffList.filter((s: any) => 
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
   );
 
-  const isIRSD = currentActingAs.toLowerCase() === 'irsd' || activeAssignmentDivision.toUpperCase() === 'IRSD';
+  const isIRSD = isIRSDActing || activeAssignmentDivision.toUpperCase() === 'IRSD';
 
   const complianceRisk = useMemo(() => {
     const baseRisk = app?.complianceRisk || {};
