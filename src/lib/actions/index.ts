@@ -192,6 +192,15 @@ export async function submitLODApplication(
           })
           .returning();
         facility = insertedFacility;
+      } else {
+        // Update coordinates or details if provided fresh
+        await tx
+          .update(facilities)
+          .set({
+            latitude: Number.isNaN(latVal) ? facility.latitude : (latVal ?? facility.latitude),
+            longitude: Number.isNaN(lngVal) ? facility.longitude : (lngVal ?? facility.longitude),
+          })
+          .where(eq(facilities.id, facility.id));
       }
 
       // 4. Products & Intrinsic Risk Calculation using local schema tables

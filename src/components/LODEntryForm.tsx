@@ -11,7 +11,7 @@ import { CompanySearch } from './CompanySearch';
 import { 
   Plus, Trash2, Globe, Building2, Save, Loader2, 
   MessageSquare, Share2, X, ChevronDown, Mail, RefreshCcw,
-  CheckCircle2, ArrowRight, Activity, ShieldAlert, Layers, Hash
+  CheckCircle2, ArrowRight, Activity, ShieldAlert, Layers, Hash, MapPin
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,13 @@ const RISK_CATEGORIES = [
   { name: "LIQUID Pesticides and Agrochemicals", comp: 1, crit: 1 },
   { name: "SOLID Pesticides and Agrochemicals", comp: 1, crit: 1 },
   { name: "Aerosol Pesticides and Agrochemicals", comp: 1, crit: 1 },
+];
+
+const FACILITY_TYPE_OPTIONS = [
+  "Pharma",
+  "Food/Feed",
+  "Pesticide",
+  "Premixes"
 ];
 
 const getRiskLevel = (score: number) => {
@@ -180,6 +187,9 @@ const [currentUser, setCurrentUser] = useState({
     notificationEmail: initialData?.notificationEmail || "",
     facilityName: initialData?.facilityName || "", 
     facilityAddress: initialData?.facilityAddress || "", 
+    facilityType: initialData?.facilityType || "Pharma",
+    latitude: initialData?.latitude || "",
+    longitude: initialData?.longitude || "",
     siteScope: initialData?.siteScope || "New Manufacturing Site",
     lodRemarks: "",
     productLines: initialData?.productLines || [{ lineName: "", riskCategory: "", products: [{ name: "" }] }],
@@ -197,6 +207,7 @@ const [currentUser, setCurrentUser] = useState({
     defaultValues
   });
 
+<<<<<<< HEAD
   useEffect(() => {
   const fetchRealUser = async () => {
     const supabase = createClient();
@@ -222,6 +233,8 @@ const [currentUser, setCurrentUser] = useState({
 }, []);
 
 
+=======
+>>>>>>> 8e74539566bb9eeb649709853ca66d02e6bfdf2d
   useEffect(() => {
     if (!initialData?.appNumber && !isUpdate) {
       const uniqueId = crypto.randomUUID();
@@ -267,6 +280,7 @@ const [currentUser, setCurrentUser] = useState({
   };
 
   const onSubmit = async (data: any) => {
+<<<<<<< HEAD
   const payload = {
     ...data,
     localCompanyName: data.companyName,
@@ -293,6 +307,32 @@ const [currentUser, setCurrentUser] = useState({
   }
 };
 
+=======
+    const payload = {
+      ...data,
+      localCompanyName: data.companyName,
+      localCompanyAddress: data.companyAddress,
+      foreignFactoryName: data.facilityName,
+      foreignFactoryAddress: data.facilityAddress,
+      userComment: data.lodRemarks,
+      applicationType: data.type,
+      localCompanyId,
+      foreignFactoryId,
+    };
+
+    const result = await submitLODApplication(
+      payload, 
+      CURRENT_USER.id, 
+      CURRENT_USER.name, 
+      CURRENT_USER.role
+    );
+
+    if (result.success) {
+      setShowSuccess(true);
+    }
+  };
+
+>>>>>>> 8e74539566bb9eeb649709853ca66d02e6bfdf2d
   return (
     <div className="max-w-4xl mx-auto pb-20 relative">
       
@@ -351,6 +391,7 @@ const [currentUser, setCurrentUser] = useState({
     </div>
   </header>
 
+<<<<<<< HEAD
   {Object.keys(errors).length > 0 && (
     <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl space-y-1">
       <h5 className="text-[11px] font-black uppercase text-rose-600 flex items-center gap-2">
@@ -374,6 +415,360 @@ const [currentUser, setCurrentUser] = useState({
           className={cn(
             "w-full p-5 pl-12 rounded-[1.5rem] text-xs font-bold font-mono outline-none border-2 border-transparent transition-all",
             "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none"
+=======
+        {Object.keys(errors).length > 0 && (
+          <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl space-y-1">
+            <h5 className="text-[11px] font-black uppercase text-rose-600 flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4" /> Validation Warnings Found
+            </h5>
+            <p className="text-[10px] text-rose-500 font-medium">
+              Please check all document uploads, required fields, coordinates, and line classifications before submitting.
+            </p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="flex flex-col gap-2 relative">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2 italic">Application Reference (UUID)</label>
+            <div className="relative">
+              <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                {...register("appNumber")} 
+                placeholder="Generating Application ID reference..."
+                readOnly
+                className={cn(
+                  "w-full p-5 pl-12 rounded-[1.5rem] text-xs font-bold font-mono outline-none border-2 border-transparent transition-all",
+                  "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none"
+                )}
+              />
+            </div>
+            {errors.appNumber && <p className="text-[9px] font-bold text-rose-500 ml-2">Valid Application UUID reference required.</p>}
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Review Type</label>
+            <select {...register("type")} className="bg-slate-50 p-5 rounded-[1.5rem] text-sm font-bold outline-none cursor-pointer">
+              <option value="Facility Verification">Facility Verification (Pass 1)</option>
+              <option value="Inspection Report Review (Foreign)">Compliance Review (Pass 2)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {/* --- LOCAL APPLICANT CARD --- */}
+          <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 relative">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                <Building2 className="w-4 h-4" /> Local Applicant
+              </h3>
+              {(isLocalAutofilled || isLocalNew) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalCompanyId(null);
+                    setIsLocalNew(false);
+                    setValue("companyName", "");
+                    setValue("companyAddress", "");
+                    setValue("notificationEmail", "");
+                  }}
+                  className="text-[9px] font-black text-rose-600 bg-rose-50 px-3 py-1 rounded-full hover:bg-rose-100 transition-all flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear & Edit
+                </button>
+              )}
+            </div>
+
+            {!isUpdate && !isLocalAutofilled && (
+              <CompanySearch 
+                category="LOCAL" 
+                onSelect={(company) => {
+                  setLocalCompanyId(company.id ?? null);
+                  setIsLocalNew(Boolean(company.isNew));
+
+                  setValue("companyName", company.name, { shouldDirty: true });
+                  setValue("companyAddress", company.address || "", { shouldDirty: true });
+                  if (company.email) {
+                    setValue("notificationEmail", company.email, { shouldDirty: true });
+                  }
+                }}
+              />
+            )}
+            
+            <input 
+              {...register("companyName")} 
+              placeholder="Company Name" 
+              readOnly={isLocalAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none transition-all",
+                isLocalAutofilled ? "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+            <input 
+              {...register("companyAddress")} 
+              placeholder="Address" 
+              readOnly={isLocalAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm shadow-sm border-none transition-all",
+                isLocalAutofilled ? "bg-slate-200/60 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
+              <input 
+                {...register("notificationEmail")} 
+                placeholder="Email (Optional)" 
+                readOnly={isLocalAutofilled}
+                className={cn(
+                  "w-full p-4 pl-10 rounded-xl text-sm font-bold shadow-sm border-none transition-all",
+                  isLocalAutofilled ? "bg-slate-200/60 text-slate-400 cursor-not-allowed select-none" : "bg-white text-blue-600"
+                )} 
+              />
+            </div>
+          </div>
+
+          {/* --- MANUFACTURING SITE CARD --- */}
+          <div className="p-8 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] space-y-4 relative">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2">
+                <Globe className="w-4 h-4" /> Manufacturing Site
+              </h3>
+              {(isForeignAutofilled || isForeignNew) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForeignFactoryId(null);
+                    setIsForeignNew(false);
+                    setValue("facilityName", "");
+                    setValue("facilityAddress", "");
+                    setValue("facilityType", "Pharma");
+                    setValue("latitude", "");
+                    setValue("longitude", "");
+                    setAvailableLines([]);
+                  }}
+                  className="text-[9px] font-black text-rose-600 bg-rose-50 px-3 py-1 rounded-full hover:bg-rose-100 transition-all flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear & Edit
+                </button>
+              )}
+            </div>
+
+            {!isUpdate && !isForeignAutofilled && (
+              <CompanySearch 
+                category="FOREIGN" 
+                onSelect={(factory) => {
+                  setForeignFactoryId(factory.id ?? null);
+                  setIsForeignNew(Boolean(factory.isNew));
+
+                  setValue("facilityName", factory.name, { shouldDirty: true });
+                  setValue("facilityAddress", factory.address || "", { shouldDirty: true });
+                  setValue("facilityType", factory.facilityType || "Pharma", { shouldDirty: true });
+                  setValue("latitude", factory.latitude || "", { shouldDirty: true });
+                  setValue("longitude", factory.longitude || "", { shouldDirty: true });
+                  setAvailableLines(factory.product_lines || factory.productLines || []);
+                }}
+              />
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
+                  <Layers className="w-3 h-3" /> Site Scope
+                </label>
+                <select 
+                  {...register("siteScope")} 
+                  className="w-full bg-white p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm cursor-pointer border border-transparent focus:border-blue-200"
+                >
+                  <option value="New Manufacturing Site">New Site</option>
+                  <option value="Additional Manufacturing Site">Additional Site</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[9px] font-black uppercase text-blue-400 ml-1 flex items-center gap-1">
+                  <Building2 className="w-3 h-3" /> Facility Type
+                </label>
+                <select 
+                  {...register("facilityType")} 
+                  disabled={isForeignAutofilled}
+                  className={cn(
+                    "w-full p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm transition-all",
+                    isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white border border-transparent focus:border-blue-200"
+                  )}
+                >
+                  {FACILITY_TYPE_OPTIONS.map((ft) => (
+                    <option key={ft} value={ft}>{ft}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <input 
+              {...register("facilityName")} 
+              placeholder="Factory Name" 
+              readOnly={isForeignAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm font-semibold uppercase shadow-sm border-none transition-all",
+                isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+            <input 
+              {...register("facilityAddress")} 
+              placeholder="Address" 
+              readOnly={isForeignAutofilled}
+              className={cn(
+                "w-full p-4 rounded-xl text-sm shadow-sm border-none transition-all",
+                isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+              )} 
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-400" />
+                <input 
+                  {...register("latitude")} 
+                  placeholder="Latitude (Optional)" 
+                  readOnly={isForeignAutofilled}
+                  className={cn(
+                    "w-full p-3.5 pl-9 rounded-xl text-xs font-mono shadow-sm border-none transition-all",
+                    isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+                  )} 
+                />
+              </div>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-400" />
+                <input 
+                  {...register("longitude")} 
+                  placeholder="Longitude (Optional)" 
+                  readOnly={isForeignAutofilled}
+                  className={cn(
+                    "w-full p-3.5 pl-9 rounded-xl text-xs font-mono shadow-sm border-none transition-all",
+                    isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+                  )} 
+                />
+              </div>
+            </div>
+
+            <FileUpload 
+              label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} 
+              onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true, shouldValidate: true })} 
+            />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex justify-between items-center px-4">
+            <h3 className="text-[11px] font-black text-slate-400 uppercase italic">Technical Scope</h3>
+            <button type="button" onClick={() => appendLine({ lineName: "", riskCategory: "", products: [{ name: "" }] })} className="text-[10px] font-black text-blue-600 bg-blue-50 px-5 py-2 rounded-full hover:bg-blue-100 transition-all flex items-center gap-2">
+              <Plus className="w-3 h-3" /> ADD LINE
+            </button>
+          </div>
+
+          {lineFields.map((line, index) => {
+            const currentCat = RISK_CATEGORIES.find(r => r.name === watchProductLines[index]?.riskCategory);
+            const score = currentCat ? currentCat.comp * currentCat.crit : 0;
+            const level = getRiskLevel(score);
+
+            const selectedLineString = watchProductLines[index]?.lineName;
+            const matchedLineObj = availableLines?.find(
+              (al: any) => al.name?.toLowerCase() === selectedLineString?.toLowerCase() || al.lineName?.toLowerCase() === selectedLineString?.toLowerCase()
+            );
+            const contextualProducts = matchedLineObj?.products || [];
+
+            return (
+              <div key={line.id} className="p-8 bg-white border border-slate-100 rounded-[3rem] relative shadow-sm">
+                <button type="button" onClick={() => removeLine(index)} className="absolute top-8 right-8 p-2 text-slate-200 hover:text-rose-500 rounded-full transition-all">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Line Name</label>
+                      <Controller
+                        name={`productLines.${index}.lineName`}
+                        control={control}
+                        render={({ field }) => (
+                          <CreatableSelect 
+                            value={field.value}
+                            options={availableLines.map(al => ({ ...al, name: al.name || al.lineName }))}
+                            onChange={field.onChange}
+                            placeholder="Line Category..."
+                            onSelectOption={(opt: any) => {
+                              setValue(`productLines.${index}.products`, opt.products?.map((p: any) => ({ name: p.name })) || [{ name: "" }]);
+                            }}
+                          />
+                        )}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between ml-2">
+                        <label className="text-[9px] font-black text-blue-400 uppercase tracking-tighter">Intrinsic Risk Rating</label>
+                        {level && (
+                          <div className={cn("flex items-center gap-1 px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-widest shadow-sm", level.color)}>
+                            <ShieldAlert className="w-3 h-3" /> {level.label} ({score})
+                          </div>
+                        )}
+                      </div>
+                      <select 
+                        {...register(`productLines.${index}.riskCategory`)}
+                        className="w-full bg-blue-50/50 p-4 rounded-xl text-[11px] font-bold uppercase outline-none border-2 border-transparent focus:border-blue-200 cursor-pointer shadow-sm"
+                      >
+                        <option value="">Select Category...</option>
+                        {RISK_CATEGORIES.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <NestedProductArray nestIndex={index} control={control} options={contextualProducts} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="p-8 bg-slate-900 rounded-[2.5rem] shadow-xl">
+          <h3 className="text-[11px] font-black text-white uppercase tracking-widest mb-6 flex items-center gap-2"><Share2 className="text-blue-400 w-5 h-5" /> Target Units</h3>
+          <div className="flex flex-wrap gap-3">
+            {DIVISION_OPTIONS.map(div => (
+              <button key={div} type="button" onClick={() => toggleDivision(div)} className={cn("px-8 py-3 rounded-2xl text-[11px] font-black border-2 transition-all", selectedDivs.includes(div) ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300')}>
+                {div}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Controller
+          name="sendEmailNotification"
+          control={control}
+          render={({ field }) => (
+            <div className="p-6 bg-slate-50 border border-slate-200/60 rounded-[2rem] flex items-center justify-between gap-4 transition-all hover:border-blue-200">
+              <div className="space-y-1 pl-2">
+                <label className="text-[11px] font-black uppercase text-slate-800 tracking-tight block">
+                  Email Director Oversight
+                </label>
+                <span className="text-[10px] text-slate-400 font-medium block">
+                  Dispatch a live processing alert message directly to the VMAP Director.
+                </span>
+              </div>
+              
+              <div 
+                onClick={() => {
+                  const newValue = !field.value;
+                  setValue("sendEmailNotification", newValue, { shouldValidate: true, shouldDirty: true });
+                }}
+                className="relative inline-flex items-center cursor-pointer select-none"
+              >
+                <div className={cn(
+                  "w-14 h-8 rounded-full transition-all duration-300 relative",
+                  field.value ? "bg-blue-600" : "bg-slate-200"
+                )}>
+                  <div className={cn(
+                    "absolute top-[4px] left-[4px] bg-white border border-slate-300 rounded-full h-6 w-6 transition-all duration-300 shadow-sm",
+                    field.value ? "translate-x-6" : "translate-x-0"
+                  )} />
+                </div>
+              </div>
+            </div>
+>>>>>>> 8e74539566bb9eeb649709853ca66d02e6bfdf2d
           )}
         />
       </div>

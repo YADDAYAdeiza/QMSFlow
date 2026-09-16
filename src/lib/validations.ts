@@ -7,13 +7,12 @@ export const lodFormSchema = z.object({
   directorate: z.string().min(1, "Directorate selection is required"),
 
   type: z.enum(["Facility Verification", "Inspection Report Review (Foreign)"], {
-    errorMap: () => ({ message: "Please select a valid application category" }),
+    error: () => ({ message: "Please select a valid application category" }),
   }),
 
   // Local Company
   companyName: z.string().min(1, "Local company name is required"),
   companyAddress: z.string().min(1, "Local address is required"),
-
   notificationEmail: z.string()
     .trim()
     .toLowerCase()
@@ -26,7 +25,7 @@ export const lodFormSchema = z.object({
   
   // ADDED: Site Scope validation
   siteScope: z.enum(["New Manufacturing Site", "Additional Manufacturing Site"], {
-    errorMap: () => ({ message: "Please select a valid site scope configuration" }),
+    error: () => ({ message: "Please select a valid site scope configuration" }),
   }).default("New Manufacturing Site"),
 
   lodRemarks: z.string().min(5, "Please provide brief intake remarks (min. 5 chars)"),
@@ -48,8 +47,6 @@ export const lodFormSchema = z.object({
   // Email Notification Toggle
   sendEmailNotification: z.boolean().optional().default(false),
 }).superRefine((data, ctx) => {
-  // Logic: If 'Facility Verification', poaUrl MUST exist. 
-  // If 'Inspection Report Review (Foreign)', inspectionReportUrl MUST exist.
   if (data.type === "Facility Verification") {
     if (!data.poaUrl || data.poaUrl.length <= 5) {
       ctx.addIssue({
