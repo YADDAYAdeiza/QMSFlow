@@ -129,25 +129,44 @@ export default async function InspectorWorkspacePage() {
         companies,
         eq(applications.companyId, companies.id)
       )
+      // Replace the innerJoin and where clause in Inspector Workspace with foreign key binding:
       .innerJoin(
         scheduleBatches,
+        eq(inspectionSchedules.batchId, scheduleBatches.id) // Join directly on foreign key
+      )
+      .where(
         and(
-          gte(inspectionSchedules.scheduledDate, scheduleBatches.startDate),
-          lte(inspectionSchedules.scheduledDate, scheduleBatches.endDate)
+          eq(inspectionTeamAssignments.inspectorId, userRecord.id),
+          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED),
+          inArray(applications.currentPoint, [
+            inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
+            "Staff Technical Field Review",
+            "STAFF_TECHNICAL_REVIEW",
+            "Field Inspection In Progress",
+            "Draft Report",
+            "Inspection Drafted"
+          ])
         )
-      ).where(
-  and(
-    eq(inspectionTeamAssignments.inspectorId, userRecord.id),
-    inArray(applications.currentPoint, [
-      "Staff Technical Field Review",
-      "STAFF_TECHNICAL_REVIEW",
-      "Field Inspection In Progress",
-      "Draft Report",
-      "Inspection Drafted"
-    ]),
-    eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
-  )
-);
+      );
+//       .innerJoin(
+//         scheduleBatches,
+//         and(
+//           gte(inspectionSchedules.scheduledDate, scheduleBatches.startDate),
+//           lte(inspectionSchedules.scheduledDate, scheduleBatches.endDate)
+//         )
+//       ).where(
+//   and(
+//     eq(inspectionTeamAssignments.inspectorId, userRecord.id),
+//     inArray(applications.currentPoint, [
+//       "Staff Technical Field Review",
+//       "STAFF_TECHNICAL_REVIEW",
+//       "Field Inspection In Progress",
+//       "Draft Report",
+//       "Inspection Drafted"
+//     ]),
+//     eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
+//   )
+// );
 
     // 🔒 Deduplicate assignments by scheduleId to guard against overlapping batch date ranges
     const uniqueAssignmentsMap = new Map<string | number, typeof rawAssignments[number]>();

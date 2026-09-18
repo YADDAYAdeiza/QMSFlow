@@ -1,152 +1,244 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { inspectionSchedules, inspectionTeamAssignments, applications } from "@/db/schema";
-import { eq, and, gte, lte, notInArray, inArray, SQL } from "drizzle-orm";
-
-interface InspectorAssignmentUpdate {
-  inspectorId: string;
-  role: "TEAM_LEADER" | "CO_INSPECTOR" | "TRAINEE_INSPECTOR";
-}
-
-interface ScheduleRowUpdate {
-  scheduleId: string;
-  scheduledDate: string;
-  driver?: string;
-  inspectors: InspectorAssignmentUpdate[];
-}
-
-interface BatchUpdateRequest {
-  updates: ScheduleRowUpdate[];
-  activeScheduleIds?: string[];
-  batchId?: string;
-  startDate?: string;
-  endDate?: string;
-}
+import { 
+  inspectionSchedules, 
+  inspectionTeamAssignments, 
+  scheduleBatches,
+  applications 
+} from "@/db/schema";
+import { eq, inArray, notInArray, and, sql } from "drizzle-orm";
+import { createClient } from "@/utils/supabase/server";
+import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 
 export async function PUT(request: Request) {
   try {
-    const body: BatchUpdateRequest = await request.json();
-    const { updates, activeScheduleIds, batchId, startDate, endDate } = body;
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!Array.isArray(updates)) {
-      return NextResponse.json(
-        { success: false, error: "Invalid payload format: updates must be an array." },
-        { status: 400 }
-      );
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
+    const body = await request.json();
+    const { 
+      batchId, 
+      updates, 
+      activeScheduleIds = [], 
+      startDate, 
+      endDate 
+    } = body as {
+      batchId?: string;
+      updates: Array<{
+        scheduleId?: string | null;
+        applicationId: number;
+        scheduledDate: string;
+        driver?: string;
+        inspectors: Array<{
+          inspectorId: string;
+          role: "TEAM_LEADER" | "CO_INSPECTOR" | "TRAINEE_INSPECTOR";
+        }>;
+      }>;
+      activeScheduleIds?: string[];
+      startDate: string;
+      endDate: string;
+    };
+
+    let targetBatchId = batchId;
+    const draftStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
+
+    // 1. Resolve or Create Batch Shell if not provided
+    if (!targetBatchId) {
+      const [existingBatch] = await db
+        .select({ id: scheduleBatches.id })
+        .from(scheduleBatches)
+        .where(
+          and(
+            eq(scheduleBatches.startDate, startDate),
+            eq(scheduleBatches.endDate, endDate)
+          )
+        )
+        .limit(1);
+
+      if (existingBatch) {
+        targetBatchId = existingBatch.id;
+      } else {
+        const [newBatch] = await db
+          .insert(scheduleBatches)
+          .values({
+            batchReference: `SCHEDULE-${startDate}-${endDate}`,
+            title: `VMAP Inspection Schedule (${startDate} to ${endDate})`,
+            startDate,
+            endDate,
+            status: draftStep.statusLabel,
+            currentPoint: draftStep.currentPoint,
+            history: [],
+          })
+          .returning({ id: scheduleBatches.id });
+
+        targetBatchId = newBatch.id;
+      }
+    }
+
+    // 2. Perform Database Operations in Transaction
     await db.transaction(async (tx) => {
-      // 1. Handle Deletions / Removals from Batch
-      if (Array.isArray(activeScheduleIds) && (batchId || (startDate && endDate))) {
-        let removedSchedules: { id: string; applicationId: number | null }[] = [];
+      // -------------------------------------------------------------
+      // Step A: Upsert Schedules & Bind Inspectors
+      // -------------------------------------------------------------
+      const activeScheduleDbIds: string[] = [];
 
-        // Construct conditions to scope deletions strictly
-        const scopeConditions: SQL[] = [];
+      for (const item of updates) {
+        let currentScheduleId = item.scheduleId;
 
-        if (batchId) {
-          scopeConditions.push(eq(inspectionSchedules.batchId, batchId));
-        } else if (startDate && endDate) {
-          scopeConditions.push(
-            gte(inspectionSchedules.scheduledDate, startDate),
-            lte(inspectionSchedules.scheduledDate, endDate)
-          );
-        }
-
-        if (activeScheduleIds.length > 0) {
-          // Find schedules in scope NOT present in activeScheduleIds
-          removedSchedules = await tx
-            .select({ 
-              id: inspectionSchedules.id,
-              applicationId: inspectionSchedules.applicationId 
+        if (currentScheduleId) {
+          // UPDATE existing schedule record
+          await tx
+            .update(inspectionSchedules)
+            .set({
+              scheduledDate: item.scheduledDate,
+              batchId: targetBatchId,
+              ...(item.driver !== undefined && {
+                details: sql`jsonb_set(
+                  COALESCE(${inspectionSchedules.details}, '{}'::jsonb), 
+                  '{assignedDriver}', 
+                  ${JSON.stringify(item.driver)}::jsonb
+                )`,
+              }),
             })
-            .from(inspectionSchedules)
-            .where(
-              and(
-                ...scopeConditions,
-                notInArray(inspectionSchedules.id, activeScheduleIds)
-              )
-            );
+            .where(eq(inspectionSchedules.id, currentScheduleId));
         } else {
-          // If activeScheduleIds is empty, all items in this batch scope were removed
-          removedSchedules = await tx
-            .select({ 
-              id: inspectionSchedules.id,
-              applicationId: inspectionSchedules.applicationId 
+          // INSERT new schedule record
+          const [insertedSchedule] = await tx
+            .insert(inspectionSchedules)
+            .values({
+              applicationId: item.applicationId,
+              batchId: targetBatchId,
+              scheduledDate: item.scheduledDate,
+              status: "SCHEDULED",
+              ...(item.driver !== undefined && {
+                details: { assignedDriver: item.driver },
+              }),
             })
-            .from(inspectionSchedules)
-            .where(and(...scopeConditions));
+            .returning({ id: inspectionSchedules.id });
+
+          currentScheduleId = insertedSchedule.id;
         }
 
-        const removedScheduleIds = removedSchedules.map((s) => s.id);
-        const removedApplicationIds = removedSchedules
+        activeScheduleDbIds.push(currentScheduleId);
+
+        // Re-bind team assignments for the schedule UUID
+        await tx
+          .delete(inspectionTeamAssignments)
+          .where(eq(inspectionTeamAssignments.scheduleId, currentScheduleId));
+
+        if (item.inspectors.length > 0) {
+          const assignmentValues = item.inspectors.map((ins) => ({
+            scheduleId: currentScheduleId,
+            inspectorId: ins.inspectorId,
+            role: ins.role,
+          }));
+
+          await tx.insert(inspectionTeamAssignments).values(assignmentValues);
+        }
+      }
+
+      // -------------------------------------------------------------
+      // Step B: Handle Unlinked / Removed Schedules
+      // -------------------------------------------------------------
+      const validActiveScheduleIds = [
+        ...activeScheduleIds.filter((id): id is string => Boolean(id)),
+        ...activeScheduleDbIds,
+      ];
+
+      if (targetBatchId && validActiveScheduleIds.length > 0) {
+        // Query unlinked schedules belonging to this batch that are no longer active
+        const removedSchedules = await tx
+          .select({ 
+            id: inspectionSchedules.id,
+            applicationId: inspectionSchedules.applicationId 
+          })
+          .from(inspectionSchedules)
+          .where(
+            and(
+              eq(inspectionSchedules.batchId, targetBatchId),
+              notInArray(inspectionSchedules.id, validActiveScheduleIds)
+            )
+          );
+
+        const unlinkedAppIds = removedSchedules
           .map((s) => s.applicationId)
           .filter((id): id is number => id !== null);
 
-        if (removedScheduleIds.length > 0) {
-          // A. Wipe child team assignments first to respect FK constraints
+        if (removedSchedules.length > 0) {
+          // Unlink schedule rows from batch
           await tx
-            .delete(inspectionTeamAssignments)
-            .where(inArray(inspectionTeamAssignments.scheduleId, removedScheduleIds));
+            .update(inspectionSchedules)
+            .set({ batchId: null })
+            .where(
+              and(
+                eq(inspectionSchedules.batchId, targetBatchId),
+                notInArray(inspectionSchedules.id, validActiveScheduleIds)
+              )
+            );
+        }
 
-          // B. Delete target schedule records
+        // Revert status of unlinked applications back to unscheduled draft
+        if (unlinkedAppIds.length > 0) {
           await tx
-            .delete(inspectionSchedules)
-            .where(inArray(inspectionSchedules.id, removedScheduleIds));
-
-          // C. Reset parent applications back to 'Divisional Deputy Director Technical Assignment' / 'INSPECTION_PENDING'
-          if (removedApplicationIds.length > 0) {
-            await tx
-              .update(applications)
-              .set({
-                status: "INSPECTION_PENDING",
-                currentPoint: "Divisional Deputy Director Technical Assignment",
-                updatedAt: new Date(),
-              })
-              .where(inArray(applications.id, removedApplicationIds));
-          }
+            .update(applications)
+            .set({
+              currentPoint: draftStep.currentPoint,
+              status: "PENDING_SCHEDULE",
+              details: sql`jsonb_set(
+                COALESCE(${applications.details}, '{}'::jsonb), 
+                '{inspectionWorkflowMeta,currentStepKey}', 
+                '"PENDING_SCHEDULE"'::jsonb
+              )`,
+              updatedAt: new Date(),
+            })
+            .where(inArray(applications.id, unlinkedAppIds));
         }
       }
 
-      // 2. Perform Updates for Active / Retained Schedule Rows
-      for (const row of updates) {
-        // Update primary schedule row properties (date, driver, and bind batchId)
-        await tx
-          .update(inspectionSchedules)
-          .set({
-            scheduledDate: row.scheduledDate,
-            ...(row.driver !== undefined && { driver: row.driver }),
-            ...(batchId && { batchId }), // Explicitly update batchId
-            updatedAt: new Date(),
-          })
-          .where(eq(inspectionSchedules.id, row.scheduleId));
+      // -------------------------------------------------------------
+      // Step C: Update Active Applications to Scheduled Workflow State
+      // -------------------------------------------------------------
+      if (activeScheduleDbIds.length > 0) {
+        const activeSchedules = await tx
+          .select({ applicationId: inspectionSchedules.applicationId })
+          .from(inspectionSchedules)
+          .where(inArray(inspectionSchedules.id, activeScheduleDbIds));
 
-        // Wipe existing team assignments for this row
-        await tx
-          .delete(inspectionTeamAssignments)
-          .where(eq(inspectionTeamAssignments.scheduleId, row.scheduleId));
+        const activeAppIds = activeSchedules
+          .map((s) => s.applicationId)
+          .filter((id): id is number => id !== null);
 
-        // Re-insert updated team assignments
-        if (row.inspectors && row.inspectors.length > 0) {
-          const newAssignments = row.inspectors.map((ins) => ({
-            scheduleId: row.scheduleId,
-            inspectorId: ins.inspectorId,
-            role: ins.role,
-            createdAt: new Date(),
-          }));
-
-          await tx.insert(inspectionTeamAssignments).values(newAssignments);
+        if (activeAppIds.length > 0) {
+          await tx
+            .update(applications)
+            .set({
+              currentPoint: draftStep.currentPoint,
+              status: draftStep.statusLabel,
+              details: sql`jsonb_set(
+                COALESCE(${applications.details}, '{}'::jsonb), 
+                '{inspectionWorkflowMeta,currentStepKey}', 
+                ${JSON.stringify(draftStep.key)}::jsonb
+              )`,
+              updatedAt: new Date(),
+            })
+            .where(inArray(applications.id, activeAppIds));
         }
       }
     });
 
-    return NextResponse.json({
-      success: true,
-      message: "Batch schedule updated, synchronized, and applications reset successfully.",
+    return NextResponse.json({ 
+      success: true, 
+      batchId: targetBatchId,
+      message: "Batch schedule and application statuses updated successfully." 
     });
   } catch (error: any) {
-    console.error("Batch Schedule Update Error:", error);
+    console.error("Error in batch-update route:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Failed to update batch schedule." },
+      { success: false, error: error.message || "Internal Server Error" },
       { status: 500 }
     );
   }

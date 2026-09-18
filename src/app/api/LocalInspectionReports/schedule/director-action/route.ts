@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { scheduleBatches, inspectionSchedules, applications } from "@/db/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { eq, inArray, notInArray, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
@@ -36,34 +36,57 @@ export async function POST(request: Request) {
 
     const currentHistory = Array.isArray(batch.history) ? batch.history : [];
 
+    const getBatchApplicationIds = async (tx: any, targetBatchId: string) => {
+      const scheduledItems = await tx
+        .select({ applicationId: inspectionSchedules.applicationId })
+        .from(inspectionSchedules)
+        .where(eq(inspectionSchedules.batchId, targetBatchId));
+
+      return scheduledItems
+        .map((item) => item.applicationId)
+        .filter((id): id is number => id !== null);
+    };
+
     // --- ACTION HANDLER 1: Endorsements & Resubmissions ---
     if (action === "RECOMMEND" || action === "RESUBMIT" || action === "RECOMMEND_RESUBMIT") {
       const auditAction =
         action === "RESUBMIT" ? "RESUBMITTED_AFTER_REWORK" : "RECOMMENDED_FOR_APPROVAL";
 
+      const targetStep = inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW;
+
       const newHistoryEntry = {
         action: auditAction,
-        actorRole: userRole || "Divisional Deputy Director",
+        actorRole: userRole || targetStep.role,
         actorId: userId || "SYSTEM",
         comments: comments || "No comments provided.",
         timestamp: new Date().toISOString(),
       };
 
       await db.transaction(async (tx) => {
-        // 1. Update batch status and history
+        // 1. Update batch status and history using config values
         await tx
           .update(scheduleBatches)
           .set({
             status: inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL,
-            currentPoint: inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW.currentPoint,
+            currentPoint: targetStep.currentPoint,
             endorsedBy: validUserId,
             history: [...currentHistory, newHistoryEntry],
             updatedAt: new Date(),
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. Scoped Batch Binding
+        // 2. Scoped Batch Binding & Cleanup
         if (Array.isArray(body.activeScheduleIds) && body.activeScheduleIds.length > 0) {
+          await tx
+            .update(inspectionSchedules)
+            .set({ batchId: null })
+            .where(
+              and(
+                eq(inspectionSchedules.batchId, batch.id),
+                notInArray(inspectionSchedules.id, body.activeScheduleIds)
+              )
+            );
+
           await tx
             .update(inspectionSchedules)
             .set({ batchId: batch.id })
@@ -72,7 +95,32 @@ export async function POST(request: Request) {
           await tx
             .update(inspectionSchedules)
             .set({ batchId: batch.id })
-            .where(eq(inspectionSchedules.batchId, batch.id));
+            .where(
+              and(
+                gte(inspectionSchedules.scheduledDate, batch.startDate),
+                lte(inspectionSchedules.scheduledDate, batch.endDate),
+                isNull(inspectionSchedules.batchId)
+              )
+            );
+        }
+
+        // 3. Update Applications Table dynamically via workflow config
+        const applicationIds = await getBatchApplicationIds(tx, batch.id);
+
+        if (applicationIds.length > 0) {
+          await tx
+            .update(applications)
+            .set({
+              currentPoint: targetStep.title,
+              status: targetStep.statusLabel,
+              details: sql`jsonb_set(
+                COALESCE(${applications.details}, '{}'::jsonb), 
+                '{inspectionWorkflowMeta,currentStepKey}', 
+                ${JSON.stringify(targetStep.key)}::jsonb
+              )`,
+              updatedAt: new Date(),
+            })
+            .where(inArray(applications.id, applicationIds));
         }
       });
 
@@ -87,8 +135,11 @@ export async function POST(request: Request) {
 
     // --- ACTION HANDLER 2: Final Director Approval ---
     if (action === "APPROVE") {
+      const targetStep = inspectionScheduleBatchWorkflow.steps.FINAL_APPROVED;
+      const nextAppStep = inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW;
+
       const newHistoryEntry = {
-        action: "APPROVED",
+        action: inspectionScheduleBatchWorkflow.statuses.APPROVED,
         actorRole: userRole || "Director",
         actorId: userId || "SYSTEM",
         comments: comments || "Batch approved.",
@@ -101,47 +152,27 @@ export async function POST(request: Request) {
           .update(scheduleBatches)
           .set({
             status: inspectionScheduleBatchWorkflow.statuses.APPROVED,
-            currentPoint: inspectionScheduleBatchWorkflow.steps.FINAL_APPROVED.currentPoint,
+            currentPoint: targetStep.currentPoint,
             approvedBy: validUserId,
             history: [...currentHistory, newHistoryEntry],
             updatedAt: new Date(),
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. Fetch ONLY scheduled items explicitly tied to this batch
-        const scheduledItems = await tx
-          .select({
-            scheduleId: inspectionSchedules.id,
-            applicationId: inspectionSchedules.applicationId,
-          })
-          .from(inspectionSchedules)
-          .innerJoin(applications, eq(inspectionSchedules.applicationId, applications.id))
-          .where(
-            and(
-              eq(inspectionSchedules.batchId, batchId),
-              inArray(applications.currentPoint, [
-                "Divisional Deputy Director Technical Assignment",
-                "Divisional Deputy Director IRSD Routing",
-                "PENDING_BATCH_RECOMMENDATION",
-              ])
-            )
-          );
+        // 2. Fetch linked application IDs
+        const applicationIds = await getBatchApplicationIds(tx, batchId);
 
-        const applicationIds = scheduledItems
-          .map((item) => item.applicationId)
-          .filter((id): id is number => id !== null);
-
-        // 3. Advance ONLY the validated applications to Staff Technical Review
+        // 3. Advance linked applications to Staff Technical Review using inspectionReportWorkflow config
         if (applicationIds.length > 0) {
           await tx
             .update(applications)
             .set({
-              currentPoint: inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
+              currentPoint: nextAppStep.title,
               status: "INSPECTION_SCHEDULED",
               details: sql`jsonb_set(
                 COALESCE(${applications.details}, '{}'::jsonb), 
                 '{inspectionWorkflowMeta,currentStepKey}', 
-                '"STAFF_TECHNICAL_REVIEW"'::jsonb
+                ${JSON.stringify(nextAppStep.key)}::jsonb
               )`,
               updatedAt: new Date(),
             })
@@ -157,23 +188,47 @@ export async function POST(request: Request) {
 
     // --- ACTION HANDLER 3: Director Return for Rework ---
     if (action === "REWORK") {
+      const targetStep = inspectionScheduleBatchWorkflow.steps.REWORK_REQUIRED;
+
       const newHistoryEntry = {
-        action: "REWORK_REQUIRED",
+        action: targetStep.statusLabel,
         actorRole: userRole || "Director",
         actorId: userId || "SYSTEM",
         comments: comments || "Revision required.",
         timestamp: new Date().toISOString(),
       };
 
-      await db
-        .update(scheduleBatches)
-        .set({
-          status: inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED,
-          currentPoint: inspectionScheduleBatchWorkflow.steps.REWORK_REQUIRED.currentPoint,
-          history: [...currentHistory, newHistoryEntry],
-          updatedAt: new Date(),
-        })
-        .where(eq(scheduleBatches.id, batchId));
+      await db.transaction(async (tx) => {
+        // 1. Update batch status
+        await tx
+          .update(scheduleBatches)
+          .set({
+            status: inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED,
+            currentPoint: targetStep.currentPoint,
+            history: [...currentHistory, newHistoryEntry],
+            updatedAt: new Date(),
+          })
+          .where(eq(scheduleBatches.id, batchId));
+
+        // 2. Update Applications Table for REWORK using config values
+        const applicationIds = await getBatchApplicationIds(tx, batchId);
+
+        if (applicationIds.length > 0) {
+          await tx
+            .update(applications)
+            .set({
+              currentPoint: targetStep.title,
+              status: targetStep.statusLabel,
+              details: sql`jsonb_set(
+                COALESCE(${applications.details}, '{}'::jsonb), 
+                '{inspectionWorkflowMeta,currentStepKey}', 
+                ${JSON.stringify(targetStep.key)}::jsonb
+              )`,
+              updatedAt: new Date(),
+            })
+            .where(inArray(applications.id, applicationIds));
+        }
+      });
 
       return NextResponse.json({
         success: true,

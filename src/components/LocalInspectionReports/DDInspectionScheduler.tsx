@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation'; // 1. Import useRouter
+import { useRouter } from 'next/navigation';
 
 interface LockedWorkflow {
   application_id: number;
@@ -19,22 +19,26 @@ interface Inspector {
 
 interface DDInspectionSchedulerProps {
   applicationId: number; 
+  scheduleId?: string | null; // Passed down UUID from inspection_schedules table
   companyName: string;
   userRole: string;
+  batchId?: string;
   onSuccess?: () => void;
-  /** Optional custom redirect route - defaults to the DDD Inbox */
+  /** Optional custom redirect route - defaults to the Divisional Deputy Director Inbox */
   redirectTo?: string; 
 }
 
 export default function DDInspectionScheduler({ 
-  applicationId, 
+  applicationId,
+  scheduleId,
   companyName, 
   userRole, 
+  batchId,
   onSuccess,
-  redirectTo = "/LocalInspectionReports/ddd/inbox?tab=assigned" // 2. Default target tab
+  redirectTo = "/LocalInspectionReports/ddd/inbox?tab=assigned"
 }: DDInspectionSchedulerProps) {
   
-  const router = useRouter(); // 3. Instantiate router
+  const router = useRouter();
 
   // Strict Security Boundary Guard
   if (userRole !== 'Divisional Deputy Director') {
@@ -69,8 +73,12 @@ export default function DDInspectionScheduler({
         
         const data = await res.json();
         setInspectors(data.inspectors || []);
-      } catch (err: any) {
-        setErrorMsg(err.message);
+      } catch (err: unknown) {
+        if (err instanceof Error) {
+          setErrorMsg(err.message);
+        } else {
+          setErrorMsg('An unexpected error occurred while fetching the staff pool.');
+        }
       } finally {
         setLoading(false);
       }
@@ -109,32 +117,48 @@ export default function DDInspectionScheduler({
     setSubmitting(true);
 
     try {
-      const response = await fetch('/api/LocalInspectionReports/inspectors/InspectionSchedules', {
-        method: 'POST',
+      // Structure team array to match the PUT route expectation
+      const inspectorPayload = [
+        { inspectorId: teamLeader, role: "TEAM_LEADER" as const },
+        ...coInspectors.map((id) => ({ inspectorId: id, role: "CO_INSPECTOR" as const })),
+        ...traineeInspectors.map((id) => ({ inspectorId: id, role: "TRAINEE_INSPECTOR" as const })),
+      ];
+
+      // Call the PUT batch-update endpoint passing the proper schedule UUID
+      const response = await fetch('/api/LocalInspectionReports/schedule/batch-update', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          applicationId,
-          scheduledDate: inspectionDate,
-          teamLeader,
-          coInspectors,
-          traineeInspectors
-        })
+          batchId: batchId || undefined,
+          startDate: inspectionDate,
+          endDate: inspectionDate,
+          updates: [
+            {
+              scheduleId: scheduleId || null, // Send null instead of undefined
+              applicationId: applicationId,       // Send integer application ID explicitly
+              scheduledDate: inspectionDate,
+              inspectors: inspectorPayload,
+            },
+          ],
+          activeScheduleIds: scheduleId ? [scheduleId] : [], // Valid UUID array
+        }),
       });
 
       const result = await response.json();
-      if (!result.success) throw new Error(result.error || 'Failed to register schedule.');
+      if (!result.success) throw new Error(result.error || 'Failed to update batch schedule.');
       
-      alert("Inspection successfully scheduled and mandated.");
-      
+      alert("Inspection successfully bound to batch schedule.");
       if (onSuccess) onSuccess();
 
-      // 4. Force a router refresh and redirect straight back to the Inbox Dashboard!
       router.refresh();
       router.push(redirectTo);
-
-    } catch (err: any) {
-      setErrorMsg(err.message);
-      setSubmitting(false); // Only unset submitting on error so UI stays disabled during page redirect
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg('An unexpected error occurred during submission.');
+      }
+      setSubmitting(false);
     }
   };
 
@@ -146,7 +170,7 @@ export default function DDInspectionScheduler({
       <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm p-6">
         <div className="border-b border-slate-100 pb-4 mb-6">
           <h2 className="text-lg font-bold text-slate-900">Schedule Field Inspection</h2>
-          <p className="text-xs text-slate-500">Divisional Deputy Director IRSD Panel — Facility: <strong className="text-slate-700">{companyName}</strong></p>
+          <p className="text-xs text-slate-500">Divisional Deputy Director Panel — Facility: <strong className="text-slate-700">{companyName}</strong></p>
         </div>
 
         {errorMsg && (
@@ -191,7 +215,7 @@ export default function DDInspectionScheduler({
           {/* Co-Inspectors Multi-Selection */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Co-Inspectors Matrix</label>
-            <p className="text-[11px] text-slate-400 mb-2">Only showing personnel cleared past the DDD_IRSD_REVIEW milestone.</p>
+            <p className="text-[11px] text-slate-400 mb-2">Only showing personnel cleared past the Divisional Deputy Director Review milestone.</p>
             <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-md p-2 space-y-1 bg-slate-50">
               {availableInspectors.filter(ins => ins.id !== teamLeader && !traineeInspectors.includes(ins.id)).map(ins => (
                 <label key={ins.id} className="flex items-center text-sm space-x-2 p-1 hover:bg-white rounded cursor-pointer justify-between">
@@ -295,7 +319,7 @@ export default function DDInspectionScheduler({
               {!focusedInspector.is_available && focusedInspector.locked_workflows && focusedInspector.locked_workflows.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-[10px] text-red-600 font-medium">
-                    Locked through final DDD_IRSD_REVIEW endorsement:
+                    Locked through final Divisional Deputy Director endorsement:
                   </p>
                   <div className="space-y-1.5 max-h-36 overflow-y-auto">
                     {focusedInspector.locked_workflows.map((wf, idx) => (
@@ -323,7 +347,7 @@ export default function DDInspectionScheduler({
         </div>
 
         <div className="mt-4 pt-3 border-t border-slate-200 text-[10px] text-slate-400 font-medium bg-slate-100/50 -mx-4 -mb-4 p-4 rounded-b-lg">
-          QMS Guardrail Enforcement Point: DDD_IRSD_REVIEW
+          QMS Guardrail Enforcement Point: Divisional Deputy Director Review
         </div>
       </div>
     </div>

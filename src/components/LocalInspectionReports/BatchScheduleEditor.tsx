@@ -1,30 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import React, { useTransition } from "react";
 import { Edit3, Eye, Save, AlertCircle, Trash2 } from "lucide-react";
 import RecommendApprovalModal from "@/app/LocalInspectionReports/ddd/schedule/print/RecommendApprovalModal";
 import PrintTrigger from "@/app/LocalInspectionReports/ddd/schedule/print/PrintTrigger";
+import { useBatchScheduleManager, EditableScheduleItem, InspectorPoolItem } from "@/hooks/LocalInspectionReports/useBatchScheduleManager";
 
-export interface InspectorPoolItem {
-  id: string;
-  full_name: string;
-  division?: string;
-  is_available: boolean;
-}
-
-export interface EditableScheduleItem {
-  scheduleId: string;
-  sn: number;
-  companyName: string;
-  companyAddress: string;
-  inspectionType: string;
-  scheduledDate: string; // YYYY-MM-DD format for date input
-  driver?: string;
-  teamLeaderId: string;
-  coInspectorIds: string[];
-  traineeInspectorIds: string[];
-}
+// Export re-usable types for child components
+export type { InspectorPoolItem, EditableScheduleItem };
 
 interface BatchScheduleEditorProps {
   batchId?: string;
@@ -47,7 +30,6 @@ export default function BatchScheduleEditor({
   batchHistory,
   startDate,
   endDate,
-  scheduleIds,
   initialRows,
   inspectorPool,
   formattedHeaderDate,
@@ -55,143 +37,32 @@ export default function BatchScheduleEditor({
   userId,
   isReadOnly = false,
 }: BatchScheduleEditorProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [rows, setRows] = useState<EditableScheduleItem[]>(initialRows);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Keep internal row state synced with parent props
-  useEffect(() => {
-    setRows(initialRows);
-  }, [initialRows]);
+  // Consume custom state & handler hook
+  const {
+    rows,
+    isEditMode,
+    saveError,
+    setIsEditMode,
+    setSaveError,
+    handleRemoveRow,
+    handleDateChange,
+    handleDriverChange,
+    handleTeamLeaderChange,
+    handleCoInspectorToggle,
+    handleTraineeToggle,
+    handleSaveChanges,
+    getInspectorName,
+  } = useBatchScheduleManager({
+    initialRows,
+    inspectorPool,
+    batchId,
+    startDate,
+    endDate,
+  });
 
   const isRework = batchStatus === "REWORK_REQUIRED";
-
-  // --- Row Removal (Local Deletion) ---
-  const handleRemoveRow = (scheduleId: string) => {
-    if (confirm("Are you sure you want to remove this inspection entry from the batch schedule?")) {
-      setRows((prev) => prev.filter((r) => r.scheduleId !== scheduleId));
-    }
-  };
-
-  // --- Inline Field Handlers ---
-  const handleDateChange = (scheduleId: string, date: string) => {
-    setRows((prev) =>
-      prev.map((r) => (r.scheduleId === scheduleId ? { ...r, scheduledDate: date } : r))
-    );
-  };
-
-  const handleDriverChange = (scheduleId: string, driver: string) => {
-    setRows((prev) =>
-      prev.map((r) => (r.scheduleId === scheduleId ? { ...r, driver } : r))
-    );
-  };
-
-  const handleTeamLeaderChange = (scheduleId: string, leaderId: string) => {
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.scheduleId !== scheduleId) return r;
-        return {
-          ...r,
-          teamLeaderId: leaderId,
-          coInspectorIds: r.coInspectorIds.filter((id) => id !== leaderId),
-          traineeInspectorIds: r.traineeInspectorIds.filter((id) => id !== leaderId),
-        };
-      })
-    );
-  };
-
-  const handleCoInspectorToggle = (scheduleId: string, inspectorId: string) => {
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.scheduleId !== scheduleId) return r;
-        const exists = r.coInspectorIds.includes(inspectorId);
-        const updated = exists
-          ? r.coInspectorIds.filter((id) => id !== inspectorId)
-          : [...r.coInspectorIds, inspectorId];
-        return { ...r, coInspectorIds: updated };
-      })
-    );
-  };
-
-  const handleTraineeToggle = (scheduleId: string, inspectorId: string) => {
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.scheduleId !== scheduleId) return r;
-        const exists = r.traineeInspectorIds.includes(inspectorId);
-        if (!exists && r.traineeInspectorIds.length >= 2) {
-          alert("QMS Guardrail: Maximum of 2 trainees allowed per inspection team.");
-          return r;
-        }
-        const updated = exists
-          ? r.traineeInspectorIds.filter((id) => id !== inspectorId)
-          : [...r.traineeInspectorIds, inspectorId];
-        return { ...r, traineeInspectorIds: updated };
-      })
-    );
-  };
-
-  // --- Save Batch Updates & Send Remaining Active Schedule IDs ---
-  const handleSaveChanges = async (): Promise<boolean> => {
-    setSaveError(null);
-
-    const payloadUpdates = rows.map((r) => {
-      const inspectors: Array<{
-        inspectorId: string;
-        role: "TEAM_LEADER" | "CO_INSPECTOR" | "TRAINEE_INSPECTOR";
-      }> = [];
-
-      if (r.teamLeaderId) {
-        inspectors.push({ inspectorId: r.teamLeaderId, role: "TEAM_LEADER" });
-      }
-      r.coInspectorIds.forEach((id) => {
-        inspectors.push({ inspectorId: id, role: "CO_INSPECTOR" });
-      });
-      r.traineeInspectorIds.forEach((id) => {
-        inspectors.push({ inspectorId: id, role: "TRAINEE_INSPECTOR" });
-      });
-
-      return {
-        scheduleId: r.scheduleId,
-        scheduledDate: r.scheduledDate,
-        driver: r.driver,
-        inspectors,
-      };
-    });
-
-    const activeScheduleIds = rows.map((r) => r.scheduleId);
-
-    try {
-      const response = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          updates: payloadUpdates,
-          activeScheduleIds,
-          batchId,
-          startDate,
-          endDate,
-        }),
-      });
-
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || "Failed to save batch schedule.");
-      }
-
-      setIsEditMode(false);
-      router.refresh();
-      return true;
-    } catch (err: any) {
-      setSaveError(err.message || "Error saving batch schedule changes.");
-      return false;
-    }
-  };
-
-  const getInspectorName = (id: string) =>
-    inspectorPool.find((ins) => ins.id === id)?.full_name || "Unknown Staff";
 
   // Dynamic active schedule list derived directly from active rows
   const currentActiveScheduleIds = rows.map((r) => r.scheduleId);

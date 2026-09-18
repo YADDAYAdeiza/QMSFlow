@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/db";
-import { applications, companies } from "@/db/schema";
+import { applications, companies, inspectionSchedules } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server"; 
 import DDInspectionScheduler from "@/components/LocalInspectionReports/DDInspectionScheduler";
@@ -21,19 +21,19 @@ export default async function DDDApplicationReviewPage({ params }: PageProps) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  console.log('This is user: ', user);
-  
   // Replace with your actual user profile/metadata check mapping to QMS roles
   const userRole = user?.user_metadata?.role || "Divisional Deputy Director"; 
 
-  // 2. Fetch critical dossier context from database
+  // 2. Fetch critical dossier context AND existing schedule ID from database
   const applicationData = await db
     .select({
       id: applications.id,
       companyName: companies.name,
+      scheduleId: inspectionSchedules.id, // Fetch the existing UUID primary key
     })
     .from(applications)
     .innerJoin(companies, eq(applications.companyId, companies.id))
+    .leftJoin(inspectionSchedules, eq(applications.id, inspectionSchedules.applicationId))
     .where(eq(applications.id, appId))
     .then((res) => res[0]);
 
@@ -53,6 +53,7 @@ export default async function DDDApplicationReviewPage({ params }: PageProps) {
       {/* Inject the scheduling module directly into the canvas workflow */}
       <DDInspectionScheduler 
         applicationId={applicationData.id}
+        scheduleId={applicationData.scheduleId || null}
         companyName={applicationData.companyName}
         userRole={userRole}
       />
