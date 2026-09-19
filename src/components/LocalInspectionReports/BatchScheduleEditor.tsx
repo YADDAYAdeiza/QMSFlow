@@ -9,6 +9,13 @@ import { useBatchScheduleManager, EditableScheduleItem, InspectorPoolItem } from
 // Export re-usable types for child components
 export type { InspectorPoolItem, EditableScheduleItem };
 
+const INSPECTION_PURPOSES = [
+  "Pre-Production",
+  "Pre-Registration",
+  "Warehouse",
+  "Cold-chain",
+];
+
 interface BatchScheduleEditorProps {
   batchId?: string;
   batchStatus?: string;
@@ -48,6 +55,7 @@ export default function BatchScheduleEditor({
     setSaveError,
     handleRemoveRow,
     handleDateChange,
+    handleInspectionTypeChange, // Handled inside custom hook
     handleDriverChange,
     handleTeamLeaderChange,
     handleCoInspectorToggle,
@@ -235,9 +243,24 @@ export default function BatchScheduleEditor({
                     <div className="text-[11px] font-normal text-slate-700 mt-1">{row.companyAddress}</div>
                   </td>
                   
-                  {/* Inspection Purpose */}
+                  {/* Inspection Purpose (Editable Dropdown) */}
                   <td className="border-r border-black p-2 uppercase font-medium">
-                    {row.inspectionType}
+                    {!isReadOnly && isEditMode ? (
+                      <select
+                        value={row.inspectionType || ""}
+                        onChange={(e) => handleInspectionTypeChange(row.scheduleId, e.target.value)}
+                        className="w-full text-xs p-1 border border-slate-300 rounded bg-white font-medium uppercase"
+                      >
+                        <option value="">-- Select Purpose --</option>
+                        {INSPECTION_PURPOSES.map((purpose) => (
+                          <option key={purpose} value={purpose}>
+                            {purpose}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      row.inspectionType
+                    )}
                   </td>
 
                   {/* Inspectors Column */}
@@ -411,7 +434,7 @@ export default function BatchScheduleEditor({
             </div>
             <div className="border-b border-black w-52 mx-auto mb-1"></div>
             <p className="uppercase">MUDASHIRU, I. A.</p>
-            <p className="text-[11px] font-normal">Divisional Deputy Director</p>
+            <p className="text-[11px] font-normal">DDi/c</p>
           </div>
         </div>
 

@@ -17,7 +17,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
   const { tab } = (await searchParams) || {};
   const activeTab = tab || "rework"; // Default focus to Rework for quick action
 
-  // Fetch batches relevant to Divisional Deputy Director (IRSD) routing
+  // Fetch batches relevant to Divisional Deputy Director routing
   const rawBatches = await db
     .select({
       id: scheduleBatches.id,
@@ -35,7 +35,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
     .leftJoin(users, eq(scheduleBatches.endorsedBy, users.id))
     .where(
       or(
-        // Rework Required sitting on IRSD Desk
+        // Rework Required sitting on DDD Desk
         and(
           eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED),
           eq(
@@ -70,7 +70,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
       <header className="border-b pb-5 border-slate-200 flex justify-between items-end">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            IRSD Inspection Schedule Management
+            Divisional Deputy Director Inspection Schedule Management
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Track, revise, and resubmit batch inspection schedules for Directorate endorsement.
@@ -200,14 +200,15 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
 
                         {batch.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED ? (
                           <Link
-                            href={`/LocalInspectionReports/ddd/schedule/print?startDate=${batch.startDate}&endDate=${batch.endDate}`}
+                            href={`/LocalInspectionReports/ddd/schedule/batch/${batch.id}`}
                             className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-md shadow-xs inline-flex items-center gap-1.5 transition-colors"
                           >
                             <Edit3 className="w-3.5 h-3.5" /> Modify & Resubmit
                           </Link>
                         ) : (
+                          /* Dedicated clean view route */
                           <Link
-                            href={`/LocalInspectionReports/ddd/schedule/print?startDate=${batch.startDate}&endDate=${batch.endDate}&readOnly=true`}
+                            href={`/LocalInspectionReports/ddd/schedule/batch/${batch.id}`}
                             target="_blank"
                             className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 inline-flex items-center gap-1"
                           >

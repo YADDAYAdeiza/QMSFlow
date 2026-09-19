@@ -3,112 +3,177 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+export interface InspectorPoolItem {
+  id: string;
+  full_name: string;
+  division?: string;
+}
+
+export interface EditableScheduleItem {
+  scheduleId: string;
+  applicationId: number;
+  companyName: string;
+  companyAddress: string;
+  inspectionType: string;
+  scheduledDate: string;
+  driver?: string;
+  teamLeaderId: string;
+  coInspectorIds: string[];
+  traineeInspectorIds: string[];
+}
+
+interface UseBatchScheduleManagerProps {
+  initialRows: EditableScheduleItem[];
+  inspectorPool: InspectorPoolItem[];
+  batchId?: string;
+  startDate: string;
+  endDate: string;
+}
+
 export function useBatchScheduleManager({
-  initialBatch,
-  initialSchedules,
-}: {
-  initialBatch: any;
-  initialSchedules: any[];
-}) {
+  initialRows,
+  inspectorPool,
+  batchId,
+  startDate,
+  endDate,
+}: UseBatchScheduleManagerProps) {
   const router = useRouter();
-  const [schedules, setSchedules] = useState(initialSchedules);
-  const [isEditing, setIsEditing] = useState(false);
+  const [rows, setRows] = useState<EditableScheduleItem[]>(initialRows || []);
+  const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  // 1. Row Removal Logic
+  const getInspectorName = (id: string): string => {
+    const found = inspectorPool.find((ins) => ins.id === id);
+    return found ? found.full_name : "Unknown Officer";
+  };
+
   const handleRemoveRow = (scheduleId: string) => {
-    setSchedules((prev) => prev.filter((item) => item.id !== scheduleId));
+    setRows((prev) => prev.filter((r) => r.scheduleId !== scheduleId));
   };
 
-  // 2. Cancel Edits & Reset State Logic
-  const handleCancelEdits = () => {
-    setSchedules(initialSchedules); // Restore original rows
-    setIsEditing(false);
+  const handleDateChange = (scheduleId: string, scheduledDate: string) => {
+    setRows((prev) =>
+      prev.map((r) => (r.scheduleId === scheduleId ? { ...r, scheduledDate } : r))
+    );
   };
 
-  // 3. Save Batch Edits (Calls PUT /api/LocalInspectionReports/schedule/batch-update)
-  const handleSaveBatchEdits = async () => {
+  const handleDriverChange = (scheduleId: string, driver: string) => {
+    setRows((prev) =>
+      prev.map((r) => (r.scheduleId === scheduleId ? { ...r, driver } : r))
+    );
+  };
+
+  const handleTeamLeaderChange = (scheduleId: string, teamLeaderId: string) => {
+    setRows((prev) =>
+      prev.map((r) => (r.scheduleId === scheduleId ? { ...r, teamLeaderId } : r))
+    );
+  };
+
+  const handleCoInspectorToggle = (scheduleId: string, inspectorId: string) => {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.scheduleId !== scheduleId) return r;
+        const exists = r.coInspectorIds.includes(inspectorId);
+        const updated = exists
+          ? r.coInspectorIds.filter((id) => id !== inspectorId)
+          : [...r.coInspectorIds, inspectorId];
+        return { ...r, coInspectorIds: updated };
+      })
+    );
+  };
+
+  const handleTraineeToggle = (scheduleId: string, inspectorId: string) => {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.scheduleId !== scheduleId) return r;
+        const exists = r.traineeInspectorIds.includes(inspectorId);
+        if (!exists && r.traineeInspectorIds.length >= 2) {
+          alert("Maximum of 2 Trainees allowed per inspection team.");
+          return r;
+        }
+        const updated = exists
+          ? r.traineeInspectorIds.filter((id) => id !== inspectorId)
+          : [...r.traineeInspectorIds, inspectorId];
+        return { ...r, traineeInspectorIds: updated };
+      })
+    );
+  };
+
+  const handleSaveChanges = async () => {
     setIsSaving(true);
+    setSaveError(null);
+
     try {
-      const activeScheduleIds = schedules.map((s) => s.id);
-      const updates = schedules.map((s) => ({
-        scheduleId: s.id,
-        scheduledDate: s.scheduledDate,
-        driver: s.assignedDriver,
-        inspectors: s.inspectors || [],
-      }));
+      const activeScheduleIds = rows
+        .map((r) => r.scheduleId)
+        .filter((id): id is string => Boolean(id));
+
+      const updates = rows.map((r) => {
+        const inspectors: Array<{
+          inspectorId: string;
+          role: "TEAM_LEADER" | "CO_INSPECTOR" | "TRAINEE_INSPECTOR";
+        }> = [];
+
+        if (r.teamLeaderId) {
+          inspectors.push({ inspectorId: r.teamLeaderId, role: "TEAM_LEADER" });
+        }
+        r.coInspectorIds.forEach((id) => {
+          inspectors.push({ inspectorId: id, role: "CO_INSPECTOR" });
+        });
+        r.traineeInspectorIds.forEach((id) => {
+          inspectors.push({ inspectorId: id, role: "TRAINEE_INSPECTOR" });
+        });
+
+        return {
+          scheduleId: r.scheduleId || null,
+          applicationId: r.applicationId,
+          scheduledDate: r.scheduledDate,
+          driver: r.driver || "",
+          inspectionType: r.inspectionType || "",
+          inspectors,
+        };
+      });
 
       const res = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          batchId: initialBatch?.id,
-          startDate: initialBatch?.startDate,
-          endDate: initialBatch?.endDate,
+          batchId,
+          startDate,
+          endDate,
           activeScheduleIds,
           updates,
         }),
       });
 
       const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      if (!data.success) throw new Error(data.error || "Failed to update schedules.");
 
-      setIsEditing(false);
+      setIsEditMode(false);
       router.refresh();
     } catch (err: any) {
       console.error("Save error:", err.message);
-      alert(`Failed to save changes: ${err.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // 4. Submit Recommendation (Auto-saves first if editing)
-  const handleRecommendApproval = async (comments: string) => {
-    setIsSaving(true);
-    try {
-      // Direct auto-save prior to endorsement submit
-      if (isEditing) {
-        await handleSaveBatchEdits();
-      }
-
-      const activeScheduleIds = schedules.map((s) => s.id);
-      const res = await fetch("/api/LocalInspectionReports/schedule/director-action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          batchId: initialBatch?.id,
-          action: initialBatch?.status === "REWORK_REQUIRED" ? "RESUBMIT" : "RECOMMEND",
-          comments,
-          activeScheduleIds,
-          userRole: "Divisional Deputy Director",
-        }),
-      });
-
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-
-      setIsModalOpen(false);
-      router.refresh();
-    } catch (err: any) {
-      console.error("Submission error:", err.message);
-      alert(`Failed to route batch: ${err.message}`);
+      setSaveError(err.message || "An unexpected error occurred.");
     } finally {
       setIsSaving(false);
     }
   };
 
   return {
-    schedules,
-    isEditing,
+    rows,
+    isEditMode,
     isSaving,
-    isModalOpen,
-    setIsEditing,
-    setIsModalOpen,
+    saveError,
+    setIsEditMode,
+    setSaveError,
     handleRemoveRow,
-    handleCancelEdits,
-    handleSaveBatchEdits,
-    handleRecommendApproval,
+    handleDateChange,
+    handleDriverChange,
+    handleTeamLeaderChange,
+    handleCoInspectorToggle,
+    handleTraineeToggle,
+    handleSaveChanges,
+    getInspectorName,
   };
 }

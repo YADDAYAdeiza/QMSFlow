@@ -35,11 +35,23 @@ export default async function DirectorScheduleInboxPage({
     .where(
       or(
         and(
-          eq(scheduleBatches.currentPoint, inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW.currentPoint),
-          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL)
+          eq(
+            scheduleBatches.currentPoint,
+            inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW.currentPoint
+          ),
+          eq(
+            scheduleBatches.status,
+            inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL
+          )
         ),
-        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED),
-        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED)
+        eq(
+          scheduleBatches.status,
+          inspectionScheduleBatchWorkflow.statuses.APPROVED
+        ),
+        eq(
+          scheduleBatches.status,
+          inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
+        )
       )
     )
     .orderBy(desc(scheduleBatches.createdAt));
@@ -65,7 +77,7 @@ export default async function DirectorScheduleInboxPage({
           Directorate Inspection Schedule Approvals
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Review, endorse, or return proposed inspection schedule batches.
+          Review, approve, or return proposed inspection schedule batches recommended by the Divisional Deputy Director.
         </p>
       </header>
 
@@ -127,16 +139,20 @@ export default async function DirectorScheduleInboxPage({
                     <td className="p-4 font-mono font-medium text-slate-900">
                       {batch.batchReference}
                     </td>
-                    <td className="p-4 font-semibold text-slate-800">{batch.title}</td>
+                    <td className="p-4 font-semibold text-slate-800">
+                      {batch.title}
+                    </td>
                     <td className="p-4 text-slate-600">
                       {batch.endorsedByName || "Divisional Deputy Director"}
                     </td>
                     <td className="p-4">
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                          batch.status === inspectionScheduleBatchWorkflow.statuses.APPROVED
+                          batch.status ===
+                          inspectionScheduleBatchWorkflow.statuses.APPROVED
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : batch.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
+                            : batch.status ===
+                              inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
                             ? "bg-amber-50 text-amber-700 border-amber-200"
                             : "bg-blue-50 text-blue-700 border-blue-200"
                         }`}
@@ -146,11 +162,11 @@ export default async function DirectorScheduleInboxPage({
                     </td>
                     <td className="p-4 text-right space-x-2 whitespace-nowrap">
                       <Link
-                        href={`/LocalInspectionReports/ddd/schedule/print?batchId=${batch.id}&readOnly=true`}
+                        href={`/LocalInspectionReports/Director/schedules/batch/${batch.id}`}
                         target="_blank"
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 inline-flex items-center gap-1"
                       >
-                        👁️ Preview Sheet
+                        👁️ View Inspection Schedules
                       </Link>
 
                       <BatchHistoryModal
@@ -160,7 +176,10 @@ export default async function DirectorScheduleInboxPage({
                       />
 
                       {activeTab === "pending" && (
-                        <DirectorBatchActionModal batchId={batch.id} title={batch.title} />
+                        <DirectorBatchActionModal
+                          batchId={batch.id}
+                          title={batch.title}
+                        />
                       )}
                     </td>
                   </tr>

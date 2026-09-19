@@ -42,29 +42,45 @@ export default function RecommendApprovalModal({
 
   const isDisabled = isPending || isSubmitting;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => 
+    {
     e.preventDefault();
-
     if (isDisabled) return;
 
-    if (!batchId) {
-      alert("Error: Batch ID is missing. Please select a valid schedule batch.");
-      return;
-    }
-
-    // Disable state before transition initiates
     setIsSubmitting(true);
-
-    // Validate UUID format before submitting
-    const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
 
     startTransition(async () => {
       try {
+        let activeBatchId = batchId;
+
+        // 1. If batchId is missing, resolve or auto-create the batch container
+        if (!activeBatchId) {
+          const batchRes = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              startDate,
+              endDate,
+              activeScheduleIds: scheduleIds,
+              updates: [], // Pass empty updates if no row edits occurred inside the modal
+            }),
+          });
+
+          const batchData = await batchRes.json();
+          if (!batchRes.ok || !batchData.success || !batchData.batchId) {
+            throw new Error(batchData.error || "Failed to initialize schedule batch.");
+          }
+          activeBatchId = batchData.batchId;
+        }
+
+        // 2. Submit recommendation with the guaranteed activeBatchId
+        const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+
         const response = await fetch("/api/LocalInspectionReports/schedule/director-action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            batchId,
+            batchId: activeBatchId,
             scheduleIds: scheduleIds || [],
             startDate,
             endDate,
@@ -76,7 +92,6 @@ export default function RecommendApprovalModal({
         });
 
         const result = await response.json();
-
         if (!response.ok || !result.success) {
           throw new Error(result.error || "Failed to submit recommendation.");
         }
@@ -96,7 +111,7 @@ export default function RecommendApprovalModal({
         setIsSubmitting(false);
       }
     });
-  };
+    };
 
   return (
     <>

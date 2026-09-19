@@ -22,7 +22,7 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const { 
       batchId, 
-      updates, 
+      updates = [], 
       activeScheduleIds = [], 
       startDate, 
       endDate 
@@ -46,51 +46,83 @@ export async function PUT(request: Request) {
     let targetBatchId = batchId;
     const draftStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
 
-    // 1. Resolve or Create Batch Shell if not provided
-    if (!targetBatchId) {
-      const [existingBatch] = await db
-        .select({ id: scheduleBatches.id })
-        .from(scheduleBatches)
-        .where(
-          and(
-            eq(scheduleBatches.startDate, startDate),
-            eq(scheduleBatches.endDate, endDate)
-          )
-        )
-        .limit(1);
+    // Determine working boundary dates from active update rows or fallback to body range
+    const allScheduledDates = updates.map((u) => u.scheduledDate).filter(Boolean);
+    const calculatedStartDate = allScheduledDates.length > 0 
+      ? allScheduledDates.reduce((min, p) => p < min ? p : min, allScheduledDates[0])
+      : startDate;
+    const calculatedEndDate = allScheduledDates.length > 0 
+      ? allScheduledDates.reduce((max, p) => p > max ? p : max, allScheduledDates[0])
+      : endDate;
 
-      if (existingBatch) {
-        targetBatchId = existingBatch.id;
-      } else {
-        const [newBatch] = await db
-          .insert(scheduleBatches)
-          .values({
-            batchReference: `SCHEDULE-${startDate}-${endDate}`,
-            title: `VMAP Inspection Schedule (${startDate} to ${endDate})`,
-            startDate,
-            endDate,
-            status: draftStep.statusLabel,
-            currentPoint: draftStep.currentPoint,
-            history: [],
-          })
-          .returning({ id: scheduleBatches.id });
+    // 1. Resolve or Create Batch Container if missing
+    // 1. Resolve or Create Batch Container if missing
+      if (!targetBatchId) {
+        // Check A: Are any of the active schedule IDs already linked to a batch?
+        if (activeScheduleIds.length > 0) {
+          const [linkedSchedule] = await db
+            .select({ batchId: inspectionSchedules.batchId })
+            .from(inspectionSchedules)
+            .where(
+              and(
+                inArray(inspectionSchedules.id, activeScheduleIds),
+                sql`${inspectionSchedules.batchId} IS NOT NULL`
+              )
+            )
+            .limit(1);
 
-        targetBatchId = newBatch.id;
+          if (linkedSchedule?.batchId) {
+            targetBatchId = linkedSchedule.batchId;
+          }
+        }
+
+        // Check B: Look for an existing batch by date range if not found by schedule link
+        if (!targetBatchId) {
+          const [existingBatch] = await db
+            .select({ id: scheduleBatches.id })
+            .from(scheduleBatches)
+            .where(
+              and(
+                eq(scheduleBatches.startDate, startDate),
+                eq(scheduleBatches.endDate, endDate)
+              )
+            )
+            .limit(1);
+
+          if (existingBatch) {
+            targetBatchId = existingBatch.id;
+          }
+        }
+
+        // Check C: Create new batch only if no existing container was resolved
+        if (!targetBatchId) {
+          const uniqueReference = `SCHEDULE-${calculatedStartDate}-${calculatedEndDate}-${Date.now().toString(36)}`;
+          const [newBatch] = await db
+            .insert(scheduleBatches)
+            .values({
+              batchReference: uniqueReference,
+              title: `VMAP Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
+              startDate: calculatedStartDate,
+              endDate: calculatedEndDate,
+              status: draftStep.statusLabel,
+              currentPoint: draftStep.currentPoint,
+              history: [],
+            })
+            .returning({ id: scheduleBatches.id });
+
+          targetBatchId = newBatch.id;
+        }
       }
-    }
-
-    // 2. Perform Database Operations in Transaction
+    // 2. Database Operations inside Transaction
     await db.transaction(async (tx) => {
-      // -------------------------------------------------------------
-      // Step A: Upsert Schedules & Bind Inspectors
-      // -------------------------------------------------------------
+      // Step A: Upsert Schedules & Bind Inspectors under targetBatchId
       const activeScheduleDbIds: string[] = [];
 
       for (const item of updates) {
         let currentScheduleId = item.scheduleId;
 
         if (currentScheduleId) {
-          // UPDATE existing schedule record
+          // UPDATE existing schedule row and associate with batchId
           await tx
             .update(inspectionSchedules)
             .set({
@@ -106,7 +138,7 @@ export async function PUT(request: Request) {
             })
             .where(eq(inspectionSchedules.id, currentScheduleId));
         } else {
-          // INSERT new schedule record
+          // INSERT new schedule row with inherited targetBatchId
           const [insertedSchedule] = await tx
             .insert(inspectionSchedules)
             .values({
@@ -125,7 +157,7 @@ export async function PUT(request: Request) {
 
         activeScheduleDbIds.push(currentScheduleId);
 
-        // Re-bind team assignments for the schedule UUID
+        // Sync inspector team assignments
         await tx
           .delete(inspectionTeamAssignments)
           .where(eq(inspectionTeamAssignments.scheduleId, currentScheduleId));
@@ -141,16 +173,16 @@ export async function PUT(request: Request) {
         }
       }
 
-      // -------------------------------------------------------------
-      // Step B: Handle Unlinked / Removed Schedules
-      // -------------------------------------------------------------
+      // Step B: Unlink Removed / Filtered Out Inspections
       const validActiveScheduleIds = [
         ...activeScheduleIds.filter((id): id is string => Boolean(id)),
         ...activeScheduleDbIds,
       ];
 
-      if (targetBatchId && validActiveScheduleIds.length > 0) {
-        // Query unlinked schedules belonging to this batch that are no longer active
+      if (targetBatchId) {
+        const hasActiveIds = validActiveScheduleIds.length > 0;
+
+        // Query removed schedules attached to this batch
         const removedSchedules = await tx
           .select({ 
             id: inspectionSchedules.id,
@@ -160,7 +192,9 @@ export async function PUT(request: Request) {
           .where(
             and(
               eq(inspectionSchedules.batchId, targetBatchId),
-              notInArray(inspectionSchedules.id, validActiveScheduleIds)
+              hasActiveIds 
+                ? notInArray(inspectionSchedules.id, validActiveScheduleIds)
+                : sql`1=1` // Select all existing items if no active IDs remain
             )
           );
 
@@ -169,19 +203,21 @@ export async function PUT(request: Request) {
           .filter((id): id is number => id !== null);
 
         if (removedSchedules.length > 0) {
-          // Unlink schedule rows from batch
+          // Unlink schedule rows from batch (set batchId to NULL)
           await tx
             .update(inspectionSchedules)
             .set({ batchId: null })
             .where(
               and(
                 eq(inspectionSchedules.batchId, targetBatchId),
-                notInArray(inspectionSchedules.id, validActiveScheduleIds)
+                hasActiveIds 
+                  ? notInArray(inspectionSchedules.id, validActiveScheduleIds)
+                  : sql`1=1`
               )
             );
         }
 
-        // Revert status of unlinked applications back to unscheduled draft
+        // Revert status of unlinked applications back to PENDING_SCHEDULE
         if (unlinkedAppIds.length > 0) {
           await tx
             .update(applications)
@@ -197,11 +233,23 @@ export async function PUT(request: Request) {
             })
             .where(inArray(applications.id, unlinkedAppIds));
         }
+
+        // Step C: Expand Batch Date Boundaries if Inspections Shifted
+        // Note: batchReference is omitted to preserve the initial tracking reference key
+        if (allScheduledDates.length > 0) {
+          await tx
+            .update(scheduleBatches)
+            .set({
+              startDate: calculatedStartDate,
+              endDate: calculatedEndDate,
+              title: `VMAP Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
+              updatedAt: new Date(),
+            })
+            .where(eq(scheduleBatches.id, targetBatchId));
+        }
       }
 
-      // -------------------------------------------------------------
-      // Step C: Update Active Applications to Scheduled Workflow State
-      // -------------------------------------------------------------
+      // Step D: Sync Application Statuses for Active Scheduled Items
       if (activeScheduleDbIds.length > 0) {
         const activeSchedules = await tx
           .select({ applicationId: inspectionSchedules.applicationId })
@@ -233,7 +281,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ 
       success: true, 
       batchId: targetBatchId,
-      message: "Batch schedule and application statuses updated successfully." 
+      message: "Batch schedule updated and unlinked inspections reset successfully." 
     });
   } catch (error: any) {
     console.error("Error in batch-update route:", error);

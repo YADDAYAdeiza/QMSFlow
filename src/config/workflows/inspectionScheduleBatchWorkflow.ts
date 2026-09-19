@@ -74,7 +74,7 @@ export const inspectionScheduleBatchWorkflow = {
       title: "Approved for Publication & Execution",
       division: "DIRECTORATE",
       role: "System",
-      currentPoint: "Applicant Notification Hub / Final Approved",
+      currentPoint: "Schedule Final Approved",
       statusLabel: "APPROVED",
       nextStepKey: null,
       prevStepKey: "STAFF_TECHNICAL_REVIEW",
