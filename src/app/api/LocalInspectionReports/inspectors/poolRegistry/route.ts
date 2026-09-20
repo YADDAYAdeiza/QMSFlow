@@ -21,20 +21,22 @@ export async function GET() {
     }
 
     // 2. Fetch assignments joined with application stage metadata
+    // Fetch ONLY assignments where the application is actively in STAFF_TECHNICAL_REVIEW
     const { data: activeAssignments, error: joinError } = await supabase
       .from('inspection_team_assignments')
       .select(`
         inspector_id,
-        inspection_schedules:schedule_id (
+        inspection_schedules!inner (
           id,
           application_id,
-          applications:application_id (
+          applications!inner (
             id,
             current_point,
             details
           )
         )
-      `);
+      `)
+        .eq('inspection_schedules.applications.current_point', inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title);
 
     if (joinError) throw joinError;
 
@@ -64,6 +66,8 @@ export async function GET() {
         }
       }
     });
+
+    console.log('trackingMap: ', trackingMap);
 
     const structuredWorkforceMatrix = staffList.map((user) => {
       const lockedWorkflows = trackingMap[user.id] || [];
