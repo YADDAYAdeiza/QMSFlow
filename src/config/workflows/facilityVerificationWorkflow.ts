@@ -55,7 +55,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
       },
       STAFF_TECHNICAL_REVIEW: {
         key: "STAFF_TECHNICAL_REVIEW",
-        title: "Staff Technical Field Review",
+        title: "Staff Technical Review",
         directorate: "VMAP",
         division: "VMD",
         role: "Technical Staff Reviewer",
@@ -105,7 +105,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
       },
       DIRECTOR_FINAL_SIGN_OFF: {
         key: "DIRECTOR_FINAL_SIGN_OFF",
-        title: "Director Final Approval & Sign-Off",
+        title: "Director Final Review",
         directorate: "VMAP",
         division: "DIRECTORATE",
         role: "Director",

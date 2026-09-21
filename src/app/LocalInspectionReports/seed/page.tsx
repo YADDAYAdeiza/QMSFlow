@@ -56,7 +56,7 @@ export default function ApplicationCreationPage() {
   const [inspectionType, setInspectionType] = useState<"Pre-Production" | "Pre-Registration" | "Renewal" | "GMP-Reassessment">("Pre-Registration");
   const [notificationEmail, setNotificationEmail] = useState("");
   const [targetDirectorate, setTargetDirectorate] = useState<DirectorateCategory>("VMD");
-  const [estimatedInspectionDays, setEstimatedInspectionDays] = useState<number>(3);
+  const [estimatedInspectionDays, setEstimatedInspectionDays] = useState<number>(2);
 
   // Geolocation
   const [latitude, setLatitude] = useState<string>("");

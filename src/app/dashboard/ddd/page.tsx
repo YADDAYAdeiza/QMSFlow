@@ -81,6 +81,7 @@ export default async function DDDInboxPage({
     techReviewStep?.title,
     irsdIntakeStep?.title,
     irsdReviewStep?.title,
+    "Technical DD Review",
   ].filter(Boolean) as string[];
 
   const incomingStatuses = [
@@ -88,6 +89,7 @@ export default async function DDDInboxPage({
     techReviewStep?.statusLabel,
     irsdIntakeStep?.statusLabel,
     irsdReviewStep?.statusLabel,
+    'PENDING_DIRECTOR',
     "REWORK_REQUIRED"
   ].filter(Boolean) as string[];
 
