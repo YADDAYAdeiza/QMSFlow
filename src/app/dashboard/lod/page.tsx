@@ -10,11 +10,13 @@ import LODMainWorkspace from "./LODMainWorkspace";
  * Fetches applications and strictly separates Pass 1 (Clearance) from Pass 2 (Certificate).
  */
 export default async function LODPage() {
-  // 1. Fetch dossiers that are either CLEARED or at the Archival point
+  // 1. Fetch dossiers that match any cleared/archived status or current routing points
   const completed = await db.query.applications.findMany({
     where: or(
       eq(applications.status, "CLEARED"),
-      eq(applications.currentPoint, "Registry Archival")
+      eq(applications.status, "APPROVED_AND_ARCHIVED"),
+      eq(applications.currentPoint, "Registry Archival"),
+      eq(applications.currentPoint, "Report Approved and Archived")
     ),
     with: {
       localApplicant: true,   
@@ -38,10 +40,12 @@ export default async function LODPage() {
     // --- PASS 2: GMP CERTIFICATE (Full Issuance) ---
     // Logic: 
     // 1. Check for the dedicated gmp_certificate_url key.
-    // 2. Only fallback to archived_path if status is 'CLEARED' AND it's not the same file as Pass 1.
+    // 2. Only fallback to archived_path if status is approved/cleared AND it's not the same file as Pass 1.
     let pass2Certificate = details.gmp_certificate_url || null;
 
-    if (!pass2Certificate && app.status === "CLEARED" && details.archived_path) {
+    const isApprovedOrCleared = app.status === "CLEARED" || app.status === "APPROVED_AND_ARCHIVED";
+
+    if (!pass2Certificate && isApprovedOrCleared && details.archived_path) {
       // Deduplication: Don't show Pass 2 if the file is just the Pass 1 clearance
       if (details.archived_path !== pass1Clearance) {
         pass2Certificate = details.archived_path;
