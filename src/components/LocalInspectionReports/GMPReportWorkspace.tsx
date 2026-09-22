@@ -105,7 +105,7 @@ export default function GMPReportWorkspace({
 }: WorkspaceProps) {
   const router = useRouter();
   const expectedUserRaw = activeUserName;
-
+console.log('facilityAddressState now is: ', facilityAddressState);
   // Core workflow states
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [activeUserRole, setActiveUserRole] = useState<string>(initialActiveUserRole);

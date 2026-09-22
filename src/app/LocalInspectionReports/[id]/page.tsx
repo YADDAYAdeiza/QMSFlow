@@ -220,6 +220,8 @@ export default async function LocalReportPage({ params }: PageProps) {
     application.companyAddress || 
     "Registered Facility Address";
 
+    console.log('facilityAddressState3: ', facilityAddressState);
+
   // 🏷️ Extract productLines and format as string array
   const rawProductLines = appDetails.productLines || [];
   const productLinesState: string[] = rawProductLines.map((line: any) => {

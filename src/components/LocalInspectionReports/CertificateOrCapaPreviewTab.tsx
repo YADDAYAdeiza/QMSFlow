@@ -1,4 +1,3 @@
-// src/components/LocalInspectionReports/CertificateOrCapaPreviewTab.tsx
 "use client";
 
 import React from "react";
@@ -30,14 +29,20 @@ export default function CertificateOrCapaPreviewTab({
     certificateData,
   } = extractInspectionData(applicationData, applicationId);
 
-  console.log('This is effectiveAddress ', effectiveAddress);
+  console.log('This is effectiveAddress2 ', effectiveAddress);
+  console.log('This is certificateData: ', certificateData);
+
+  // Map effectiveAddress into certificateData if facilityAddress is missing/empty
+  const updatedCertificateData = {
+    ...certificateData,
+    facilityAddress: certificateData?.facilityAddress || effectiveAddress || "N/A",
+    effectiveCompanyName: certificateData?.effectiveCompanyName || effectiveCompanyName,
+  };
 
   const isCapaPending = finalRecommendation === "PENDING" || finalRecommendation === "CAPA_PENDING";
 
   // Replace this href string once you locate the exact route in your project
   const capaPortalHref = `/LocalInspectionReports/applicant/applications/${applicationId}/capa`;
-
-console.log('This is certificateData: ', certificateData);
 
   if (isCapaPending) {
     return (
@@ -117,7 +122,7 @@ console.log('This is certificateData: ', certificateData);
   return (
     <div className="w-full h-[750px] rounded-lg border border-slate-200 bg-slate-100 overflow-hidden shadow-inner my-4">
       <PDFViewer width="100%" height="100%" className="border-none">
-        <GMPCertificateView data={certificateData} />
+        <GMPCertificateView data={updatedCertificateData} />
       </PDFViewer>
     </div>
   );

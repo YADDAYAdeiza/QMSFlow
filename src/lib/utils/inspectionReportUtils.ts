@@ -50,7 +50,7 @@ export function extractInspectionData(
     "Registered Establishment";
 
   const effectiveAddress = 
-    data?.facilityAddress || 
+    data?.facility_address || 
     checklistSnapshot?.facility_address || 
     checklistSnapshot?.facilityAddress || 
     checklistSnapshot?.inspected_site_address ||
