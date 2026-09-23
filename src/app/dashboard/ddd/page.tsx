@@ -82,7 +82,7 @@ export default async function DDDInboxPage({
     irsdIntakeStep?.title,
     irsdReviewStep?.title,
     "Technical DD Review",
-    "IRSD Staff Vetting Return"
+    // "IRSD Staff Vetting Return"
   ].filter(Boolean) as string[];
 
   const incomingStatuses = [
@@ -92,7 +92,7 @@ export default async function DDDInboxPage({
     irsdReviewStep?.statusLabel,
     'PENDING_DIRECTOR',
     "REWORK_REQUIRED",
-    "AWAITING_HUB_ENDORSEMENT"
+    // "AWAITING_HUB_ENDORSEMENT"
   ].filter(Boolean) as string[];
 
   // For the assigned monitoring view (staff active steps)
