@@ -35,7 +35,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
     .leftJoin(users, eq(scheduleBatches.endorsedBy, users.id))
     .where(
       or(
-        // Rework Required sitting on DDD Desk
+        // Rework Required sitting on Divisional Deputy Director Desk
         and(
           eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED),
           eq(
@@ -77,7 +77,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
           </p>
         </div>
         <Link
-          href="/LocalInspectionReports/ddd/schedule/print"
+          href="/LocalInspectionReports/ddd/inbox"
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs inline-flex items-center gap-1.5 transition-colors"
         >
           <Edit3 className="w-4 h-4" />

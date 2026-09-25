@@ -21,7 +21,6 @@ export default async function LocalInspectionReportsPage() {
             );
           } catch {
             // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing user sessions.
           }
         },
       },
@@ -38,17 +37,28 @@ export default async function LocalInspectionReportsPage() {
   if (authUser) {
     const { data } = await supabase
       .from("users")
-      .select("id, name, role, division")
+      .select("id, name, role, division, directorate")
       .eq("id", authUser.id)
       .single();
 
     userRecord = data;
   }
 
-  // Access control check for Schedules: Role MUST be "Divisional Deputy Director" AND division MUST be "IRSD"
-  const canAccessSchedules =
-    userRecord?.role === "Divisional Deputy Director" &&
-    userRecord?.division === "IRSD";
+  // Access control & dynamic routing checks
+  const isDDD = userRecord?.role === "Divisional Deputy Director";
+  const isDirector = userRecord?.role === "Director";
+
+  let schedulesHref: string | null = null;
+  if (isDDD) {
+    schedulesHref = "/LocalInspectionReports/ddd/schedule/inbox";
+  } else if (isDirector) {
+    schedulesHref = "/LocalInspectionReports/Director/schedules";
+  }
+
+  const isLOD =
+    userRecord?.division === "LOD" ||
+    userRecord?.role === "LOD" ||
+    userRecord?.directorate === "LOD";
 
   return (
     <div className="min-h-screen bg-slate-50/50 py-10 px-4 sm:px-6 lg:px-8">
@@ -146,12 +156,9 @@ export default async function LocalInspectionReportsPage() {
           <h2 className="text-xs font-black uppercase tracking-widest text-slate-400">
             Module Workspaces
           </h2>
-          <div
-            className={`grid grid-cols-1 md:grid-cols-2 ${
-              canAccessSchedules ? "lg:grid-cols-4" : "lg:grid-cols-3"
-            } gap-6`}
-          >
-            {/* My Inspections Inbox -> Points directly to Inspectors/Inbox */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            
+            {/* My Inspections Inbox */}
             <Link
               href="/LocalInspectionReports/Inspectors/Inbox"
               className="group bg-white border border-slate-200 hover:border-blue-500 rounded-xl p-6 shadow-sm transition-all flex flex-col justify-between"
@@ -178,10 +185,43 @@ export default async function LocalInspectionReportsPage() {
               </div>
             </Link>
 
-            {/* Inspection Schedules -> Conditionally rendered for Divisional Deputy Director in IRSD */}
-            {canAccessSchedules && (
+            {/* LOD Role: New Requested Applications -> Points to seed */}
+            {isLOD && (
               <Link
-                href="/LocalInspectionReports/Director/schedules"
+                href="/LocalInspectionReports/seed"
+                className="group bg-white border border-purple-200 hover:border-purple-500 rounded-xl p-6 shadow-sm transition-all flex flex-col justify-between bg-gradient-to-b from-purple-50/30 to-white"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="h-10 w-10 bg-purple-100 group-hover:bg-purple-600 group-hover:text-white text-purple-700 rounded-lg flex items-center justify-center font-bold text-lg transition-colors">
+                      🌱
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 px-2 py-0.5 rounded">
+                      LOD Workspace
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900 group-hover:text-purple-700 transition-colors">
+                    New Requested Applications
+                  </h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Seed, log, and ingest incoming inspection requests from external applicants and regional hubs.
+                  </p>
+                </div>
+                <div className="mt-6 pt-4 border-t border-purple-100 flex items-center justify-between">
+                  <span className="text-xs font-bold text-purple-700 group-hover:text-purple-900">
+                    Open Ingestion Pipeline
+                  </span>
+                  <span className="text-xs text-purple-400 group-hover:translate-x-1 transition-transform">
+                    &rarr;
+                  </span>
+                </div>
+              </Link>
+            )}
+
+            {/* Inspection Schedules -> Dynamic target based on DDD vs Director role */}
+            {schedulesHref && (
+              <Link
+                href={schedulesHref}
                 className="group bg-white border border-slate-200 hover:border-indigo-500 rounded-xl p-6 shadow-sm transition-all flex flex-col justify-between"
               >
                 <div className="space-y-3">
@@ -356,7 +396,7 @@ export default async function LocalInspectionReportsPage() {
                       Clearance Ready
                     </span>
                   </td>
-                  <td className="py-4 px-6 text-emerald-600 font-bold">
+                  <td className="py-4 px-6 text-slate-500 font-medium">
                     On Schedule
                   </td>
                   <td className="py-4 px-6 text-right">

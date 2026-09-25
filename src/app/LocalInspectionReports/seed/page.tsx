@@ -21,6 +21,8 @@ export const DIRECTORATE_PRODUCT_MAP: Record<DirectorateCategory, string[]> = {
 
 export const PRODUCTION_LINE_TYPES = [
   "Liquid",
+  "Oral Liquid",
+  "Dry Powder",
   "Solid",
   "Aerosol",
   "Powder",
