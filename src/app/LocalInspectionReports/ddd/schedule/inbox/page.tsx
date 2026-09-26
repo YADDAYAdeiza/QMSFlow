@@ -4,7 +4,7 @@ import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionSc
 import { eq, or, and, desc } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle, Clock, Edit3, Eye } from "lucide-react";
+import { AlertTriangle, CheckCircle, Clock, Edit3, Eye, PlusCircle } from "lucide-react";
 import BatchHistoryModal from "@/app/LocalInspectionReports/Director/schedules/BatchHistoryModal";
 
 export const dynamic = "force-dynamic";
@@ -76,13 +76,22 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
             Track, revise, and resubmit batch inspection schedules for Directorate endorsement.
           </p>
         </div>
-        <Link
-          href="/LocalInspectionReports/ddd/inbox"
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs inline-flex items-center gap-1.5 transition-colors"
-        >
-          <Edit3 className="w-4 h-4" />
-          Create / Draft New Schedule
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/LocalInspectionReports/ddd/inbox"
+            className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold rounded-lg shadow-xs inline-flex items-center gap-1.5 transition-colors"
+          >
+            <Edit3 className="w-4 h-4" />
+            Set Inspection
+          </Link>
+          <Link
+            href="/LocalInspectionReports/ddd/schedule/print"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs inline-flex items-center gap-1.5 transition-colors"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Create / Draft New Schedule
+          </Link>
+        </div>
       </header>
 
       {/* Tabs */}

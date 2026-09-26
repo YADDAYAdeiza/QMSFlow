@@ -52,7 +52,6 @@ export default function BatchHistoryModal({
         return "bg-slate-100 text-slate-800 border-slate-300";
     }
   };
-  
 
   return (
     <>
@@ -65,35 +64,38 @@ export default function BatchHistoryModal({
       </button>
 
       {isOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
-          <div className="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[85vh] flex flex-col">
-            {/* Header */}
-            <div className="flex justify-between items-center border-b pb-3 border-slate-200">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 print:hidden text-left">
+          <div className="bg-white rounded-xl w-full max-w-2xl p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[85vh] flex flex-col box-border overflow-hidden text-left">
+            
+            {/* Header section with explicit left alignment and word break handling */}
+            <div className="flex justify-between items-start border-b pb-3 border-slate-200 gap-3 w-full min-w-0 text-left">
+              <div className="min-w-0 flex-1 overflow-hidden text-left">
+                <h3 className="text-base font-bold text-slate-900 truncate block text-left">
                   Audit Trail & Minutes History
                 </h3>
-                <p className="text-xs text-slate-500 font-mono mt-0.5">
-                  Ref: {batchReference} — {title}
+                <p className="text-xs text-slate-500 font-mono mt-1 break-all text-left">
+                  <span className="font-semibold text-slate-700">Ref: {batchReference}</span>
+                  {title ? ` — ${title}` : ""}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer shrink-0 p-1 rounded-md hover:bg-slate-100 transition-colors"
+                aria-label="Close modal"
               >
                 ✕
               </button>
             </div>
 
             {/* History Timeline Content */}
-            <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+            <div className="flex-1 overflow-y-auto pr-1 space-y-4 min-w-0 text-left">
               {historyList.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 text-xs italic">
                   No approval or rework history logged for this schedule batch yet.
                 </div>
               ) : (
-                <div className="relative border-l-2 border-slate-200 ml-3 pl-4 space-y-6 my-2">
+                <div className="relative border-l-2 border-slate-200 ml-3 pl-4 space-y-6 my-2 text-left">
                   {historyList.map((entry, idx) => {
                     const formattedDate = entry.timestamp
                       ? new Date(entry.timestamp).toLocaleString("en-GB", {
@@ -103,30 +105,30 @@ export default function BatchHistoryModal({
                       : "N/A";
 
                     return (
-                      <div key={idx} className="relative group">
+                      <div key={idx} className="relative group min-w-0 text-left">
                         {/* Dot on timeline */}
                         <div className="absolute -left-[23px] top-1.5 w-3 h-3 rounded-full bg-slate-400 border-2 border-white ring-2 ring-slate-100" />
 
-                        <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-2">
+                        <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-2 min-w-0 text-left">
                           <div className="flex flex-wrap justify-between items-center gap-2">
                             <span
                               className={`px-2 py-0.5 text-[10px] font-bold rounded-md border uppercase ${getActionBadge(
                                 entry.action
                               )}`}
                             >
-                              {entry.action.replace(/_/g, " ")}
+                              {entry.action ? entry.action.replace(/_/g, " ") : "ACTION"}
                             </span>
                             <span className="text-[11px] text-slate-500 font-medium">
                               {formattedDate}
                             </span>
                           </div>
 
-                          <div className="text-xs font-semibold text-slate-800">
+                          <div className="text-xs font-semibold text-slate-800 truncate text-left">
                             Actor: {entry.actorRole || "Divisional Deputy Director"}
                           </div>
 
                           {entry.fromStep && entry.toStep && (
-                            <div className="text-[11px] text-slate-500 flex items-center gap-1 font-mono">
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1 font-mono truncate text-left">
                               <span>{entry.fromStep}</span>
                               <span>➔</span>
                               <span className="font-semibold text-slate-700">
@@ -135,8 +137,8 @@ export default function BatchHistoryModal({
                             </div>
                           )}
 
-                          <div className="text-xs text-slate-700 bg-white p-2.5 rounded border border-slate-200 italic whitespace-pre-wrap mt-1">
-                            "{entry.comments}"
+                          <div className="text-xs text-slate-700 bg-white p-2.5 rounded border border-slate-200 italic whitespace-pre-wrap break-words mt-1 text-left">
+                            "{entry.comments || "No comments provided."}"
                           </div>
                         </div>
                       </div>
@@ -147,7 +149,7 @@ export default function BatchHistoryModal({
             </div>
 
             {/* Footer */}
-            <div className="flex justify-end pt-2 border-t border-slate-100">
+            <div className="flex justify-end pt-2 border-t border-slate-100 shrink-0">
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
