@@ -8,7 +8,7 @@ import {
   inspectionTeamAssignments, 
   users 
 } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and, gte, lte, or, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import React from "react";
 import Link from "next/link";
@@ -16,7 +16,6 @@ import { ArrowLeft, Printer } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import BatchHistoryModal from "../../BatchHistoryModal";
 import BatchScheduleInteractiveTable from "@/components/LocalInspectionReports/BatchScheduleInteractiveTable";
-// import BatchScheduleInteractiveTable from "./BatchScheduleInteractiveTable";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +28,7 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
   const paramsPromise = props?.params ? props.params : Promise.resolve({});
   const searchParamsPromise = props?.searchParams ? props.searchParams : Promise.resolve({});
 
-  const [resolvedParams] = await Promise.all([
+  const [resolvedParams, resolvedSearchParams] = await Promise.all([
     paramsPromise,
     searchParamsPromise,
   ]);
@@ -65,13 +64,43 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
     notFound();
   }
 
-  // 2. Query inspection schedules joined with applications, companies, and facilities
+  // Determine active filter date range (use searchParams if user filtered, else fallback to batch dates)
+  const filterStartDate = typeof resolvedSearchParams?.startDate === "string" 
+    ? resolvedSearchParams.startDate 
+    : batch.startDate 
+      ? format(parseISO(String(batch.startDate)), "yyyy-MM-dd")
+      : "";
+
+  const filterEndDate = typeof resolvedSearchParams?.endDate === "string" 
+    ? resolvedSearchParams.endDate 
+    : batch.endDate 
+      ? format(parseISO(String(batch.endDate)), "yyyy-MM-dd")
+      : "";
+
+  // Build SQL condition: fetch assigned items OR unassigned candidates within active date range
+  let scheduleWhereCondition;
+
+  if (filterStartDate && filterEndDate) {
+    scheduleWhereCondition = or(
+      eq(inspectionSchedules.batchId, batchId),
+      and(
+        isNull(inspectionSchedules.batchId),
+        gte(inspectionSchedules.scheduledDate, filterStartDate),
+        lte(inspectionSchedules.scheduledDate, filterEndDate)
+      )
+    );
+  } else {
+    scheduleWhereCondition = eq(inspectionSchedules.batchId, batchId);
+  }
+
+  // 2. Query inspection schedules (both assigned to batch AND unassigned candidates in range)
   const rawSchedules = await db
     .select({
       scheduleId: inspectionSchedules.id,
-      applicationId: inspectionSchedules.applicationId, // <--- Add this field
+      applicationId: inspectionSchedules.applicationId,
       scheduledDate: inspectionSchedules.scheduledDate,
       status: inspectionSchedules.status,
+      batchId: inspectionSchedules.batchId,
       companyName: companies.name,
       companyAddress: companies.address,
       facilityAddress: facilities.address,
@@ -82,7 +111,7 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
     .innerJoin(applications, eq(inspectionSchedules.applicationId, applications.id))
     .leftJoin(companies, eq(applications.companyId, companies.id))
     .leftJoin(facilities, eq(applications.facilityId, facilities.id))
-    .where(eq(inspectionSchedules.batchId, batchId));
+    .where(scheduleWhereCondition);
 
   const schedules = Array.isArray(rawSchedules) ? rawSchedules : [];
   const scheduleIds: string[] = schedules.map((s) => s.scheduleId).filter(Boolean);
@@ -141,7 +170,7 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
     const team = teamBySchedule[s.scheduleId] || {};
     return {
       scheduleId: s.scheduleId,
-      applicationId: s.applicationId, // <--- Add this property
+      applicationId: s.applicationId,
       companyName: s.companyName || "N/A",
       companyAddress: s.companyAddress || s.facilityAddress || "N/A",
       inspectionType: s.inspectionType || "",
@@ -152,25 +181,19 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
       teamLeaderId: team.teamLeader || "",
       coInspectorIds: team.coInspectors || [],
       traineeInspectorIds: team.trainees || [],
+      isAlreadyInBatch: s.batchId === batchId,
     };
   });
 
   const isApproved = batch.status === "APPROVED";
 
   const formattedHeaderDate =
-    batch.startDate && batch.endDate
-      ? `${format(parseISO(String(batch.startDate)), "do MMM yyyy")} - ${format(
-          parseISO(String(batch.endDate)),
+    filterStartDate && filterEndDate
+      ? `${format(parseISO(filterStartDate), "do MMM yyyy")} - ${format(
+          parseISO(filterEndDate),
           "do MMM yyyy"
         )}`
       : "SCHEDULE PERIOD";
-
-  const formattedStartDate = batch.startDate
-    ? format(parseISO(String(batch.startDate)), "yyyy-MM-dd")
-    : "";
-  const formattedEndDate = batch.endDate
-    ? format(parseISO(String(batch.endDate)), "yyyy-MM-dd")
-    : "";
 
   return (
     <main className="min-h-screen bg-slate-100 p-4 print:p-0 print:bg-white text-black font-sans">
@@ -181,7 +204,7 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
             href="/LocalInspectionReports/ddd/schedule/inbox"
             className="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-2"
           >
-            <ArrowLeft className="w-4 h-4" /> Back to Deputy Director Inbox
+            <ArrowLeft className="w-4 h-4" /> Back to Divisional Deputy Director Inbox
           </Link>
         </div>
 
@@ -233,8 +256,8 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
           batchId={batch.id}
           batchStatus={batch.status}
           batchHistory={batch.history as any[]}
-          startDate={formattedStartDate}
-          endDate={formattedEndDate}
+          startDate={filterStartDate}
+          endDate={filterEndDate}
           initialRows={initialRows}
           inspectorPool={inspectorPool}
           formattedHeaderDate={formattedHeaderDate}

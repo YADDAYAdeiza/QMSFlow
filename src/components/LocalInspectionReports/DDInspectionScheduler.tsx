@@ -117,37 +117,29 @@ export default function DDInspectionScheduler({
     setSubmitting(true);
 
     try {
-      // Structure team array to match the PUT route expectation
+      // Structure team array to match the POST route expectation
       const inspectorPayload = [
         { inspectorId: teamLeader, role: "TEAM_LEADER" as const },
         ...coInspectors.map((id) => ({ inspectorId: id, role: "CO_INSPECTOR" as const })),
         ...traineeInspectors.map((id) => ({ inspectorId: id, role: "TRAINEE_INSPECTOR" as const })),
       ];
 
-      // Call the PUT batch-update endpoint passing the proper schedule UUID
-      const response = await fetch('/api/LocalInspectionReports/schedule/batch-update', {
-        method: 'PUT',
+      // Call the POST endpoint for individual inspection scheduling
+      const response = await fetch('/api/LocalInspectionReports/schedule/single', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          batchId: batchId || undefined,
-          startDate: inspectionDate,
-          endDate: inspectionDate,
-          updates: [
-            {
-              scheduleId: scheduleId || null, // Send null instead of undefined
-              applicationId: applicationId,       // Send integer application ID explicitly
-              scheduledDate: inspectionDate,
-              inspectors: inspectorPayload,
-            },
-          ],
-          activeScheduleIds: scheduleId ? [scheduleId] : [], // Valid UUID array
+          scheduleId: scheduleId || null,
+          applicationId: Number(applicationId),
+          scheduledDate: inspectionDate,
+          inspectors: inspectorPayload,
         }),
       });
 
       const result = await response.json();
-      if (!result.success) throw new Error(result.error || 'Failed to update batch schedule.');
+      if (!result.success) throw new Error(result.error || 'Failed to update inspection schedule.');
       
-      alert("Inspection successfully bound to batch schedule.");
+      alert("Inspection successfully scheduled.");
       if (onSuccess) onSuccess();
 
       router.refresh();

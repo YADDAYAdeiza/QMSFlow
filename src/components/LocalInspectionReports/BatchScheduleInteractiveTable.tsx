@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useTransition } from "react";
-import { Edit3, Eye, Save, AlertCircle, Trash2 } from "lucide-react";
+import { Edit3, Eye, Save, AlertCircle, Trash2, PlusCircle } from "lucide-react";
 import RecommendApprovalModal from "@/app/LocalInspectionReports/ddd/schedule/print/RecommendApprovalModal";
 import PrintTrigger from "@/app/LocalInspectionReports/ddd/schedule/print/PrintTrigger";
 import {
@@ -23,7 +23,7 @@ interface BatchScheduleInteractiveTableProps {
   batchHistory?: any[];
   startDate: string;
   endDate: string;
-  initialRows: EditableScheduleItem[];
+  initialRows: (EditableScheduleItem & { isAlreadyInBatch?: boolean })[];
   inspectorPool: InspectorPoolItem[];
   formattedHeaderDate: string;
   isApproved: boolean;
@@ -76,7 +76,7 @@ export default function BatchScheduleInteractiveTable({
     <div>
       {/* Screen Action Control Bar */}
       <div className="mb-6 p-4 bg-white rounded-lg shadow-md border border-slate-200 flex flex-wrap justify-between items-center gap-4 print:hidden">
-        {/* Date Filter */}
+        {/* Date Filter Form */}
         {!isReadOnly ? (
           <form method="GET" className="flex items-center gap-3">
             <label className="text-xs font-semibold text-slate-600">
@@ -85,6 +85,7 @@ export default function BatchScheduleInteractiveTable({
                 type="date"
                 name="startDate"
                 defaultValue={startDate}
+                key={`start-${startDate}`}
                 className="ml-1 px-2 py-1 border border-slate-300 rounded-md text-sm"
               />
             </label>
@@ -94,6 +95,7 @@ export default function BatchScheduleInteractiveTable({
                 type="date"
                 name="endDate"
                 defaultValue={endDate}
+                key={`end-${endDate}`}
                 className="ml-1 px-2 py-1 border border-slate-300 rounded-md text-sm"
               />
             </label>
@@ -174,7 +176,7 @@ export default function BatchScheduleInteractiveTable({
       {/* Active Mode Notice */}
       {!isReadOnly && isEditMode && (
         <p className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded py-1 px-3 mb-4 text-center print:hidden">
-          ✏️ BATCH EDITOR ACTIVE — Modify dates, team allocations, or delete entries below, then click "Save Batch Edits"
+          ✏️ BATCH EDITOR ACTIVE — Expand or filter date ranges above, modify team allocations or dates, then click "Save Batch Edits"
         </p>
       )}
 
@@ -203,159 +205,175 @@ export default function BatchScheduleInteractiveTable({
               </td>
             </tr>
           ) : (
-            rows.map((row, index) => (
-              <tr key={row.scheduleId} className="border-b border-black align-top">
-                <td className="border-r border-black p-2 text-center font-bold">{index + 1}.</td>
-                
-                <td className="border-r border-black p-2 uppercase font-semibold">
-                  <div>{row.companyName}</div>
-                  <div className="text-[11px] font-normal text-slate-700 mt-1">{row.companyAddress}</div>
-                </td>
-                
-                <td className="border-r border-black p-2 uppercase font-medium">
-                  {!isReadOnly && isEditMode ? (
-                    <select
-                      value={row.inspectionType || ""}
-                      onChange={(e) => handleInspectionTypeChange(row.scheduleId, e.target.value)}
-                      className="w-full text-xs p-1 border border-slate-300 rounded bg-white font-medium uppercase"
-                    >
-                      <option value="">-- Select Purpose --</option>
-                      {INSPECTION_PURPOSES.map((purpose) => (
-                        <option key={purpose} value={purpose}>
-                          {purpose}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    row.inspectionType
-                  )}
-                </td>
+            rows.map((row, index) => {
+              const isCandidate = (row as any).isAlreadyInBatch === false;
 
-                <td className="border-r border-black p-2 uppercase">
-                  {!isReadOnly && isEditMode ? (
-                    <div className="space-y-3 lowercase">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-700 uppercase">Team Leader:</label>
-                        <select
-                          value={row.teamLeaderId}
-                          onChange={(e) => handleTeamLeaderChange(row.scheduleId, e.target.value)}
-                          className="w-full text-xs p-1 border border-slate-300 rounded bg-white uppercase font-medium"
-                        >
-                          <option value="">-- Select Team Leader --</option>
-                          {inspectorPool.map((ins) => (
-                            <option key={ins.id} value={ins.id}>
-                              {ins.full_name} ({ins.division || "STAFF"})
-                            </option>
-                          ))}
-                        </select>
+              return (
+                <tr 
+                  key={row.scheduleId} 
+                  className={`border-b border-black align-top ${
+                    isCandidate && isEditMode ? "bg-amber-50/50" : ""
+                  }`}
+                >
+                  <td className="border-r border-black p-2 text-center font-bold">
+                    {index + 1}.
+                    {isCandidate && isEditMode && (
+                      <div className="text-[9px] text-amber-700 font-bold mt-1 print:hidden flex items-center justify-center gap-0.5">
+                        <PlusCircle className="w-2.5 h-2.5" /> NEW
                       </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Co-Inspectors:</label>
-                        <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
-                          {inspectorPool
-                            .filter((ins) => ins.id !== row.teamLeaderId && !row.traineeInspectorIds.includes(ins.id))
-                            .map((ins) => (
-                              <label key={ins.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={row.coInspectorIds.includes(ins.id)}
-                                  onChange={() => handleCoInspectorToggle(row.scheduleId, ins.id)}
-                                  className="rounded text-emerald-600"
-                                />
-                                <span>{ins.full_name}</span>
-                              </label>
-                            ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Trainees (Max 2):</label>
-                        <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
-                          {inspectorPool
-                            .filter((ins) => ins.id !== row.teamLeaderId && !row.coInspectorIds.includes(ins.id))
-                            .map((ins) => (
-                              <label key={ins.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={row.traineeInspectorIds.includes(ins.id)}
-                                  onChange={() => handleTraineeToggle(row.scheduleId, ins.id)}
-                                  className="rounded text-amber-600"
-                                />
-                                <span>{ins.full_name}</span>
-                              </label>
-                            ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      {row.teamLeaderId && (
-                        <div className="font-semibold flex justify-between items-center pr-1">
-                          <span>{getInspectorName(row.teamLeaderId)}</span>
-                          <span className="text-[10px] font-normal text-slate-600 lowercase italic">(TL)</span>
-                        </div>
-                      )}
-                      {row.coInspectorIds.map((id) => (
-                        <div key={id} className="font-semibold flex justify-between items-center pr-1">
-                          <span>{getInspectorName(id)}</span>
-                          <span className="text-[10px] font-normal text-slate-600 lowercase italic">(Co-Inspector)</span>
-                        </div>
-                      ))}
-                      {row.traineeInspectorIds.map((id) => (
-                        <div key={id} className="font-semibold flex justify-between items-center pr-1">
-                          <span>{getInspectorName(id)}</span>
-                          <span className="text-[10px] font-normal text-slate-600 lowercase italic">(Trainee)</span>
-                        </div>
-                      ))}
-                      {!row.teamLeaderId && row.coInspectorIds.length === 0 && (
-                        <span className="text-slate-400 italic">Unassigned</span>
-                      )}
-                    </div>
-                  )}
-                </td>
-
-                <td className="border-r border-black p-2 text-center font-bold">
-                  {!isReadOnly && isEditMode ? (
-                    <input
-                      type="date"
-                      value={row.scheduledDate}
-                      onChange={(e) => handleDateChange(row.scheduleId, e.target.value)}
-                      className="w-full text-xs p-1 border border-slate-300 rounded font-sans"
-                    />
-                  ) : (
-                    row.scheduledDate
-                  )}
-                </td>
-
-                <td className={`p-2 text-center font-semibold uppercase ${!isReadOnly && isEditMode ? "border-r border-black" : ""}`}>
-                  {!isReadOnly && isEditMode ? (
-                    <input
-                      type="text"
-                      value={row.driver || ""}
-                      onChange={(e) => handleDriverChange(row.scheduleId, e.target.value)}
-                      placeholder="Driver Name"
-                      className="w-full text-xs p-1 border border-slate-300 rounded font-sans uppercase"
-                    />
-                  ) : (
-                    row.driver || "DAN BABA"
-                  )}
-                </td>
-
-                {!isReadOnly && isEditMode && (
-                  <td className="p-2 text-center align-middle print:hidden">
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveRow(row.scheduleId)}
-                      className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors cursor-pointer"
-                      title="Remove schedule from batch"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    )}
                   </td>
-                )}
-              </tr>
-            ))
+                  
+                  <td className="border-r border-black p-2 uppercase font-semibold">
+                    <div>{row.companyName}</div>
+                    <div className="text-[11px] font-normal text-slate-700 mt-1">{row.companyAddress}</div>
+                  </td>
+                  
+                  <td className="border-r border-black p-2 uppercase font-medium">
+                    {!isReadOnly && isEditMode ? (
+                      <select
+                        value={row.inspectionType || ""}
+                        onChange={(e) => handleInspectionTypeChange(row.scheduleId, e.target.value)}
+                        className="w-full text-xs p-1 border border-slate-300 rounded bg-white font-medium uppercase"
+                      >
+                        <option value="">-- Select Purpose --</option>
+                        {INSPECTION_PURPOSES.map((purpose) => (
+                          <option key={purpose} value={purpose}>
+                            {purpose}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      row.inspectionType
+                    )}
+                  </td>
+
+                  <td className="border-r border-black p-2 uppercase">
+                    {!isReadOnly && isEditMode ? (
+                      <div className="space-y-3 lowercase">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-700 uppercase">Team Leader:</label>
+                          <select
+                            value={row.teamLeaderId}
+                            onChange={(e) => handleTeamLeaderChange(row.scheduleId, e.target.value)}
+                            className="w-full text-xs p-1 border border-slate-300 rounded bg-white uppercase font-medium"
+                          >
+                            <option value="">-- Select Team Leader --</option>
+                            {inspectorPool.map((ins) => (
+                              <option key={ins.id} value={ins.id}>
+                                {ins.full_name} ({ins.division || "STAFF"})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Co-Inspectors:</label>
+                          <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
+                            {inspectorPool
+                              .filter((ins) => ins.id !== row.teamLeaderId && !row.traineeInspectorIds.includes(ins.id))
+                              .map((ins) => (
+                                <label key={ins.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.coInspectorIds.includes(ins.id)}
+                                    onChange={() => handleCoInspectorToggle(row.scheduleId, ins.id)}
+                                    className="rounded text-emerald-600"
+                                  />
+                                  <span>{ins.full_name}</span>
+                                </label>
+                              ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Trainees (Max 2):</label>
+                          <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
+                            {inspectorPool
+                              .filter((ins) => ins.id !== row.teamLeaderId && !row.coInspectorIds.includes(ins.id))
+                              .map((ins) => (
+                                <label key={ins.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.traineeInspectorIds.includes(ins.id)}
+                                    onChange={() => handleTraineeToggle(row.scheduleId, ins.id)}
+                                    className="rounded text-amber-600"
+                                  />
+                                  <span>{ins.full_name}</span>
+                                </label>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {row.teamLeaderId && (
+                          <div className="font-semibold flex justify-between items-center pr-1">
+                            <span>{getInspectorName(row.teamLeaderId)}</span>
+                            <span className="text-[10px] font-normal text-slate-600 lowercase italic">(TL)</span>
+                          </div>
+                        )}
+                        {row.coInspectorIds.map((id) => (
+                          <div key={id} className="font-semibold flex justify-between items-center pr-1">
+                            <span>{getInspectorName(id)}</span>
+                            <span className="text-[10px] font-normal text-slate-600 lowercase italic">(Co-Inspector)</span>
+                          </div>
+                        ))}
+                        {row.traineeInspectorIds.map((id) => (
+                          <div key={id} className="font-semibold flex justify-between items-center pr-1">
+                            <span>{getInspectorName(id)}</span>
+                            <span className="text-[10px] font-normal text-slate-600 lowercase italic">(Trainee)</span>
+                          </div>
+                        ))}
+                        {!row.teamLeaderId && row.coInspectorIds.length === 0 && (
+                          <span className="text-slate-400 italic">Unassigned</span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+
+                  <td className="border-r border-black p-2 text-center font-bold">
+                    {!isReadOnly && isEditMode ? (
+                      <input
+                        type="date"
+                        value={row.scheduledDate}
+                        onChange={(e) => handleDateChange(row.scheduleId, e.target.value)}
+                        className="w-full text-xs p-1 border border-slate-300 rounded font-sans"
+                      />
+                    ) : (
+                      row.scheduledDate
+                    )}
+                  </td>
+
+                  <td className={`p-2 text-center font-semibold uppercase ${!isReadOnly && isEditMode ? "border-r border-black" : ""}`}>
+                    {!isReadOnly && isEditMode ? (
+                      <input
+                        type="text"
+                        value={row.driver || ""}
+                        onChange={(e) => handleDriverChange(row.scheduleId, e.target.value)}
+                        placeholder="Driver Name"
+                        className="w-full text-xs p-1 border border-slate-300 rounded font-sans uppercase"
+                      />
+                    ) : (
+                      row.driver || "DAN BABA"
+                    )}
+                  </td>
+
+                  {!isReadOnly && isEditMode && (
+                    <td className="p-2 text-center align-middle print:hidden">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRow(row.scheduleId)}
+                        className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                        title="Remove schedule from batch"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

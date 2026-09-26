@@ -269,7 +269,7 @@ export const inspectionSchedules = pgTable("inspection_schedules", {
     .references(() => applications.id, { onDelete: "cascade" })
     .notNull(),
   batchId: uuid("batch_id").references(() => scheduleBatches.id, { onDelete: "cascade" }),
-  scheduledDate: timestamp("scheduled_date", { mode: "string" }).notNull(),
+  scheduledDate: timestamp("scheduled_date", { mode: "string" }),
   status: varchar("status", { length: 50 }).default("SCHEDULED"),
   createdBy: uuid("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

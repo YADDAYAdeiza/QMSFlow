@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export interface InspectorPoolItem {
@@ -43,6 +43,11 @@ export function useBatchScheduleManager({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Sync state when Server Component re-fetches with new initialRows
+  useEffect(() => {
+    setRows(initialRows || []);
+  }, [initialRows]);
+
   const getInspectorName = (id: string): string => {
     const found = inspectorPool.find((ins) => ins.id === id);
     return found ? found.full_name : "Unknown Officer";
@@ -55,6 +60,12 @@ export function useBatchScheduleManager({
   const handleDateChange = (scheduleId: string, scheduledDate: string) => {
     setRows((prev) =>
       prev.map((r) => (r.scheduleId === scheduleId ? { ...r, scheduledDate } : r))
+    );
+  };
+
+  const handleInspectionTypeChange = (scheduleId: string, inspectionType: string) => {
+    setRows((prev) =>
+      prev.map((r) => (r.scheduleId === scheduleId ? { ...r, inspectionType } : r))
     );
   };
 
@@ -169,6 +180,7 @@ export function useBatchScheduleManager({
     setSaveError,
     handleRemoveRow,
     handleDateChange,
+    handleInspectionTypeChange,
     handleDriverChange,
     handleTeamLeaderChange,
     handleCoInspectorToggle,
