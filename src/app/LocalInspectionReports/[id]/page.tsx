@@ -21,6 +21,7 @@ const BASE_CHECKLIST_TEMPLATE = {
   vicinity_assessment: "",
   lead_inspector: "",
   co_inspectors: "",
+  trainee_inspectors: "",
   historical_baseline: {
     prev_date_type: "",
     prev_team: "",
@@ -48,7 +49,7 @@ const BASE_CHECKLIST_TEMPLATE = {
 
 export default async function LocalReportPage({ params }: PageProps) {
   // 🔐 Authenticated session validation
- const supabase = await createClient();
+  const supabase = await createClient();
   
   let user = null;
   try {
@@ -58,7 +59,6 @@ export default async function LocalReportPage({ params }: PageProps) {
     console.error("Supabase Auth server fetch failed:", err);
   }
 
-  // If user failed to fetch due to network error or expired session, safely redirect
   if (!user) {
     redirect("/login");
   }
@@ -83,7 +83,7 @@ export default async function LocalReportPage({ params }: PageProps) {
       currentPoint: applications.currentPoint,
       status: applications.status,
       scheduledDate: inspectionSchedules.scheduledDate,
-      scheduleId: inspectionSchedules.id, // Needed for team query below
+      scheduleId: inspectionSchedules.id,
     })
     .from(applications)
     .leftJoin(companies, eq(applications.companyId, companies.id))
@@ -97,12 +97,12 @@ export default async function LocalReportPage({ params }: PageProps) {
     notFound();
   }
 
-  // Format scheduled_date if present (e.g., "2026-07-27")
+  // Format scheduled_date if present
   const scheduledDate = application.scheduledDate 
     ? new Date(application.scheduledDate).toISOString().split("T")[0] 
     : "";
 
-  // 🛡️ 2. Dynamic Assignment Role Retrieval & Team Lead Fetching
+  // 🛡️ 2. Dynamic Assignment Role Retrieval & Team Lead/Members Fetching
   const teamAssignments = await db
     .select({
       role: inspectionTeamAssignments.role,
@@ -119,26 +119,64 @@ export default async function LocalReportPage({ params }: PageProps) {
   const currentUserAssignment = teamAssignments.find(t => t.inspectorId === user.id);
   const dynamicAssignmentRole = currentUserAssignment?.role || "CO_INSPECTOR";
 
-  // Identify the Lead Inspector from team assignments
-  const leadAssignment = teamAssignments.find(
-    t => t.role === "LEAD_INSPECTOR" || t.role === "TEAM_LEADER"
-  );
+  // Batch fetch profiles and signatures for all team members in a single query
+  const teamUserIds = teamAssignments
+    .map(t => t.inspectorId)
+    .filter((id): id is string => Boolean(id));
 
-  let leadInspectorName = "";
-  if (leadAssignment?.inspectorId) {
-    const leadUserData = await supabase
+  let userProfilesMap: Record<string, string> = {};
+  let signaturesMap: Record<string, string> = {};
+
+  if (teamUserIds.length > 0) {
+    const { data: teamUsersData } = await supabase
       .from("users")
-      .select("name, email")
-      .eq("id", leadAssignment.inspectorId)
-      .single();
+      .select("id, name, email, signature_url")
+      .in("id", teamUserIds);
 
-    leadInspectorName = leadUserData.data?.name || leadUserData.data?.email || "";
+    if (teamUsersData) {
+      teamUsersData.forEach((u) => {
+        const resolvedName = u.name || u.email || "Unknown Inspector";
+        userProfilesMap[u.id] = resolvedName;
+        if (u.signature_url) {
+          signaturesMap[resolvedName] = u.signature_url;
+        }
+      });
+    }
   }
 
-  // 3. Fetch public global user configuration from public.users table for current active user
+  // console.log('signaturesMap: ', signaturesMap)
+  // console.log('teamUserIds: ', teamUserIds);
+  
+  // Categorize inspectors based on role
+  let leadInspectorName = "";
+  let leadSignatureUrl = "";
+  const coInspectorNames: string[] = [];
+  const traineeInspectorNames: string[] = [];
+
+  teamAssignments.forEach((assignment) => {
+    const name = userProfilesMap[assignment.inspectorId] || "";
+    if (!name) return;
+
+    const roleUpper = (assignment.role || "").toUpperCase();
+
+    if (roleUpper === "LEAD_INSPECTOR" || roleUpper === "TEAM_LEADER") {
+      leadInspectorName = name;
+      leadSignatureUrl = signaturesMap[name] || "";
+      console.log('leadSignatureUrl in page.tsx: ', leadSignatureUrl);
+    } else if (roleUpper.includes("TRAINEE")) {
+      traineeInspectorNames.push(name);
+    } else {
+      coInspectorNames.push(name);
+    }
+  });
+
+  const coInspectorsFormatted = coInspectorNames.join(", ");
+  const traineeInspectorsFormatted = traineeInspectorNames.join(", ");
+
+  // 3. Fetch public global user configuration for current active user
   const userData = await supabase
     .from("users")
-    .select("name, role")
+    .select("name, role, signature_url")
     .eq("id", user.id)
     .single();
 
@@ -183,15 +221,13 @@ export default async function LocalReportPage({ params }: PageProps) {
     };
   });
 
-  // 5. Safely extract values from the jsonb details block
+  // 5. Extract JSONB details
   const appDetails = (application.details as any) || {};
   const initialComments = appDetails.comments || [];
   const initialReportHtml = appDetails.compiledReportHtml || null;
   const notificationEmail = appDetails.notificationEmail || "";
   const inspectionTypeMeta = appDetails.inspectionTypeMeta || "";
   
-  // 🎯 STEP KEY RESOLUTION FIX:
-  // Prioritize application.currentPoint directly over jsonb metadata
   const currentPointStr = application.currentPoint || "";
   let initialStepKey = "STAFF_TECHNICAL_REVIEW";
 
@@ -206,13 +242,12 @@ export default async function LocalReportPage({ params }: PageProps) {
   ) {
     initialStepKey = "DDD_TECHNICAL_ASSIGNMENT";
   } else {
-    // Fallback to jsonb currentStepKey or currentPoint string if not matched above
     initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey || currentPointStr || "STAFF_TECHNICAL_REVIEW";
   }
 
   const activeSnapshot = appDetails.checklistSnapshot || appDetails.savedChecklistSnapshot;
+  console.log('activeSnapshot.lead_signature_url in page.tsx: ', activeSnapshot.lead_signature_url);
 
-  // 📍 Extract facility address (checking details JSON keys with fallbacks to database level)
   const facilityAddressState: string = 
     appDetails.facilityAddress || 
     appDetails.siteAddress || 
@@ -220,9 +255,6 @@ export default async function LocalReportPage({ params }: PageProps) {
     application.companyAddress || 
     "Registered Facility Address";
 
-    console.log('facilityAddressState3: ', facilityAddressState);
-
-  // 🏷️ Extract productLines and format as string array
   const rawProductLines = appDetails.productLines || [];
   const productLinesState: string[] = rawProductLines.map((line: any) => {
     const lineName = line.lineName || line.lineType || "Production Line";
@@ -232,12 +264,20 @@ export default async function LocalReportPage({ params }: PageProps) {
     return productNames ? `${lineName} (${productNames})` : lineName;
   });
 
-  // 📦 Bundling notificationEmail, scheduled_date, & lead_inspector into initial snapshot
+  // 📦 Bundling team assignments & fetched signatures into initial snapshot
   const initialChecklistSnapshot = activeSnapshot 
     ? {
         ...BASE_CHECKLIST_TEMPLATE,
         inspection_dates: activeSnapshot.inspection_dates || scheduledDate,
-        lead_inspector: activeSnapshot.lead_inspector || leadInspectorName, // 👈 Pre-fills Lead Inspector
+        lead_inspector: activeSnapshot.lead_inspector || leadInspectorName,
+        co_inspectors: activeSnapshot.co_inspectors || coInspectorsFormatted,
+        trainee_inspectors: activeSnapshot.trainee_inspectors || traineeInspectorsFormatted,
+        // lead_signature_url: activeSnapshot.lead_signature_url || leadSignatureUrl,
+        lead_signature_url: leadSignatureUrl || activeSnapshot.lead_signature_url,
+        signatures: {
+          ...signaturesMap,
+          ...(activeSnapshot.signatures || {})
+        },
         ...activeSnapshot,
         notificationEmail: activeSnapshot.notificationEmail || notificationEmail,
         inspectionTypeMeta,
@@ -254,7 +294,11 @@ export default async function LocalReportPage({ params }: PageProps) {
     : {
         ...BASE_CHECKLIST_TEMPLATE,
         inspection_dates: scheduledDate,
-        lead_inspector: leadInspectorName, // 👈 Pre-fills Lead Inspector
+        lead_inspector: leadInspectorName,
+        co_inspectors: coInspectorsFormatted,
+        trainee_inspectors: traineeInspectorsFormatted,
+        lead_signature_url: leadSignatureUrl,
+        signatures: signaturesMap,
         notificationEmail,
         inspectionTypeMeta,
         site_contact_details: {
@@ -266,6 +310,8 @@ export default async function LocalReportPage({ params }: PageProps) {
         report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`,
         final_recommendation: "PENDING"
       };
+
+      console.log('Just before: ', initialChecklistSnapshot.lead_signature_url)
 
   return (
     <div className="bg-slate-50 min-h-screen py-6">
@@ -280,6 +326,8 @@ export default async function LocalReportPage({ params }: PageProps) {
         notificationEmail={notificationEmail}
         scheduledDate={scheduledDate}
         leadInspectorName={leadInspectorName}
+        coInspectors={coInspectorsFormatted}
+        traineeInspectors={traineeInspectorsFormatted}
         initialStepKey={initialStepKey}
         initialReportHtml={initialReportHtml}
         initialChecklistSnapshot={initialChecklistSnapshot}

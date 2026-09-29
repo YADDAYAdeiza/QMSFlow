@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import WorkspaceTabs from "./WorkspaceTabs";
+import WorkspaceTabs from "@/components/LocalInspectionReports/WorkspaceTabs";
 
 export default async function LocalInspectionReportsPage() {
   const cookieStore = await cookies();

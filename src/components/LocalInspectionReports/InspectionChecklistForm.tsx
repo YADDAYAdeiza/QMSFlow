@@ -44,7 +44,8 @@ export interface ChecklistData {
   activities_carried_out: string[];
   vicinity_assessment: string;
   lead_inspector: string;
-  co_inspectors: string;
+  co_inspectors: string[];
+  trainees: string[];
   historical_baseline: {
     prev_date_type: string;
     prev_team: string;
@@ -75,6 +76,8 @@ interface ChecklistFormProps {
   initialData?: Partial<ChecklistData> & Record<string, any> | null;  
   scheduledDate?: string; 
   leadInspectorName?: string;
+  coInspectors?: string[] | string;
+  traineeInspectors?: string[] | string;
   currentInspector?: string;
   onSave: (data: ChecklistData) => void | Promise<void>;
   onSaveDraft?: (data: ChecklistData) => void | Promise<void>; 
@@ -105,10 +108,21 @@ const resolveInitialInspector = (data?: Record<string, any> | null, fallbackInsp
   return data?.lead_inspector || data?.leadInspector || data?.inspector_name || fallbackInspector || "";
 };
 
+// Helper to ensure inspector/trainee lists are cleanly parsed as string arrays
+const parseInspectorList = (val: any): string[] => {
+  if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
+  if (typeof val === 'string' && val.trim()) {
+    return val.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+};
+
 export default function InspectionChecklistForm({ 
   initialData, 
   scheduledDate,
   leadInspectorName,
+  coInspectors,
+  traineeInspectors,
   onSave, 
   onSaveDraft, 
   onChange,
@@ -140,6 +154,9 @@ export default function InspectionChecklistForm({
   const [formData, setFormData] = useState<ChecklistData>(() => {
     const resolvedEmail = resolveInitialEmail(initialData);
 
+    const initialCoList = parseInspectorList(initialData?.co_inspectors);
+    const initialTraineeList = parseInspectorList(initialData?.trainees ?? initialData?.traineeInspectors);
+
     return {
       report_doc_number: initialData?.report_doc_number || "OKL-LA-PRI-01-2026",
       inspection_dates: initialData?.inspection_dates || "",
@@ -159,7 +176,11 @@ export default function InspectionChecklistForm({
       activities_carried_out: Array.isArray(initialData?.activities_carried_out) ? initialData.activities_carried_out : [],
       vicinity_assessment: initialData?.vicinity_assessment || "",
       lead_inspector: resolveInitialInspector(initialData, leadInspectorName),
-      co_inspectors: initialData?.co_inspectors || "",
+      
+      // Fallback: If initialData has items, use them; otherwise fallback to props
+      co_inspectors: initialCoList.length > 0 ? initialCoList : parseInspectorList(coInspectors),
+      trainees: initialTraineeList.length > 0 ? initialTraineeList : parseInspectorList(traineeInspectors),
+      
       historical_baseline: initialData?.historical_baseline || { prev_date_type: "", prev_team: "", past_capa_status: "", major_changes: "" },
       
       pqs_score: initialData?.pqs_score ?? 100, pqs_notes: initialData?.pqs_notes || "",
@@ -183,11 +204,36 @@ export default function InspectionChecklistForm({
 
   const lastEmittedDataRef = useRef<ChecklistData | null>(null);
 
+  // Sync leadInspectorName prop
   useEffect(() => {
     if (leadInspectorName && !formData.lead_inspector) {
       setFormData(prev => ({ ...prev, lead_inspector: leadInspectorName }));
     }
   }, [leadInspectorName, formData.lead_inspector]);
+
+  // Sync coInspectors and traineeInspectors props if loaded asynchronously
+  useEffect(() => {
+    setFormData(prev => {
+      let updated = false;
+      const parsedCoProp = parseInspectorList(coInspectors);
+      const parsedTraineeProp = parseInspectorList(traineeInspectors);
+
+      let nextCo = [...prev.co_inspectors];
+      let nextTrainees = [...prev.trainees];
+
+      if (prev.co_inspectors.length === 0 && parsedCoProp.length > 0) {
+        nextCo = parsedCoProp;
+        updated = true;
+      }
+
+      if (prev.trainees.length === 0 && parsedTraineeProp.length > 0) {
+        nextTrainees = parsedTraineeProp;
+        updated = true;
+      }
+
+      return updated ? { ...prev, co_inspectors: nextCo, trainees: nextTrainees } : prev;
+    });
+  }, [coInspectors, traineeInspectors]);
 
   useEffect(() => {
     if (!initialData) return;
@@ -196,11 +242,20 @@ export default function InspectionChecklistForm({
     if (!isEcho) {
       const resolvedEmail = resolveInitialEmail(initialData);
 
+      const parsedInitialCo = parseInspectorList(initialData.co_inspectors);
+      const parsedInitialTrainees = parseInspectorList(initialData.trainees ?? initialData.traineeInspectors);
+
       setFormData(prev => ({
         ...prev,
         ...initialData,
         inspected_site_name: initialData.inspected_site_name || initialData.company_name || prev.inspected_site_name,
         lead_inspector: resolveInitialInspector(initialData, leadInspectorName) || prev.lead_inspector,
+        co_inspectors: parsedInitialCo.length > 0 
+          ? parsedInitialCo 
+          : (prev.co_inspectors.length > 0 ? prev.co_inspectors : parseInspectorList(coInspectors)),
+        trainees: parsedInitialTrainees.length > 0 
+          ? parsedInitialTrainees 
+          : (prev.trainees.length > 0 ? prev.trainees : parseInspectorList(traineeInspectors)),
         notificationEmail: resolvedEmail || prev.notificationEmail,
         site_contact_details: {
           phone: initialData.site_contact_details?.phone ?? initialData.phone ?? prev.site_contact_details.phone,
@@ -222,7 +277,7 @@ export default function InspectionChecklistForm({
         rework_cycle_count: initialData.rework_cycle_count ?? prev.rework_cycle_count,
       }));
     }
-  }, [initialData?.report_doc_number, initialData?.inspected_site_name, leadInspectorName]);
+  }, [initialData?.report_doc_number, initialData?.inspected_site_name, leadInspectorName, coInspectors, traineeInspectors]);
 
   useEffect(() => {
     if (onChange) {
@@ -230,6 +285,39 @@ export default function InspectionChecklistForm({
       onChange(formData);
     }
   }, [formData, onChange]);
+
+  // Handlers for dynamic Co-Inspectors and Trainees
+  const handleInspectorChange = (
+    type: 'co_inspectors' | 'trainees', 
+    index: number, 
+    value: string
+  ) => {
+    if (isReadOnly) return;
+    setFormData(prev => {
+      const updated = [...(prev[type] || [])];
+      updated[index] = value;
+      return { ...prev, [type]: updated };
+    });
+  };
+
+  const addInspectorField = (type: 'co_inspectors' | 'trainees') => {
+    if (isReadOnly) return;
+    setFormData(prev => ({
+      ...prev,
+      [type]: [...(prev[type] || []), ""]
+    }));
+  };
+
+  const removeInspectorField = (
+    type: 'co_inspectors' | 'trainees', 
+    index: number
+  ) => {
+    if (isReadOnly) return;
+    setFormData(prev => ({
+      ...prev,
+      [type]: (prev[type] || []).filter((_, i) => i !== index)
+    }));
+  };
 
   // Geolocation Handler
   const handleGeolocate = () => {
@@ -272,12 +360,6 @@ export default function InspectionChecklistForm({
     );
   };
 
-  // Form input states for adding a new observation
-  // const [newObsText, setNewObsText] = useState("");
-  // const [newObsSeverity, setNewObsSeverity] = useState<"critical" | "major" | "other">("major");
-  // const [newObsSystem, setNewObsSystem] = useState<QualitySystemKey>("pqs");
-  // const [newObsRootCause, setNewObsRootCause] = useState<RootCauseCategory | "">("");
-
   const toggleActivity = (activity: string) => {
     if (isReadOnly) return;
     setFormData(prev => {
@@ -291,7 +373,7 @@ export default function InspectionChecklistForm({
     });
   };
 
-    const addObservation = () => {
+  const addObservation = () => {
     if (!newObsText.trim()) return;
 
     const uniqueId = crypto.randomUUID();
@@ -307,7 +389,7 @@ export default function InspectionChecklistForm({
       observation_text: newObsText.trim(),
       root_cause_category: newObsRootCause || "Uncategorized",
       rootCauseCategory: newObsRootCause || "Uncategorized",
-    } as unknown as Observation; // 👈 Solves all type mismatches cleanly
+    } as unknown as Observation;
     
     setFormData(prev => ({
       ...prev,
@@ -331,34 +413,6 @@ export default function InspectionChecklistForm({
       major_count: severity === "major" ? Math.max(0, prev.major_count - 1) : prev.major_count,
       other_count: severity === "other" ? Math.max(0, prev.other_count - 1) : prev.other_count,
     }));
-  };
-
-  // Inside your observation creation handler in inspectionChecklist.tsx:
-// 2. Add Observation Handler
-  const handleAddObservation = () => {
-    if (!newObsText.trim()) {
-      alert("Please provide observation details before adding.");
-      return;
-    }
-
-    const newObservation = {
-      id: crypto.randomUUID(),
-      quality_system: newObsSystem || "General Quality System",
-      qualitySystem: newObsSystem || "General Quality System", // Dual keys ensure compatibility
-      severity: newObsSeverity,
-      root_cause_category: newObsRootCause || "Uncategorized",
-      rootCauseCategory: newObsRootCause || "Uncategorized", // Dual keys ensure compatibility
-      observation_text: newObsText,
-      text: newObsText, // Dual keys ensure compatibility
-    };
-
-    // Append new finding to snapshot observations list
-    setObservations((prev: any[]) => [...(prev || []), newObservation]);
-
-    // Reset form inputs for next entry
-    setNewObsText("");
-    setNewObsRootCause("SOP Deficit");
-    setNewObsSeverity("MAJOR");
   };
 
   const handleDraftSubmit = async () => {
@@ -390,144 +444,146 @@ export default function InspectionChecklistForm({
     { key: "laboratory_control", label: "System 6: Laboratory Control (QC Operations)", scoreKey: "laboratory_control_score", notesKey: "laboratory_control_notes", placeholder: "Operations independence..." },
   ];
 
-return (
-  <div className="bg-slate-900 border border-slate-700/60 rounded-xl p-6 shadow-2xl space-y-6">
-    {/* Header Tabs Navigation */}
-    <div className="flex border-b border-slate-700">
-      <button
-        type="button"
-        onClick={() => setActiveTab(1)}
-        className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
-          activeTab === 1
-            ? "border-blue-500 text-blue-400 bg-blue-950/20"
-            : "border-transparent text-slate-400 hover:text-slate-200"
-        }`}
-      >
-        1. Site Identification & Baseline
-      </button>
-      <button
-        type="button"
-        onClick={() => setActiveTab(2)}
-        className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
-          activeTab === 2
-            ? "border-blue-500 text-blue-400 bg-blue-950/20"
-            : "border-transparent text-slate-400 hover:text-slate-200"
-        }`}
-      >
-        2. The 6 Quality Systems
-      </button>
-      <button
-        type="button"
-        onClick={() => setActiveTab(3)}
-        className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
-          activeTab === 3
-            ? "border-blue-500 text-blue-400 bg-blue-950/20"
-            : "border-transparent text-slate-400 hover:text-slate-200"
-        }`}
-      >
-        3. Synthesis & Recommendations
-      </button>
-    </div>
+  return (
+    <div className="bg-slate-900 border border-slate-700/60 rounded-xl p-6 shadow-2xl space-y-6">
+      {/* Header Tabs Navigation */}
+      <div className="flex border-b border-slate-700">
+        <button
+          type="button"
+          onClick={() => setActiveTab(1)}
+          className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
+            activeTab === 1
+              ? "border-blue-500 text-blue-400 bg-blue-950/20"
+              : "border-transparent text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          1. Site Identification & Baseline
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab(2)}
+          className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
+            activeTab === 2
+              ? "border-blue-500 text-blue-400 bg-blue-950/20"
+              : "border-transparent text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          2. The 6 Quality Systems
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab(3)}
+          className={`py-2 px-4 text-xs font-semibold uppercase tracking-wider transition border-b-2 ${
+            activeTab === 3
+              ? "border-blue-500 text-blue-400 bg-blue-950/20"
+              : "border-transparent text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          3. Synthesis & Recommendations
+        </button>
+      </div>
 
-    {/* Tab 1: Site Meta, Geolocation & History Baseline */}
-    {activeTab === 1 && (
-      <div className="space-y-6 animate-fadeIn">
-        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-4">
-          <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-            1.1 Primary Audit Metadata
-          </h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1 font-medium">Report Doc Number</label>
-              <input
-                type="text"
-                disabled={isReadOnly}
-                value={formData.report_doc_number}
-                onChange={e => setFormData(prev => ({ ...prev, report_doc_number: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50 font-mono"
-              />
+      {/* Tab 1: Site Meta, Geolocation & History Baseline */}
+      {activeTab === 1 && (
+        <div className="space-y-6 animate-fadeIn">
+          <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-4">
+            <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+              1.1 Primary Audit Metadata & Team Details
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Report Doc Number</label>
+                <input
+                  type="text"
+                  disabled={isReadOnly}
+                  value={formData.report_doc_number}
+                  onChange={e => setFormData(prev => ({ ...prev, report_doc_number: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Inspected Site Name
+                </label>
+                <input
+                  type="text"
+                  disabled={isReadOnly}
+                  value={formData.inspected_site_name}
+                  onChange={e => setFormData(prev => ({ ...prev, inspected_site_name: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Inspection Dates</label>
+                <input
+                  type="text"
+                  disabled={isReadOnly}
+                  placeholder="e.g. Oct 12 - Oct 14, 2026"
+                  value={formData.inspection_dates}
+                  onChange={e => setFormData(prev => ({ ...prev, inspection_dates: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs text-slate-400 mb-1 font-medium font-bold text-slate-300">
-                Inspected Site Name
-              </label>
-              <input
-                type="text"
-                disabled={isReadOnly}
-                value={formData.inspected_site_name}
-                onChange={e => setFormData(prev => ({ ...prev, inspected_site_name: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
-              />
-            </div>
+            {/* Geolocation Section */}
+            <div className="pt-2 border-t border-slate-700/50">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-slate-300">
+                  Site GPS Coordinates (Latitude & Longitude)
+                </label>
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={handleGeolocate}
+                    disabled={isGeolocating}
+                    className="flex items-center gap-1.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 text-[11px] font-medium px-2.5 py-1 rounded transition disabled:opacity-50"
+                  >
+                    {isGeolocating ? <Spinner /> : "📍 Fetch GPS Location"}
+                  </button>
+                )}
+              </div>
 
-            <div>
-              <label className="block text-xs text-slate-400 mb-1 font-medium">Inspection Dates</label>
-              <input
-                type="text"
-                disabled={isReadOnly}
-                placeholder="e.g. Oct 12 - Oct 14, 2026"
-                value={formData.inspection_dates}
-                onChange={e => setFormData(prev => ({ ...prev, inspection_dates: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
-              />
-            </div>
-          </div>
-
-          {/* Geolocation Section */}
-          <div className="pt-2 border-t border-slate-700/50">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold text-slate-300">
-                Site GPS Coordinates (Latitude & Longitude)
-              </label>
-              {!isReadOnly && (
-                <button
-                  type="button"
-                  onClick={handleGeolocate}
-                  disabled={isGeolocating}
-                  className="flex items-center gap-1.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 text-[11px] font-medium px-2.5 py-1 rounded transition disabled:opacity-50"
-                >
-                  {isGeolocating ? <Spinner /> : "📍 Fetch GPS Location"}
-                </button>
+              {geoError && (
+                <p className="text-[11px] text-rose-400 mb-2 font-mono">⚠️ {geoError}</p>
               )}
-            </div>
 
-            {geoError && (
-              <p className="text-[11px] text-rose-400 mb-2 font-mono">⚠️ {geoError}</p>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Latitude</label>
-                <input
-                  type="number"
-                  step="any"
-                  disabled={isReadOnly}
-                  value={formData.latitude ?? ""}
-                  onChange={e => setFormData(prev => ({ ...prev, latitude: e.target.value ? parseFloat(e.target.value) : null }))}
-                  placeholder="e.g. 8.950700"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Longitude</label>
-                <input
-                  type="number"
-                  step="any"
-                  disabled={isReadOnly}
-                  value={formData.longitude ?? ""}
-                  onChange={e => setFormData(prev => ({ ...prev, longitude: e.target.value ? parseFloat(e.target.value) : null }))}
-                  placeholder="e.g. 7.076800"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Latitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    disabled={isReadOnly}
+                    value={formData.latitude ?? ""}
+                    onChange={e => setFormData(prev => ({ ...prev, latitude: e.target.value ? parseFloat(e.target.value) : null }))}
+                    placeholder="e.g. 8.950700"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Longitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    disabled={isReadOnly}
+                    value={formData.longitude ?? ""}
+                    onChange={e => setFormData(prev => ({ ...prev, longitude: e.target.value ? parseFloat(e.target.value) : null }))}
+                    placeholder="e.g. 7.076800"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1 font-medium">Lead Inspector</label>
+            {/* Lead Inspector */}
+            <div className="pt-2 border-t border-slate-700/50">
+              <label className="block text-xs text-slate-400 mb-1 font-medium">
+                Lead Inspector
+              </label>
               <input
                 type="text"
                 disabled={isReadOnly}
@@ -537,287 +593,366 @@ return (
               />
             </div>
 
+            {/* Co-Inspectors Dynamic Section */}
+            <div className="space-y-2 pt-2 border-t border-slate-700/50">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-300">
+                  Co-Inspectors ({formData.co_inspectors?.length || 0})
+                </label>
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={() => addInspectorField('co_inspectors')}
+                    className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-600 text-blue-400 px-2 py-0.5 rounded transition"
+                  >
+                    + Add Co-Inspector
+                  </button>
+                )}
+              </div>
+
+              {formData.co_inspectors?.length === 0 ? (
+                <p className="text-[11px] text-slate-500 italic">No co-inspectors assigned.</p>
+              ) : (
+                <div className="space-y-2">
+                  {formData.co_inspectors.map((inspector, index) => (
+                    <div key={`co-inspector-${index}`} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        disabled={isReadOnly}
+                        placeholder={`Co-Inspector #${index + 1} Name`}
+                        value={inspector}
+                        onChange={e => handleInspectorChange('co_inspectors', index, e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                      />
+                      {!isReadOnly && (
+                        <button
+                          type="button"
+                          onClick={() => removeInspectorField('co_inspectors', index)}
+                          className="text-rose-400 hover:text-rose-300 text-xs px-2 py-1 font-bold"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Trainees Dynamic Section */}
+            <div className="space-y-2 pt-2 border-t border-slate-700/50">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-300">
+                  Trainees / Observers ({formData.trainees?.length || 0})
+                </label>
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={() => addInspectorField('trainees')}
+                    className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-600 text-blue-400 px-2 py-0.5 rounded transition"
+                  >
+                    + Add Trainee
+                  </button>
+                )}
+              </div>
+
+              {formData.trainees?.length === 0 ? (
+                <p className="text-[11px] text-slate-500 italic">No trainees attached.</p>
+              ) : (
+                <div className="space-y-2">
+                  {formData.trainees.map((trainee, index) => (
+                    <div key={`trainee-${index}`} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        disabled={isReadOnly}
+                        placeholder={`Trainee #${index + 1} Name`}
+                        value={trainee}
+                        onChange={e => handleInspectorChange('trainees', index, e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                      />
+                      {!isReadOnly && (
+                        <button
+                          type="button"
+                          onClick={() => removeInspectorField('trainees', index)}
+                          className="text-rose-400 hover:text-rose-300 text-xs px-2 py-1 font-bold"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-4">
+            <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+              1.2 Scope & Historical Baseline
+            </h3>
+            
             <div>
-              <label className="block text-xs text-slate-400 mb-1 font-medium">Co-Inspectors</label>
-              <input
-                type="text"
+              <label className="block text-xs text-slate-400 mb-2 font-medium">Activities Evaluated</label>
+              <div className="flex flex-wrap gap-2">
+                {["Active Ingredient", "Finished Product", "Intermediate or bulk", "Packaging", "Importing", "Laboratory Testing", "Batch Control", "Batch release"].map(act => {
+                  const active = formData.activities_carried_out.includes(act);
+                  return (
+                    <label
+                      key={act}
+                      className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-md border font-medium transition cursor-pointer select-none ${
+                        active 
+                          ? "bg-blue-600/30 border-blue-500 text-blue-300"
+                          : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                      } ${isReadOnly ? "cursor-not-allowed opacity-60" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={active}
+                        disabled={isReadOnly}
+                        onChange={() => toggleActivity(act)}
+                        className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <span>{act}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-medium">Vicinity & Surrounding Environment Assessment</label>
+              <textarea
+                rows={2}
                 disabled={isReadOnly}
-                placeholder="e.g. Jane Doe, John Smith"
-                value={formData.co_inspectors}
-                onChange={e => setFormData(prev => ({ ...prev, co_inspectors: e.target.value }))}
+                value={formData.vicinity_assessment}
+                onChange={e => setFormData(prev => ({ ...prev, vicinity_assessment: e.target.value }))}
+                placeholder="Details regarding adjacent facilities, potential environmental risks..."
                 className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
               />
             </div>
           </div>
         </div>
+      )}
 
-        <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-4">
-          <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-            1.2 Scope & Historical Baseline
-          </h3>
-          
-          <div>
-            <label className="block text-xs text-slate-400 mb-2 font-medium">Activities Evaluated</label>
-            <div className="flex flex-wrap gap-2">
-              {["Active Ingredient", "Finished Product", "Intermediate or bulk", "Packaging", "Importing", "Laboratory Testing", "Batch Control", "Batch release"].map(act => {
-                const active = formData.activities_carried_out.includes(act);
-                return (
-                  <label
-                    key={act}
-                    className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-md border font-medium transition cursor-pointer select-none ${
-                      active 
-                        ? "bg-blue-600/30 border-blue-500 text-blue-300"
-                        : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
-                    } ${isReadOnly ? "cursor-not-allowed opacity-60" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={active}
-                      disabled={isReadOnly}
-                      onChange={() => toggleActivity(act)}
-                      className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer disabled:cursor-not-allowed"
-                    />
-                    <span>{act}</span>
-                  </label>
-                );
-              })}
+      {/* Tab 2: The 6 Quality Systems */}
+      {activeTab === 2 && (
+        <div className="space-y-4 animate-fadeIn">
+          {qualitySystemsConfigs.map(sys => (
+            <div key={sys.key} className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold text-slate-200">{sys.label}</h4>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400">Compliance Score:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    disabled={isReadOnly}
+                    value={formData[sys.scoreKey] as number}
+                    onChange={e => setFormData(prev => ({ ...prev, [sys.scoreKey]: Number(e.target.value) }))}
+                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-blue-400 font-bold focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                  />
+                  <span className="text-xs text-slate-500">%</span>
+                </div>
+              </div>
+              <textarea
+                rows={2}
+                disabled={isReadOnly}
+                placeholder={sys.placeholder}
+                value={formData[sys.notesKey] as string}
+                onChange={e => setFormData(prev => ({ ...prev, [sys.notesKey]: e.target.value }))}
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              />
             </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-slate-400 mb-1 font-medium">Vicinity & Surrounding Environment Assessment</label>
-            <textarea
-              rows={2}
-              disabled={isReadOnly}
-              value={formData.vicinity_assessment}
-              onChange={e => setFormData(prev => ({ ...prev, vicinity_assessment: e.target.value }))}
-              placeholder="Details regarding adjacent facilities, potential environmental risks..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
-            />
-          </div>
+          ))}
         </div>
-      </div>
-    )}
+      )}
 
-    {/* Tab 2: The 6 Quality Systems */}
-    {activeTab === 2 && (
-      <div className="space-y-4 animate-fadeIn">
-        {qualitySystemsConfigs.map(sys => (
-          <div key={sys.key} className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-slate-200">{sys.label}</h4>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400">Compliance Score:</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  disabled={isReadOnly}
-                  value={formData[sys.scoreKey] as number}
-                  onChange={e => setFormData(prev => ({ ...prev, [sys.scoreKey]: Number(e.target.value) }))}
-                  className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-blue-400 font-bold focus:outline-none focus:border-blue-500 disabled:opacity-50"
+      {/* Tab 3: Synthesis, Observations & Submit */}
+      {activeTab === 3 && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Add Observation Form */}
+          {!isReadOnly && (
+            <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-3 my-4">
+              <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+                Log New Audit Deficit / Observation
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Quality System Domain */}
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Quality System Domain</label>
+                  <select
+                    value={newObsSystem}
+                    onChange={(e) => setNewObsSystem(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="General Quality System">General Quality System</option>
+                    <option value="Premises & Equipment">Premises & Equipment</option>
+                    <option value="Personnel & Training">Personnel & Training</option>
+                    <option value="Pharmaceutical Quality System (PQS)">Pharmaceutical Quality System (PQS)</option>
+                    <option value="Material Management">Material Management</option>
+                    <option value="Laboratory Controls">Laboratory Controls</option>
+                  </select>
+                </div>
+
+                {/* Severity Classification */}
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Severity</label>
+                  <select
+                    value={newObsSeverity}
+                    onChange={(e) => setNewObsSeverity(e.target.value as any)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="CRITICAL">CRITICAL</option>
+                    <option value="MAJOR">MAJOR</option>
+                    <option value="OTHER">OTHER</option>
+                  </select>
+                </div>
+
+                {/* Root Cause Category */}
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Root Cause Category</label>
+                  <select
+                    value={newObsRootCause}
+                    onChange={(e) => setNewObsRootCause(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="SOP Deficit">SOP Deficit</option>
+                    <option value="Training Failure">Training Failure</option>
+                    <option value="Equipment Breakdown">Equipment Breakdown</option>
+                    <option value="Design Flaw">Design Flaw</option>
+                    <option value="Human Error">Human Error</option>
+                    <option value="Vendor Issue">Vendor Issue</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Finding Narrative Textarea */}
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Deficit Description</label>
+                <textarea
+                  rows={2}
+                  value={newObsText}
+                  onChange={(e) => setNewObsText(e.target.value)}
+                  placeholder="Record clear objective evidence of non-compliance..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
                 />
-                <span className="text-xs text-slate-500">%</span>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={addObservation}
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-4 py-1.5 rounded transition-colors shadow-sm"
+                >
+                  + Append Observation
+                </button>
               </div>
             </div>
-            <textarea
-              rows={2}
+          )}
+
+          {/* Logged Observations Table */}
+          <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
+            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              Recorded Audit Findings ({formData.observations.length})
+            </h3>
+
+            {formData.observations.length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-2">No findings or observations logged.</p>
+            ) : (
+              <div className="space-y-2">
+                {formData.observations.map((obs: any) => {
+                  const sev = String(obs.severity || "OTHER").toLowerCase();
+                  const sys = obs.quality_system || obs.qualitySystem || obs.system_category || "General Quality System";
+                  const rootCat = obs.root_cause_category || obs.rootCauseCategory;
+
+                  return (
+                    <div key={obs.id} className="bg-slate-900 border border-slate-800 p-3 rounded-md flex justify-between items-start gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                            sev === "critical" 
+                              ? "bg-rose-950/60 border-rose-500/40 text-rose-400"
+                              : sev === "major"
+                              ? "bg-amber-950/60 border-amber-500/40 text-amber-400"
+                              : "bg-slate-800 border-slate-700 text-slate-300"
+                          }`}>
+                            {sev}
+                          </span>
+                          <span className="text-[11px] font-mono text-slate-400">{sys}</span>
+                          {rootCat && (
+                            <span className="text-[10px] text-blue-400 bg-blue-950/40 border border-blue-500/20 px-1.5 py-0.5 rounded">
+                              {rootCat}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-200">{obs.text || obs.observation_text}</p>
+                      </div>
+
+                      {!isReadOnly && (
+                        <button
+                          type="button"
+                          onClick={() => removeObservation(obs.id, obs.severity)}
+                          className="text-rose-400 hover:text-rose-300 text-xs font-bold"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* FINAL ADJUDICATION DROPDOWN */}
+          <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-2">
+            <label className="block font-bold text-xs text-slate-200 uppercase tracking-wider">
+              Final Recommendation / Adjudication
+            </label>
+            <select
               disabled={isReadOnly}
-              placeholder={sys.placeholder}
-              value={formData[sys.notesKey] as string}
-              onChange={e => setFormData(prev => ({ ...prev, [sys.notesKey]: e.target.value }))}
-              className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-50"
-            />
-          </div>
-        ))}
-      </div>
-    )}
-
-    {/* Tab 3: Synthesis, Observations & Submit */}
-    {activeTab === 3 && (
-        <div className="space-y-6 animate-fadeIn">
-      {/* Add Observation Form */}
-      {!isReadOnly && (
-        <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-3 my-4">
-          <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-            Log New Audit Deficit / Observation
-          </h4>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* Quality System Domain */}
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Quality System Domain</label>
-              <select
-                value={newObsSystem}
-                onChange={(e) => setNewObsSystem(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-              >
-                <option value="General Quality System">General Quality System</option>
-                <option value="Premises & Equipment">Premises & Equipment</option>
-                <option value="Personnel & Training">Personnel & Training</option>
-                <option value="Pharmaceutical Quality System (PQS)">Pharmaceutical Quality System (PQS)</option>
-                <option value="Material Management">Material Management</option>
-                <option value="Laboratory Controls">Laboratory Controls</option>
-              </select>
-            </div>
-
-            {/* Severity Classification */}
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Severity</label>
-              <select
-                value={newObsSeverity}
-                onChange={(e) => setNewObsSeverity(e.target.value as any)}
-                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-              >
-                <option value="CRITICAL">CRITICAL</option>
-                <option value="MAJOR">MAJOR</option>
-                <option value="OTHER">OTHER</option>
-              </select>
-            </div>
-
-            {/* Root Cause Category */}
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Root Cause Category</label>
-              <select
-                value={newObsRootCause}
-                onChange={(e) => setNewObsRootCause(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-              >
-                <option value="SOP Deficit">SOP Deficit</option>
-                <option value="Training Failure">Training Failure</option>
-                <option value="Equipment Breakdown">Equipment Breakdown</option>
-                <option value="Design Flaw">Design Flaw</option>
-                <option value="Human Error">Human Error</option>
-                <option value="Vendor Issue">Vendor Issue</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Finding Narrative Textarea */}
-          <div>
-            <label className="block text-[11px] text-slate-400 mb-1">Deficit Description</label>
-            <textarea
-              rows={2}
-              value={newObsText}
-              onChange={(e) => setNewObsText(e.target.value)}
-              placeholder="Record clear objective evidence of non-compliance..."
-              className="w-full bg-slate-900 border border-slate-700 rounded p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={addObservation}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-4 py-1.5 rounded transition-colors shadow-sm"
+              value={formData.final_recommendation || "PENDING"}
+              onChange={e => setFormData((prev: any) => ({ ...prev, final_recommendation: e.target.value }))}
+              className="w-full bg-slate-900 border border-slate-700 rounded-md p-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:border-blue-500 disabled:opacity-50"
             >
-              + Append Observation
-            </button>
+              <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
+              <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
+              <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
+              <option value="REJECTED">Recommended for Rejection / Hold</option>
+            </select>
           </div>
         </div>
       )}
 
-      {/* Logged Observations Table */}
-      <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-3">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-          Recorded Audit Findings ({formData.observations.length})
-        </h3>
+      {/* Global Form Actions */}
+      {!isReadOnly && (
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
+          {onSaveDraft && (
+            <button
+              type="button"
+              onClick={handleDraftSubmit}
+              disabled={isSavingDraft || isCompiling}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 text-xs font-medium py-2.5 px-4 rounded-md transition flex items-center gap-2 disabled:opacity-50"
+            >
+              {isSavingDraft ? <Spinner /> : null}
+              {isSavingDraft ? "Saving Draft..." : "Save Draft"}
+            </button>
+          )}
 
-        {formData.observations.length === 0 ? (
-          <p className="text-xs text-slate-500 italic py-2">No findings or observations logged.</p>
-        ) : (
-          <div className="space-y-2">
-            {formData.observations.map((obs: any) => {
-              const sev = String(obs.severity || "OTHER").toLowerCase();
-              const sys = obs.quality_system || obs.qualitySystem || obs.system_category || "General Quality System";
-              const rootCat = obs.root_cause_category || obs.rootCauseCategory;
-
-              return (
-                <div key={obs.id} className="bg-slate-900 border border-slate-800 p-3 rounded-md flex justify-between items-start gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
-                        sev === "critical" 
-                          ? "bg-rose-950/60 border-rose-500/40 text-rose-400"
-                          : sev === "major"
-                          ? "bg-amber-950/60 border-amber-500/40 text-amber-400"
-                          : "bg-slate-800 border-slate-700 text-slate-300"
-                      }`}>
-                        {sev}
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-400">{sys}</span>
-                      {rootCat && (
-                        <span className="text-[10px] text-blue-400 bg-blue-950/40 border border-blue-500/20 px-1.5 py-0.5 rounded">
-                          {rootCat}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-200">{obs.text || obs.observation_text}</p>
-                  </div>
-
-                  {!isReadOnly && (
-                    <button
-                      type="button"
-                      onClick={() => removeObservation(obs.id, obs.severity)}
-                      className="text-rose-400 hover:text-rose-300 text-xs font-bold"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* FINAL ADJUDICATION DROPDOWN */}
-      <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-lg space-y-2">
-        <label className="block font-bold text-xs text-slate-200 uppercase tracking-wider">
-          Final Recommendation / Adjudication
-        </label>
-        <select
-          disabled={isReadOnly}
-          value={formData.final_recommendation || "PENDING"}
-          onChange={e => setFormData((prev: any) => ({ ...prev, final_recommendation: e.target.value }))}
-          className="w-full bg-slate-900 border border-slate-700 rounded-md p-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:border-blue-500 disabled:opacity-50"
-        >
-          <option value="PENDING">Select / Awaiting Divisional Deputy Director Evaluation</option>
-          <option value="APPROVED">Recommended for Approval / Issuance of Marketing Authorization</option>
-          <option value="CAPA_PENDING">Compliance pending CAPA verification (Follow-up required)</option>
-          <option value="REJECTED">Recommended for Rejection / Hold</option>
-        </select>
-      </div>
-    </div>
-        )}
-
-    {/* Global Form Actions */}
-    {!isReadOnly && (
-      <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
-        {onSaveDraft && (
           <button
             type="button"
-            onClick={handleDraftSubmit}
-            disabled={isSavingDraft || isCompiling}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 text-xs font-medium py-2.5 px-4 rounded-md transition flex items-center gap-2 disabled:opacity-50"
+            onClick={handleFinalSubmit}
+            disabled={isCompiling || isSavingDraft}
+            className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider py-2.5 px-5 rounded-md transition flex items-center gap-2 shadow-lg disabled:opacity-50"
           >
-            {isSavingDraft ? <Spinner /> : null}
-            {isSavingDraft ? "Saving Draft..." : "Save Draft"}
+            {isCompiling ? <Spinner /> : null}
+            {isCompiling ? "Generating..." : "AI Generate Report Framework"}
           </button>
-        )}
-
-        <button
-          type="button"
-          onClick={handleFinalSubmit}
-          disabled={isCompiling || isSavingDraft}
-          className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider py-2.5 px-5 rounded-md transition flex items-center gap-2 shadow-lg disabled:opacity-50"
-        >
-          {isCompiling ? <Spinner /> : null}
-          {isCompiling ? "Generating..." : "AI Generate Report Framework"}
-        </button>
-      </div>
-    )}
-  </div>
-);
-};
+        </div>
+      )}
+    </div>
+  );
+}
