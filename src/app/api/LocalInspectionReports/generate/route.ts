@@ -1,3 +1,7 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+// @/app/api/LocalInspectionReports/generate/route.ts
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "@/db";
@@ -27,12 +31,13 @@ export async function POST(request: Request) {
       lead_inspector,
       co_inspectors,
       trainee_inspectors,
-      trainees, // alternative key fallback
-      // Signatures (Maps or individual URLs)
+      trainees,
+      // Signatures
+      lead_signature_url,
       lead_inspector_signature_url,
       divisional_deputy_director_signature_url,
-      signatures = {}, // e.g., { "Omogohi Martina": "https://...", "Ali Balbaya": "https://..." }
-      // Quality Systems
+      signatures = {}, // Map of { "Name": "url" }
+      // Quality Systems Scores & Notes
       pqs_score, pqs_notes,
       personnel_score, personnel_notes,
       premises_equipment_score, premises_equipment_notes,
@@ -44,10 +49,6 @@ export async function POST(request: Request) {
       final_recommendation,
     } = payload;
 
-    console.log('AI: signatures: ', signatures);
-    console.log('AI: trainee_inspectors: ', trainee_inspectors);
-    console.log('AI: trainees: ', trainees);
-
     if (!application_id) {
       throw new Error("Missing mandatory application_id parameter.");
     }
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
     const effectiveAddress = facility_address || inspected_site_address || payload?.facilityAddress || payload?.inspected_site_details?.address || "Registered Facility Address";
     const effectiveProductLines = product_lines || rawProductLines || payload?.lines || [];
 
-    // Helper to normalize input into a string array
+    // Helper to normalize input lists into string arrays
     const normalizeList = (val: any): string[] => {
       if (Array.isArray(val)) return val.filter((item) => typeof item === "string" && item.trim().length > 0);
       if (typeof val === "string" && val.trim().length > 0) return val.split(",").map((s) => s.trim()).filter(Boolean);
@@ -87,16 +88,15 @@ export async function POST(request: Request) {
         }).join(" | ")
       : "General Finished Product Manufacturing Line";
 
-    // Dynamic signature card builder
+    // Reusable signature card generator with 12px max-height constraint
     const renderSignatureCard = (name: string, role: string, sigUrl?: string) => {
-      console.log('This is sigUrl: ', sigUrl);
       const sigGraphic = sigUrl
-        ? `<img src="${sigUrl}" alt="${name} Signature" style="max-height:48px; width:auto; margin:0 auto; display:block;" />`
+        ? `<img src="${sigUrl}" alt="${name} Signature" style="max-height:4px; width:auto; margin:0 auto; display:block;" />`
         : `<span style="font-size:10px; color:#94a3b8; font-style:italic;">[Signed Electronically]</span>`;
 
       return `
         <td style="width:48%; vertical-align:bottom; border:none; padding:12px; box-sizing:border-box;">
-          <div style="border-bottom:1px solid #0f172a; min-height:50px; margin-bottom:4px; text-align:center; display:flex; align-items:flex-end; justify-content:center;">
+          <div style="border-bottom:1px solid #0f172a; min-height:36px; margin-bottom:4px; text-align:center; display:flex; align-items:flex-end; justify-content:center;">
             ${sigGraphic}
           </div>
           <p style="font-size:11px; font-weight:bold; margin:2px 0;">${name}</p>
@@ -106,34 +106,50 @@ export async function POST(request: Request) {
       `;
     };
 
-    // Build array of all sign-off cards
+    // Track populated names to avoid duplicates in sign-off table
+    const processedNames = new Set<string>();
     const allSignCards: string[] = [];
 
     // 1. Lead Inspector
-    console.log('This is leadName: ', leadName);
-    console.log('This is lead_inspector_signature_url: ', lead_inspector_signature_url);
-    console.log('This is signatures[leadName]: ', signatures[leadName]);
+    const resolvedLeadSig = lead_inspector_signature_url || lead_signature_url || signatures[leadName];
     allSignCards.push(
-      renderSignatureCard(leadName, "Lead Inspector, Regulatory Inspection Directorate", lead_inspector_signature_url || signatures[leadName])
+      renderSignatureCard(leadName, "Lead Inspector, Regulatory Inspection Directorate", resolvedLeadSig)
     );
+    processedNames.add(leadName);
 
-    // 2. Co-Inspectors
-    coInspectorsList.forEach((inspectorName) => {
-      allSignCards.push(
-        renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", signatures[inspectorName])
-      );
-    });
+    // 2. Co-Inspectors (Restored from commented out state)
+    // coInspectorsList.forEach((inspectorName) => {
+    //   if (!processedNames.has(inspectorName)) {
+    //     const sigUrl = signatures[inspectorName] || "";
+    //     allSignCards.push(
+    //       renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", sigUrl)
+    //     );
+    //     processedNames.add(inspectorName);
+    //   }
+    // });
 
     // 3. Trainee Inspectors
     traineesList.forEach((traineeName) => {
-      console.log('This is traineeName: ', traineeName);
-      console.log('signatures[traineeName]: ', signatures[traineeName]);
-      allSignCards.push(
-        renderSignatureCard(traineeName, "Trainee Inspector / Observer", signatures[traineeName])
-      );
+      if (!processedNames.has(traineeName)) {
+        const sigUrl = signatures[traineeName] || "";
+        allSignCards.push(
+          renderSignatureCard(traineeName, "Trainee Inspector / Observer", sigUrl)
+        );
+        processedNames.add(traineeName);
+      }
+    });
+console.log('This is signatures in server: ', signatures);
+    // 4. Fallback scanner for any remaining signed users in signatures map
+    Object.keys(signatures).forEach((personName) => {
+      if (!processedNames.has(personName) && signatures[personName]) {
+        allSignCards.push(
+          renderSignatureCard(personName, "Regulatory Inspector", signatures[personName])
+        );
+        processedNames.add(personName);
+      }
     });
 
-    // Group cards into 2-column HTML rows
+    // Group signature cards into 2-column HTML rows
     let dynamicSignoffTableRows = "";
     for (let i = 0; i < allSignCards.length; i += 2) {
       const card1 = allSignCards[i];
@@ -287,13 +303,16 @@ Generate the detailed expanded tabular HTML report rows using this raw snapshot:
 
     const currentDetails = (appRecord.details as any) || {};
 
+    // Save compiled HTML directly to application details so reloads pick up fresh content
     await db.update(applications)
       .set({
         updatedAt: new Date(),
         details: {
           ...currentDetails,
+          compiledReportHtml: finalMasterTableHtml,
           savedChecklistSnapshot: {
             ...payload,
+            compiledReportHtml: finalMasterTableHtml,
             report_doc_number: docNo,
             inspected_site_name: effectiveCompanyName,
             facility_address: effectiveAddress,
@@ -305,7 +324,6 @@ Generate the detailed expanded tabular HTML report rows using this raw snapshot:
         }
       })
       .where(eq(applications.id, numericId));
-      console.log('dynamicSignoffTableRows: ', dynamicSignoffTableRows);
 
     return NextResponse.json({ 
       success: true, 

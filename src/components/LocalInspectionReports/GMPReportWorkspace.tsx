@@ -240,64 +240,66 @@ export default function GMPReportWorkspace({
 
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
-  const handleSaveDraft = async (draftPayload: any) => {
-    if (!draftPayload) return;
-    setIsSavingDraft(true);
-    try {
-      setChecklistSnapshot(draftPayload);
+const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
+  if (!draftPayload) return;
+  setIsSavingDraft(true);
+  try {
+    setChecklistSnapshot(draftPayload);
 
-      const currentReportHtml =
-        reportHtml ||
-        draftPayload?.compiledReportHtml ||
-        "";
+    // Prioritize draftPayload's explicit compiledReportHtml over stale state
+    const currentReportHtml =
+      draftPayload?.compiledReportHtml ||
+      reportHtml ||
+      "";
 
-      const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          applicationId,
-          compiledReportHtml: currentReportHtml,
-          checklistSnapshot: draftPayload,
-          savedBy: expectedUserRaw,
-          savedById: activeUserId,
-          savedByRole: activeUserRole,
-          inspectionWorkflowMeta: {
-            lastAction: "DRAFT_SAVE",
-            currentStepKey: currentStep
-          }
-        }),
-      });
+    const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        applicationId,
+        compiledReportHtml: currentReportHtml,
+        checklistSnapshot: draftPayload,
+        savedBy: expectedUserRaw,
+        savedById: activeUserId,
+        savedByRole: activeUserRole,
+        inspectionWorkflowMeta: {
+          lastAction: "DRAFT_SAVE",
+          currentStepKey: currentStep
+        }
+      }),
+    });
 
-      const outcome = await res.json();
-      if (res.ok && outcome.success) {
+    const outcome = await res.json();
+    if (res.ok && outcome.success) {
+      // Only refresh the server router if we are NOT in the middle of an AI compile flow
+      if (!skipRefresh) {
         alert(`Draft snapshot saved successfully by ${expectedUserRaw}!`);
         router.refresh();
-      } else {
-        throw new Error(outcome.error || "Draft storage structural rejection.");
       }
-    } catch (err: any) {
-      alert(`Draft Save Error: ${err.message}`);
-    } finally {
-      setIsSavingDraft(false);
+    } else {
+      throw new Error(outcome.error || "Draft storage structural rejection.");
     }
-  };
+  } catch (err: any) {
+    alert(`Draft Save Error: ${err.message}`);
+  } finally {
+    setIsSavingDraft(false);
+  }
+};
 
   console.log('This is signatures: ', checklistSnapshot?.signatures);
 
   // ✍️ Signature-Aware AI Correlation Handler
 const handleAICorrelationCompile = async (completedFormPayload: any) => {
   if (!completedFormPayload) return;
-  // try {
+  try {
     setChecklistSnapshot(completedFormPayload);
 
-    // Extract signatures from incoming payload or state snapshot fallback
     const leadSignature =
       completedFormPayload.lead_signature_url ||
       completedFormPayload.leadSignatureUrl ||
       checklistSnapshot?.lead_signature_url ||
       checklistSnapshot?.leadSignatureUrl ||
       "";
-      console.log('leadSignature is: ', checklistSnapshot?.lead_signature_url);
 
     const dddSignature =
       completedFormPayload.ddd_signature_url ||
@@ -310,50 +312,53 @@ const handleAICorrelationCompile = async (completedFormPayload: any) => {
       ...(checklistSnapshot?.signatures || {}),
       ...(completedFormPayload.signatures || {})
     };
-  //   const res = await fetch("/api/LocalInspectionReports/generate", {
-  //     method: "POST",
-  //     headers: { "Content-Type": "application/json" },
-  //     body: JSON.stringify({
-  //       ...completedFormPayload,
-  //       application_id: applicationId,
-  //       report_doc_number: `NAFDAC/VMD/GMP/${applicationId}/2026`,
-  //       inspected_site_name: companyName,
-  //       company_name: companyName,
-  //       facility_address: resolvedAddress,
-  //       inspected_site_address: resolvedAddress,
-  //       product_lines: resolvedProductLines,
-  //       productLines: resolvedProductLines,
-  //       applicant_email: resolvedNotificationEmail,
-  //       lead_signature_url: leadSignature,
-  //       lead_inspector_signature_url: leadSignature,
-  //       ddd_signature_url: dddSignature,
-  //       divisional_deputy_director_signature_url: dddSignature,
-  //       signatures: mergedSignatures
-  //     }),
-  //   });
 
-  //   const outcome = await res.json();
-  //   if (outcome.success) {
-  //     // 🔑 Direct use of outcome.report_html — server already dynamically generated signatures
-  //     const finalReportHtml = outcome.report_html;
-  //     setReportHtml(finalReportHtml);
+    const res = await fetch("/api/LocalInspectionReports/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...completedFormPayload,
+        application_id: applicationId,
+        report_doc_number: `NAFDAC/VMD/GMP/${applicationId}/2026`,
+        inspected_site_name: companyName,
+        company_name: companyName,
+        facility_address: resolvedAddress,
+        inspected_site_address: resolvedAddress,
+        product_lines: resolvedProductLines,
+        productLines: resolvedProductLines,
+        applicant_email: resolvedNotificationEmail,
+        lead_signature_url: leadSignature,
+        lead_inspector_signature_url: leadSignature,
+        ddd_signature_url: dddSignature,
+        divisional_deputy_director_signature_url: dddSignature,
+        signatures: mergedSignatures
+      }),
+    });
 
-  //     // 🔑 Automatically save draft with the server's compiled HTML
-  //     const updatedSnapshot = {
-  //       ...completedFormPayload,
-  //       compiledReportHtml: finalReportHtml
-  //     };
-      
-  //     setChecklistSnapshot(updatedSnapshot);
-  //     await handleSaveDraft(updatedSnapshot);
+    const outcome = await res.json();
+    if (outcome.success) {
+      const finalReportHtml = outcome.report_html;
 
-  //     alert("AI Technical Report Narrative compiled and saved successfully!");
-  //   } else {
-  //     alert("Synthesis aborted: " + outcome.error);
-  //   }
-  // } catch (err: any) {
-  //   alert(`Execution Error: ${err.message}`);
-  // }
+      // 1. Immediately update UI state with the fresh report
+      setReportHtml(finalReportHtml);
+
+      const updatedSnapshot = {
+        ...completedFormPayload,
+        compiledReportHtml: finalReportHtml
+      };
+
+      setChecklistSnapshot(updatedSnapshot);
+
+      // 2. Save draft seamlessly in background without calling router.refresh()
+      await handleSaveDraft(updatedSnapshot, true);
+
+      alert("AI Technical Report Narrative compiled and saved successfully!");
+    } else {
+      alert("Synthesis aborted: " + outcome.error);
+    }
+  } catch (err: any) {
+    alert(`Execution Error: ${err.message}`);
+  }
 };
 
  const handleCommitPdfToStorage = async (): Promise<string | null> => {

@@ -144,9 +144,6 @@ export default async function LocalReportPage({ params }: PageProps) {
     }
   }
 
-  // console.log('signaturesMap: ', signaturesMap)
-  // console.log('teamUserIds: ', teamUserIds);
-  
   // Categorize inspectors based on role
   let leadInspectorName = "";
   let leadSignatureUrl = "";
@@ -246,7 +243,6 @@ export default async function LocalReportPage({ params }: PageProps) {
   }
 
   const activeSnapshot = appDetails.checklistSnapshot || appDetails.savedChecklistSnapshot;
-  console.log('activeSnapshot.lead_signature_url in page.tsx: ', activeSnapshot.lead_signature_url);
 
   const facilityAddressState: string = 
     appDetails.facilityAddress || 
@@ -264,21 +260,31 @@ export default async function LocalReportPage({ params }: PageProps) {
     return productNames ? `${lineName} (${productNames})` : lineName;
   });
 
+  // 📦 Safely resolve Lead Inspector Signature with prior draft fallback logic
+  const resolvedLeadInspectorName = activeSnapshot?.lead_inspector || leadInspectorName;
+  const resolvedLeadSig = 
+    leadSignatureUrl || 
+    signaturesMap[resolvedLeadInspectorName] ||
+    activeSnapshot?.lead_signature_url || 
+    activeSnapshot?.leadSignatureUrl || 
+    "";
+
   // 📦 Bundling team assignments & fetched signatures into initial snapshot
   const initialChecklistSnapshot = activeSnapshot 
     ? {
         ...BASE_CHECKLIST_TEMPLATE,
+        ...activeSnapshot, // 👈 1. Spread draft first so intentional field overrides below take priority!
+        
         inspection_dates: activeSnapshot.inspection_dates || scheduledDate,
-        lead_inspector: activeSnapshot.lead_inspector || leadInspectorName,
+        lead_inspector: resolvedLeadInspectorName,
         co_inspectors: activeSnapshot.co_inspectors || coInspectorsFormatted,
         trainee_inspectors: activeSnapshot.trainee_inspectors || traineeInspectorsFormatted,
-        // lead_signature_url: activeSnapshot.lead_signature_url || leadSignatureUrl,
-        lead_signature_url: leadSignatureUrl || activeSnapshot.lead_signature_url,
+        lead_signature_url: resolvedLeadSig, // 👈 2. Explicit override safely preserved
+        leadSignatureUrl: resolvedLeadSig,
         signatures: {
           ...signaturesMap,
           ...(activeSnapshot.signatures || {})
         },
-        ...activeSnapshot,
         notificationEmail: activeSnapshot.notificationEmail || notificationEmail,
         inspectionTypeMeta,
         site_contact_details: {
@@ -298,6 +304,7 @@ export default async function LocalReportPage({ params }: PageProps) {
         co_inspectors: coInspectorsFormatted,
         trainee_inspectors: traineeInspectorsFormatted,
         lead_signature_url: leadSignatureUrl,
+        leadSignatureUrl: leadSignatureUrl,
         signatures: signaturesMap,
         notificationEmail,
         inspectionTypeMeta,
@@ -311,7 +318,7 @@ export default async function LocalReportPage({ params }: PageProps) {
         final_recommendation: "PENDING"
       };
 
-      console.log('Just before: ', initialChecklistSnapshot.lead_signature_url)
+  console.log('Just before passing to Workspace: ', initialChecklistSnapshot.lead_signature_url);
 
   return (
     <div className="bg-slate-50 min-h-screen py-6">
