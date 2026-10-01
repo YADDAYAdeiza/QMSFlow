@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
   Loader2, RotateCcw, ShieldCheck, 
-  FileText, CheckCircle2
+  FileText, CheckCircle2, FileSearch
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
@@ -21,7 +21,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   const [remarks, setRemarks] = useState("");
   const [isPending, startTransition] = useTransition();
   const [processing, setProcessing] = useState(false);
-  const [viewMode, setViewMode] = useState<'dossier' | 'draft'>('dossier');
+  const [viewMode, setViewMode] = useState<'dossier' | 'draft' | 'preview'>('dossier');
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const router = useRouter();
 
@@ -103,6 +103,15 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     }
   }, [app, details, isInspection, complianceRisk]);
 
+  // Route each tab to its unique source document URL
+  const iframeSrc = useMemo(() => {
+    if (viewMode === 'dossier') return pdfUrl || details.poaUrl;
+    if (viewMode === 'preview') {
+      return details.verificationReportUrl || details.finalRecommendationReport || details.technicalAssessmentUrl || null;
+    }
+    return null;
+  }, [viewMode, pdfUrl, details]);
+
   const handleApprove = async () => {
     if (!remarks.trim()) return alert("Executive remarks required.");
     setProcessing(true);
@@ -156,24 +165,37 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
               >
                 <CheckCircle2 className="w-3 h-3" /> Draft {isInspection ? "Certificate" : "Letter"}
               </button>
+              <button 
+                onClick={() => setViewMode('preview')} 
+                className={`px-4 py-2 rounded-full text-[9px] font-black uppercase flex items-center gap-2 transition-all duration-300 ${viewMode === 'preview' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+              >
+                <ShieldCheck className="w-3 h-3" /> Verification Report
+              </button>
             </div>
           </div>
-          <div className="h-full w-full pt-16 flex-1">
-            {viewMode === 'draft' ? (
-              <BlobProvider document={docConfig.component}>
-                {({ url, loading }) => loading ? (
-                  <div className="h-full flex items-center justify-center font-black uppercase text-[10px] text-slate-400 italic">
-                    Compiling Executive Draft...
-                  </div>
-                ) : <iframe src={`${url}#toolbar=0`} className="w-full h-full border-none" /> }
-              </BlobProvider>
-            ) : pdfUrl ? (
-              <iframe src={`${pdfUrl}#toolbar=0`} className="w-full h-full border-none" />
-            ) : (
-              <div className="h-full flex items-center justify-center font-black uppercase text-[10px] text-slate-400 italic text-slate-400">
-                No source document attachment found.
-              </div>
-            )}
+
+          <div className="h-full w-full pt-20 p-6 flex-1">
+            <div className="bg-white p-2 rounded-[3rem] shadow-inner border border-slate-200 h-full relative overflow-hidden flex flex-col">
+              {viewMode === 'draft' ? (
+                <BlobProvider document={docConfig.component}>
+                  {({ url, loading }) => loading ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-2">
+                      <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                      <p className="text-[10px] font-black uppercase tracking-widest italic">Compiling Executive Draft...</p>
+                    </div>
+                  ) : (
+                    <iframe src={`${url}#toolbar=0`} className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" key="draft-pdf" />
+                  )}
+                </BlobProvider>
+              ) : iframeSrc ? (
+                <iframe src={`${iframeSrc}#toolbar=0`} className="w-full h-full rounded-[2.2rem] border-none bg-slate-50" key={viewMode} />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-3">
+                  <FileSearch className="w-12 h-12 opacity-20" />
+                  <p className="text-xs font-bold uppercase tracking-widest text-center px-10">The requested verification report URL is missing.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -207,7 +229,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
             <textarea 
               value={remarks} 
               onChange={(e) => setRemarks(e.target.value)} 
-              className="w-full h-40 bg-slate-800/50 border-none rounded-[2rem] p-6 text-sm mb-6 outline-none text-white italic placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500/20 transition-all" 
+              className="w-full h-40 bg-slate-800/50 border-none rounded-[2.2rem] p-6 text-sm mb-6 outline-none text-white italic placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500/20 transition-all" 
               placeholder={`Enter final executive decision remarks...`} 
             />
             <button 

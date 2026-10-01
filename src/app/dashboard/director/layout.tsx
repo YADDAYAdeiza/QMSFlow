@@ -53,11 +53,11 @@ export default async function DirectorLayout({
   const userDivision = (profile.division || "VMD").toUpperCase();
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans relative">
       
       {/* SHARED DIRECTOR NAVIGATION BAR */}
-      {/* h-20 (80px) height. z-50 ensures it stays above 'fixed' child components */}
-      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 h-20 shadow-sm">
+      {/* h-20 (80px) height. z-[100] ensures it sits cleanly above all page content and conflicting layout headers */}
+      <nav className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-[100] h-20 shadow-md">
         <div className="max-w-7xl mx-auto px-8 h-full flex items-center justify-between">
           
           <div className="flex items-center gap-8">
@@ -79,44 +79,42 @@ export default async function DirectorLayout({
             <div className="h-10 w-[1px] bg-slate-100 mx-2 hidden md:block" />
 
             {/* NAVIGATION TABS */}
-            {/* NAVIGATION TABS WITH CORRECTED HISTORY ROUTE */}
-    <div className="flex items-center gap-1">
-      <Link 
-        href="/dashboard/director" 
-        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-      >
-        <LayoutDashboard className="w-4 h-4" /> Workspace
-      </Link>
+            <div className="flex items-center gap-1">
+              <Link 
+                href="/dashboard/director" 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+              >
+                <LayoutDashboard className="w-4 h-4" /> Workspace
+              </Link>
 
-      {/* ✅ FIXED: Pointed directly to /history path instead of duplicate workspace link */}
-      <Link 
-        href="/dashboard/director/history" 
-        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-      >
-        <History className="w-4 h-4" /> My History
-      </Link>
+              <Link 
+                href="/dashboard/director/history" 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+              >
+                <History className="w-4 h-4" /> My History
+              </Link>
 
-      <Link 
-        href="/dashboard/director/applications" 
-        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-      >
-        <Globe className="w-4 h-4" /> Master Tracker
-      </Link>
+              <Link 
+                href="/dashboard/director/applications" 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+              >
+                <Globe className="w-4 h-4" /> Master Tracker
+              </Link>
 
-      <Link 
-        href="/dashboard/director/performance" 
-        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-      >
-        <Timer className="w-4 h-4" /> Performance
-      </Link>
+              <Link 
+                href="/dashboard/director/performance" 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+              >
+                <Timer className="w-4 h-4" /> Performance
+              </Link>
 
-      <Link 
-        href="/dashboard/director/analytics" 
-        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
-      >
-        <BarChart3 className="w-4 h-4" /> Analytics
-      </Link>
-    </div>
+              <Link 
+                href="/dashboard/director/analytics" 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all"
+              >
+                <BarChart3 className="w-4 h-4" /> Analytics
+              </Link>
+            </div>
           </div>
 
           {/* USER PROFILE SECTION */}
@@ -137,12 +135,9 @@ export default async function DirectorLayout({
         </div>
       </nav>
 
-      {/* PAGE CONTENT */}
-      {/* pt-20 provides the offset for non-fixed pages. 
-          flex-1 ensures the main area expands to fill the screen.
-      */}
-      <main className="flex-1 pt-20">
-        <div className="max-w-7xl mx-auto h-full px-8">
+      {/* PAGE CONTENT CONTAINER */}
+      <main className="flex-1 w-full pb-16">
+        <div className="max-w-7xl mx-auto h-full px-8 pt-8">
           {children}
         </div>
       </main>

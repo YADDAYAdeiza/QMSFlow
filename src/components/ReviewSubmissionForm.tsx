@@ -86,13 +86,13 @@ export default function ReviewSubmissionForm({
         const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
-          .from('Documents') 
+          .from('documents') 
           .upload(filePath, evidenceFile);
         
         if (uploadError) throw uploadError;
 
         const { data: { publicUrl: url } } = supabase.storage
-          .from('Documents')
+          .from('documents')
           .getPublicUrl(filePath);
           
         publicUrl = url;

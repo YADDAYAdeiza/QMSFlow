@@ -70,7 +70,7 @@ export default async function DDDInboxPage({
 
   const isAssignedView = view === "assigned";
   
-  // 4. Resolve Workflow Titles Dynamically using the Directorate
+  // 4. Resolve Workflow Steps & Config-Driven Query Criteria
   const techAssignmentStep = getWorkflowStep(actingDirectorate, "DDD_TECHNICAL_ASSIGNMENT");
   const techReviewStep = getWorkflowStep(actingDirectorate, "DDD_TECHNICAL_REVIEW");
   const irsdIntakeStep = getWorkflowStep(actingDirectorate, "DDD_IRSD_INTAKE");
@@ -81,9 +81,6 @@ export default async function DDDInboxPage({
     techReviewStep?.title,
     irsdIntakeStep?.title,
     irsdReviewStep?.title,
-    "Technical DD Review",
-    "Technical DD Review Return",
-    "IRSD Staff Vetting Return"
   ].filter(Boolean) as string[];
 
   const incomingStatuses = [
@@ -91,10 +88,6 @@ export default async function DDDInboxPage({
     techReviewStep?.statusLabel,
     irsdIntakeStep?.statusLabel,
     irsdReviewStep?.statusLabel,
-    'PENDING_DIRECTOR',
-    "REWORK_REQUIRED",
-    "AWAITING_HUB_ENDORSEMENT",
-    "PENDING_DD_RECOMMENDATION"
   ].filter(Boolean) as string[];
 
   // For the assigned monitoring view (staff active steps)
@@ -104,10 +97,9 @@ export default async function DDDInboxPage({
   const assignedTitles = [
     staffAssignmentStep?.title,
     irsdVettingStep?.title,
-    "Staff Technical Field Review",
   ].filter(Boolean) as string[];
 
-  // 5. Streamlined Database Query mapped to Workflow Titles & Division
+  // 5. Config-Driven Database Query
   const rawInbox = await db
     .select({
       id: applications.id,
@@ -177,16 +169,18 @@ export default async function DDDInboxPage({
     const lookupKey = String(app.staffId || "").toLowerCase();
     const staffName = lookupKey ? staffMap[lookupKey] || null : null;
 
-    const isReturningFromStaff = 
-      app.currentPoint === techReviewStep?.title || 
-      app.currentPoint === irsdReviewStep?.title ||
-      app.status === "PENDING_TECHNICAL_ENDORSEMENT" ||
-      app.status === "PENDING_IRSD_CONCURRENCE";
+    const isReturningFromTech = 
+      Boolean(techReviewStep) && 
+      (app.currentPoint === techReviewStep?.title || app.status === techReviewStep?.statusLabel);
+
+    const isReturningFromIrsd = 
+      Boolean(irsdReviewStep) && 
+      (app.currentPoint === irsdReviewStep?.title || app.status === irsdReviewStep?.statusLabel);
+
+    const isReturningFromStaff = isReturningFromTech || isReturningFromIrsd;
 
     return { ...app, displayTime, isRound2, isRework, staffName, isReturningFromStaff };
   });
-
-  console.log('isAssignedView: ', isAssignedView)
 
   return (
     <div className="p-8 bg-slate-50 min-h-screen font-sans">
