@@ -9,22 +9,16 @@ import {
   scheduleBatches,
   users 
 } from "@/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, or } from "drizzle-orm";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { ShieldAlert, ClipboardList, UserCheck, Eye, Lock } from "lucide-react";
+import { ShieldAlert, ClipboardList, UserCheck, Eye, Lock, FileCheck } from "lucide-react";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 
 export const dynamic = "force-dynamic";
 
-// ============================================================================
-// CONFIGURATION (Adjust & Git Push to change locking policy)
-// ============================================================================
-//  0 = Locked until the exact scheduled day (00:00:00 local time)
-// -1 = Unlocks 1 day prior to scheduled date
-// -2 = Unlocks 2 days prior to scheduled date (Handles foreign timezones & travel)
 const INSPECTION_LOCK_THRESHOLD_DAYS = -20; 
 
 interface Task {
@@ -42,7 +36,14 @@ interface Task {
   };
 }
 
-// Deterministic date formatter
+interface VettingTask {
+  applicationId: string;
+  fileNumber: string;
+  companyName: string;
+  currentPoint: string;
+  assignedAt?: string;
+}
+
 function formatDateSafe(dateInput: string | Date | null | undefined): string {
   if (!dateInput) return "Pending Data";
   try {
@@ -57,7 +58,6 @@ function formatDateSafe(dateInput: string | Date | null | undefined): string {
   }
 }
 
-// Helper: Formats a date to YYYY-MM-DD in West Africa Time (Africa/Lagos)
 function getLocalDateString(dateInput?: string | Date | null): string {
   if (!dateInput) return "";
   const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
@@ -65,14 +65,11 @@ function getLocalDateString(dateInput?: string | Date | null): string {
   return d.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
 }
 
-// Helper to evaluate if the inspection is still locked
 function checkIfLocked(scheduledDateInput: string | Date | null | undefined): boolean {
-  if (!scheduledDateInput) return true; // Lock if date is undefined/missing
-  
+  if (!scheduledDateInput) return true;
   const targetDate = new Date(scheduledDateInput);
   if (isNaN(targetDate.getTime())) return true;
 
-  // Calculate unlock threshold date
   const unlockDate = new Date(targetDate);
   unlockDate.setDate(unlockDate.getDate() + INSPECTION_LOCK_THRESHOLD_DAYS);
 
@@ -80,11 +77,15 @@ function checkIfLocked(scheduledDateInput: string | Date | null | undefined): bo
   const unlockStr = getLocalDateString(unlockDate);
 
   if (!todayStr || !unlockStr) return true;
-
   return todayStr < unlockStr;
 }
 
-export default async function InspectorWorkspacePage() {
+export default async function InspectorWorkspacePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab = "field" } = await searchParams;
   const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -105,7 +106,6 @@ export default async function InspectorWorkspacePage() {
     }
   );
 
-  // Authenticate securely against Supabase Auth server (replaces session check)
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) redirect("/login");
 
@@ -141,7 +141,8 @@ export default async function InspectorWorkspacePage() {
     );
   }
 
-  let tasks: Task[] = [];
+  // Fetch Field Tasks
+  let fieldTasks: Task[] = [];
   try {
     const rawAssignments = await db
       .select({
@@ -155,22 +156,10 @@ export default async function InspectorWorkspacePage() {
         companyName: companies.name,
       })
       .from(inspectionTeamAssignments)
-      .innerJoin(
-        inspectionSchedules,
-        eq(inspectionTeamAssignments.scheduleId, inspectionSchedules.id)
-      )
-      .innerJoin(
-        applications,
-        eq(inspectionSchedules.applicationId, applications.id)
-      )
-      .innerJoin(
-        companies,
-        eq(applications.companyId, companies.id)
-      )
-      .innerJoin(
-        scheduleBatches,
-        eq(inspectionSchedules.batchId, scheduleBatches.id)
-      )
+      .innerJoin(inspectionSchedules, eq(inspectionTeamAssignments.scheduleId, inspectionSchedules.id))
+      .innerJoin(applications, eq(inspectionSchedules.applicationId, applications.id))
+      .innerJoin(companies, eq(applications.companyId, companies.id))
+      .innerJoin(scheduleBatches, eq(inspectionSchedules.batchId, scheduleBatches.id))
       .where(
         and(
           eq(inspectionTeamAssignments.inspectorId, userRecord.id),
@@ -193,7 +182,7 @@ export default async function InspectorWorkspacePage() {
       }
     }
 
-    tasks = Array.from(uniqueAssignmentsMap.values()).map((row) => ({
+    fieldTasks = Array.from(uniqueAssignmentsMap.values()).map((row) => ({
       scheduleId: String(row.scheduleId),
       rawScheduledDate: row.scheduledDate ? new Date(row.scheduledDate) : null,
       scheduledDate: formatDateSafe(row.scheduledDate),
@@ -207,133 +196,211 @@ export default async function InspectorWorkspacePage() {
         currentPoint: row.currentPoint ?? inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
       },
     }));
-  } catch (dbError) {
-    console.error("Direct Database Fetch Failure:", dbError);
+  } catch (err) {
+    console.error("Field Query Error:", err);
+  }
+
+  // Fetch IRSD Vetting Tasks
+  let vettingTasks: VettingTask[] = [];
+  try {
+    const rawVetting = await db
+      .select({
+        applicationId: applications.id,
+        fileNumber: applications.applicationNumber,
+        currentPoint: applications.currentPoint,
+        companyName: companies.name,
+      })
+      .from(applications)
+      .innerJoin(companies, eq(applications.companyId, companies.id))
+      .where(
+        and(
+          eq(applications.assignedVettingInspectorId, userRecord.id),
+          or(
+            eq(applications.currentPoint, inspectionReportWorkflow.steps.IRSD_STAFF_VETTING.title),
+            eq(applications.currentPoint, "IRSD_STAFF_VETTING"),
+            eq(applications.currentPoint, "IRSD Staff Compliance Vetting")
+          )
+        )
+      );
+
+    vettingTasks = rawVetting.map((row) => ({
+      applicationId: String(row.applicationId),
+      fileNumber: row.fileNumber || "No File #",
+      companyName: row.companyName,
+      currentPoint: row.currentPoint || "IRSD Staff Compliance Vetting",
+    }));
+  } catch (err) {
+    console.error("Vetting Query Error:", err);
   }
 
   return (
     <div className="p-8 max-w-6xl mx-auto font-sans text-slate-900">
-      <div className="mb-8 border-b border-slate-200 pb-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">
-              Inspector Field Assignment Desk
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">
-              {userRecord.name} • Inspector ({userRecord.division || "VMD"})
-            </p>
-          </div>
+      <div className="mb-6 border-b border-slate-200 pb-5 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">
+            Inspector Assignment Desk
+          </h1>
+          <p className="text-xs text-slate-500 mt-1">
+            {userRecord.name} • ({userRecord.division || "IRSD"})
+          </p>
         </div>
       </div>
 
-      <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">
-        Pending Scheduled Inspections ({tasks.length})
-      </h2>
+      {/* Workspace Tabs */}
+      <div className="flex border-b border-slate-200 mb-6 gap-6">
+        <Link
+          href="?tab=field"
+          className={`pb-3 text-xs font-bold transition-colors border-b-2 ${
+            tab === "field"
+              ? "border-blue-600 text-blue-600"
+              : "border-transparent text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          Field Inspection Tasks ({fieldTasks.length})
+        </Link>
+        <Link
+          href="?tab=vetting"
+          className={`pb-3 text-xs font-bold transition-colors border-b-2 flex items-center gap-2 ${
+            tab === "vetting"
+              ? "border-emerald-600 text-emerald-600"
+              : "border-transparent text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          IRSD Vetting Desk ({vettingTasks.length})
+        </Link>
+      </div>
 
-      {tasks.length === 0 ? (
-        <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-lg text-slate-400 text-xs font-medium bg-white">
-          No pending approved field inspections assigned to your profile.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {tasks.map((task) => {
-            const isLead = task.assignedRole === "TEAM_LEADER";
-            const isTrainee = task.assignedRole === "TRAINEE_INSPECTOR";
-            let roleBadgeStyles = "bg-blue-50 text-blue-800 border-blue-200";
-            if (isLead) roleBadgeStyles = "bg-purple-50 text-purple-800 border-purple-200";
-            if (isTrainee) roleBadgeStyles = "bg-slate-100 text-slate-600 border-slate-300";
+      {/* Tab 1: Field Assignments */}
+      {tab === "field" && (
+        <>
+          {fieldTasks.length === 0 ? (
+            <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-lg text-slate-400 text-xs font-medium bg-white">
+              No pending approved field inspections assigned to your profile.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {fieldTasks.map((task) => {
+                const isLead = task.assignedRole === "TEAM_LEADER";
+                const isTrainee = task.assignedRole === "TRAINEE_INSPECTOR";
+                let roleBadgeStyles = "bg-blue-50 text-blue-800 border-blue-200";
+                if (isLead) roleBadgeStyles = "bg-purple-50 text-purple-800 border-purple-200";
+                if (isTrainee) roleBadgeStyles = "bg-slate-100 text-slate-600 border-slate-300";
 
-            return (
-              <div 
-                key={task.scheduleId} 
-                className={`bg-white border rounded-lg shadow-sm transition-shadow flex flex-col justify-between ${
-                  task.isLocked ? "border-slate-200 opacity-80" : "border-slate-200 hover:shadow-md"
-                }`}
-              >
-                <div className="p-4 flex flex-col gap-3">
-                  <div className="flex justify-between items-start gap-2">
-                    <span className="text-[10px] font-mono text-slate-400 font-semibold tracking-tight">
-                      {task.application.fileNumber}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {task.isLocked && (
-                        <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded uppercase tracking-wider">
-                          <Lock className="w-2.5 h-2.5" />
-                          Locked
+                return (
+                  <div
+                    key={task.scheduleId}
+                    className={`bg-white border rounded-lg shadow-sm transition-shadow flex flex-col justify-between ${
+                      task.isLocked ? "border-slate-200 opacity-80" : "border-slate-200 hover:shadow-md"
+                    }`}
+                  >
+                    <div className="p-4 flex flex-col gap-3">
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="text-[10px] font-mono text-slate-400 font-semibold tracking-tight">
+                          {task.application.fileNumber}
                         </span>
+                        <div className="flex items-center gap-1.5">
+                          {task.isLocked && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                              <Lock className="w-2.5 h-2.5" />
+                              Locked
+                            </span>
+                          )}
+                          <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded uppercase tracking-wider ${roleBadgeStyles}`}>
+                            {task.assignedRole.replace("_", " ")}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-800 line-clamp-1">
+                          {task.application.companyName}
+                        </h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Target Date: <span className="font-semibold text-slate-600">{task.scheduledDate}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 rounded-b-lg flex justify-end gap-2">
+                      {task.isLocked ? (
+                        <button disabled className="w-full text-center text-xs font-semibold py-1.5 px-3 rounded bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed flex items-center justify-center gap-1.5 select-none">
+                          <Lock className="w-3.5 h-3.5" />
+                          Locked ({task.scheduledDate})
+                        </button>
+                      ) : isTrainee ? (
+                        <Link href={`/LocalInspectionReports/${task.application.id}?mode=readonly`} className="w-full text-center text-xs font-semibold py-1.5 px-3 rounded bg-white border border-slate-200 text-slate-600 flex items-center justify-center gap-1.5">
+                          <Eye className="w-3.5 h-3.5" />
+                          View Audit Documents
+                        </Link>
+                      ) : (
+                        <>
+                          <Link href={`/LocalInspectionReports/${task.application.id}?mode=checklist`} className="text-center text-xs font-medium py-1.5 px-3 rounded bg-white border border-slate-200 text-slate-700 flex items-center gap-1">
+                            <ClipboardList className="w-3.5 h-3.5 text-slate-400" />
+                            Checklists
+                          </Link>
+                          <Link href={`/LocalInspectionReports/${task.application.id}?mode=field-notes`} className={`text-center text-xs font-semibold py-1.5 px-3 rounded text-white flex items-center gap-1 ${isLead ? "bg-purple-600 hover:bg-purple-700" : "bg-blue-600 hover:bg-blue-700"}`}>
+                            <UserCheck className="w-3.5 h-3.5" />
+                            {isLead ? "Sign-Off" : "Record Inputs"}
+                          </Link>
+                        </>
                       )}
-                      <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded uppercase tracking-wider ${roleBadgeStyles}`}>
-                        {task.assignedRole.replace("_", " ")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Tab 2: IRSD Vetting Desk */}
+      {tab === "vetting" && (
+        <>
+          {vettingTasks.length === 0 ? (
+            <div className="text-center py-12 border-2 border-dashed border-emerald-100 rounded-lg text-slate-400 text-xs font-medium bg-emerald-50/20">
+              No applications currently pending your IRSD compliance vetting.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {vettingTasks.map((vetTask) => (
+                <div
+                  key={vetTask.applicationId}
+                  className="bg-white border border-emerald-200 rounded-lg shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+                >
+                  <div className="p-4 flex flex-col gap-3">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-[10px] font-mono text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded font-semibold">
+                        {vetTask.fileNumber}
                       </span>
+                      <span className="text-[9px] font-bold border border-emerald-200 bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                        Compliance Vetting
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 line-clamp-1">
+                        {vetTask.companyName}
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Assigned for Desk Review & Compliance Vetting
+                      </p>
                     </div>
                   </div>
 
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-800 line-clamp-1">
-                      {task.application.companyName}
-                    </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Target Date: <span className="font-semibold text-slate-600">{task.scheduledDate}</span>
-                    </p>
-                  </div>
-
-                  <div className="mt-1 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400 font-medium">Stage:</span>
-                    <span className="font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
-                      {task.application.currentPoint}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Card Actions Block */}
-                <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 rounded-b-lg flex justify-end gap-2">
-                  {task.isLocked ? (
-                    /* Locked UI State */
-                    <button
-                      disabled
-                      className="w-full text-center text-xs font-semibold py-1.5 px-3 rounded bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed flex items-center justify-center gap-1.5 select-none"
+                  <div className="px-4 py-3 bg-emerald-50/50 border-t border-emerald-100 rounded-b-lg flex justify-end">
+                    <Link
+                      href={`/LocalInspectionReports/${vetTask.applicationId}?step=IRSD_STAFF_VETTING`}
+                      className="w-full text-center text-xs font-semibold py-2 px-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm flex items-center justify-center gap-1.5"
                     >
-                      <Lock className="w-3.5 h-3.5" />
-                      Locked Until Scheduled Date ({task.scheduledDate})
-                    </button>
-                  ) : isTrainee ? (
-                    /* Unlocked Trainee UI */
-                    <Link 
-                      href={`/LocalInspectionReports/${task.application.id}?mode=readonly`}
-                      className="w-full text-center text-xs font-semibold py-1.5 px-3 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      View Audit Documents (Read-Only)
+                      <FileCheck className="w-3.5 h-3.5" />
+                      Perform Vetting Review
                     </Link>
-                  ) : (
-                    /* Unlocked Inspector UI */
-                    <>
-                      <Link 
-                        href={`/LocalInspectionReports/${task.application.id}?mode=checklist`}
-                        className="text-center text-xs font-medium py-1.5 px-3 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 transition-colors flex items-center gap-1"
-                      >
-                        <ClipboardList className="w-3.5 h-3.5 text-slate-400" />
-                        Checklists
-                      </Link>
-                      
-                      <Link 
-                        href={`/LocalInspectionReports/${task.application.id}?mode=field-notes`}
-                        className={`text-center text-xs font-semibold py-1.5 px-3 rounded text-white transition-colors shadow-sm flex items-center gap-1 ${
-                          isLead 
-                            ? "bg-purple-600 hover:bg-purple-700" 
-                            : "bg-blue-600 hover:bg-blue-700"
-                        }`}
-                      >
-                        <UserCheck className="w-3.5 h-3.5" />
-                        {isLead ? "Execute Final Sign-Off" : "Record Audit Inputs"}
-                      </Link>
-                    </>
-                  )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

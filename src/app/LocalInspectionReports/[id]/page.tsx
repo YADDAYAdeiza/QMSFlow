@@ -6,8 +6,35 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import GMPReportWorkspace from "@/components/LocalInspectionReports/GMPReportWorkspace";
 
+// 🎯 Express Step Key Union Type matching GMPReportWorkspace requirements
+export type StepKey =
+  | "STAFF_TECHNICAL_REVIEW"
+  | "DDD_TECHNICAL_ASSIGNMENT"
+  | "LOD"
+  | "DIRECTOR_INTAKE"
+  | "DDD_TECHNICAL_REVIEW"
+  | "DDD_IRSD_INTAKE"
+  | "IRSD_STAFF_VETTING"
+  | "DDD_IRSD_REVIEW"
+  | "DIRECTOR_FINAL_SIGN_OFF"
+  | "FINALIZED";
+
+const VALID_STEP_KEYS: StepKey[] = [
+  "STAFF_TECHNICAL_REVIEW",
+  "DDD_TECHNICAL_ASSIGNMENT",
+  "LOD",
+  "DIRECTOR_INTAKE",
+  "DDD_TECHNICAL_REVIEW",
+  "DDD_IRSD_INTAKE",
+  "IRSD_STAFF_VETTING",
+  "DDD_IRSD_REVIEW",
+  "DIRECTOR_FINAL_SIGN_OFF",
+  "FINALIZED",
+];
+
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ step?: string }>;
 }
 
 const BASE_CHECKLIST_TEMPLATE = {
@@ -47,7 +74,7 @@ const BASE_CHECKLIST_TEMPLATE = {
   final_recommendation: "PENDING"
 };
 
-export default async function LocalReportPage({ params }: PageProps) {
+export default async function LocalReportPage({ params, searchParams }: PageProps) {
   // 🔐 Authenticated session validation
   const supabase = await createClient();
   
@@ -64,6 +91,9 @@ export default async function LocalReportPage({ params }: PageProps) {
   }
 
   const resolvedParams = await params;
+  const resolvedSearchParams = (await searchParams) || {};
+  const requestedStep = resolvedSearchParams.step;
+
   const targetId = resolvedParams.id;
   const numericId = Number(targetId);
   if (isNaN(numericId)) {
@@ -226,9 +256,12 @@ export default async function LocalReportPage({ params }: PageProps) {
   const inspectionTypeMeta = appDetails.inspectionTypeMeta || "";
   
   const currentPointStr = application.currentPoint || "";
-  let initialStepKey = "STAFF_TECHNICAL_REVIEW";
+  let initialStepKey: StepKey = "STAFF_TECHNICAL_REVIEW";
 
-  if (
+  // Validate and type guard requested step from URL query param
+  if (requestedStep && VALID_STEP_KEYS.includes(requestedStep as StepKey)) {
+    initialStepKey = requestedStep as StepKey;
+  } else if (
     currentPointStr === "Staff Technical Field Review" || 
     currentPointStr === "STAFF_TECHNICAL_REVIEW"
   ) {
@@ -239,7 +272,10 @@ export default async function LocalReportPage({ params }: PageProps) {
   ) {
     initialStepKey = "DDD_TECHNICAL_ASSIGNMENT";
   } else {
-    initialStepKey = appDetails.inspectionWorkflowMeta?.currentStepKey || currentPointStr || "STAFF_TECHNICAL_REVIEW";
+    const fallbackStep = appDetails.inspectionWorkflowMeta?.currentStepKey || currentPointStr;
+    if (VALID_STEP_KEYS.includes(fallbackStep as StepKey)) {
+      initialStepKey = fallbackStep as StepKey;
+    }
   }
 
   const activeSnapshot = appDetails.checklistSnapshot || appDetails.savedChecklistSnapshot;

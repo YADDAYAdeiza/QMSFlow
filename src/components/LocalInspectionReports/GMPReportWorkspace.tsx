@@ -9,8 +9,6 @@ import InspectionChecklistForm from "./InspectionChecklistForm";
 import ReportRichTextEditor from "./ReportRichTextEditor";
 import { uploadDossierPdf, buildCompanyFilePath } from "@/lib/utils/supabaseUpload";
 import CertificateOrCapaPreviewTab from "@/components/LocalInspectionReports/CertificateOrCapaPreviewTab";
-// import { injectSignaturesIntoHtml } from "@/lib/utils/reportUtils";
-import { convertSegmentPathToStaticExportFilename } from "next/dist/shared/lib/segment-cache/segment-value-encoding";
 
 const BASE_CHECKLIST_TEMPLATE = {
   report_doc_number: "OKL-LA-PRI-01-2026",
@@ -97,13 +95,15 @@ export default function GMPReportWorkspace({
   applicantEmail = "",
   scheduledDate = "",
   leadInspectorName = "",
-  initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
+  initialStepKey = "DDD_IRSD_INTAKE",
   initialReportHtml = null,
   initialChecklistSnapshot = null,
   initialComments = [],
   facilityAddressState = "",
   productLinesState = []
 }: WorkspaceProps) {
+
+  // alert(initialStepKey);
   const router = useRouter();
   const expectedUserRaw = activeUserName;
 
@@ -154,6 +154,18 @@ export default function GMPReportWorkspace({
       setActiveUserRole(targetStepConfig.role);
     }
   };
+
+  useEffect(() => {
+  if (initialStepKey && inspectionReportWorkflow.steps[initialStepKey]) {
+    setCurrentStep(initialStepKey);
+    setStepEntryTime(Date.now());
+    
+    const stepConfig = inspectionReportWorkflow.steps[initialStepKey];
+    if (stepConfig?.role) {
+      setActiveUserRole(stepConfig.role);
+    }
+  }
+}, [initialStepKey]);
 
   useEffect(() => {
     async function fetchStaffMembers() {
@@ -240,192 +252,184 @@ export default function GMPReportWorkspace({
 
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
-const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
-  if (!draftPayload) return;
-  setIsSavingDraft(true);
-  try {
-    setChecklistSnapshot(draftPayload);
+  const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
+    if (!draftPayload) return;
+    setIsSavingDraft(true);
+    try {
+      setChecklistSnapshot(draftPayload);
 
-    // Prioritize draftPayload's explicit compiledReportHtml over stale state
-    const currentReportHtml =
-      draftPayload?.compiledReportHtml ||
-      reportHtml ||
-      "";
+      const currentReportHtml =
+        draftPayload?.compiledReportHtml ||
+        reportHtml ||
+        "";
 
-    const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        applicationId,
-        compiledReportHtml: currentReportHtml,
-        checklistSnapshot: draftPayload,
-        savedBy: expectedUserRaw,
-        savedById: activeUserId,
-        savedByRole: activeUserRole,
-        inspectionWorkflowMeta: {
-          lastAction: "DRAFT_SAVE",
-          currentStepKey: currentStep
+      const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          applicationId,
+          compiledReportHtml: currentReportHtml,
+          checklistSnapshot: draftPayload,
+          savedBy: expectedUserRaw,
+          savedById: activeUserId,
+          savedByRole: activeUserRole,
+          inspectionWorkflowMeta: {
+            lastAction: "DRAFT_SAVE",
+            currentStepKey: currentStep
+          }
+        }),
+      });
+
+      const outcome = await res.json();
+      if (res.ok && outcome.success) {
+        if (!skipRefresh) {
+          alert(`Draft snapshot saved successfully by ${expectedUserRaw}!`);
+          router.refresh();
         }
-      }),
-    });
-
-    const outcome = await res.json();
-    if (res.ok && outcome.success) {
-      // Only refresh the server router if we are NOT in the middle of an AI compile flow
-      if (!skipRefresh) {
-        alert(`Draft snapshot saved successfully by ${expectedUserRaw}!`);
-        router.refresh();
+      } else {
+        throw new Error(outcome.error || "Draft storage structural rejection.");
       }
-    } else {
-      throw new Error(outcome.error || "Draft storage structural rejection.");
+    } catch (err: any) {
+      alert(`Draft Save Error: ${err.message}`);
+    } finally {
+      setIsSavingDraft(false);
     }
-  } catch (err: any) {
-    alert(`Draft Save Error: ${err.message}`);
-  } finally {
-    setIsSavingDraft(false);
-  }
-};
+  };
 
-  console.log('This is signatures: ', checklistSnapshot?.signatures);
+  const handleAICorrelationCompile = async (completedFormPayload: any) => {
+    if (!completedFormPayload) return;
+    try {
+      setChecklistSnapshot(completedFormPayload);
 
-  // ✍️ Signature-Aware AI Correlation Handler
-const handleAICorrelationCompile = async (completedFormPayload: any) => {
-  if (!completedFormPayload) return;
-  try {
-    setChecklistSnapshot(completedFormPayload);
+      const leadSignature =
+        completedFormPayload.lead_signature_url ||
+        completedFormPayload.leadSignatureUrl ||
+        checklistSnapshot?.lead_signature_url ||
+        checklistSnapshot?.leadSignatureUrl ||
+        "";
 
-    const leadSignature =
-      completedFormPayload.lead_signature_url ||
-      completedFormPayload.leadSignatureUrl ||
-      checklistSnapshot?.lead_signature_url ||
-      checklistSnapshot?.leadSignatureUrl ||
-      "";
+      const dddSignature =
+        completedFormPayload.ddd_signature_url ||
+        completedFormPayload.dddSignatureUrl ||
+        checklistSnapshot?.ddd_signature_url ||
+        checklistSnapshot?.dddSignatureUrl ||
+        "";
 
-    const dddSignature =
-      completedFormPayload.ddd_signature_url ||
-      completedFormPayload.dddSignatureUrl ||
-      checklistSnapshot?.ddd_signature_url ||
-      checklistSnapshot?.dddSignatureUrl ||
-      "";
-
-    const mergedSignatures = {
-      ...(checklistSnapshot?.signatures || {}),
-      ...(completedFormPayload.signatures || {})
-    };
-
-    const res = await fetch("/api/LocalInspectionReports/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...completedFormPayload,
-        application_id: applicationId,
-        report_doc_number: `NAFDAC/VMD/GMP/${applicationId}/2026`,
-        inspected_site_name: companyName,
-        company_name: companyName,
-        facility_address: resolvedAddress,
-        inspected_site_address: resolvedAddress,
-        product_lines: resolvedProductLines,
-        productLines: resolvedProductLines,
-        applicant_email: resolvedNotificationEmail,
-        lead_signature_url: leadSignature,
-        lead_inspector_signature_url: leadSignature,
-        ddd_signature_url: dddSignature,
-        divisional_deputy_director_signature_url: dddSignature,
-        signatures: mergedSignatures
-      }),
-    });
-
-    const outcome = await res.json();
-    if (outcome.success) {
-      const finalReportHtml = outcome.report_html;
-
-      // 1. Immediately update UI state with the fresh report
-      setReportHtml(finalReportHtml);
-
-      const updatedSnapshot = {
-        ...completedFormPayload,
-        compiledReportHtml: finalReportHtml
+      const mergedSignatures = {
+        ...(checklistSnapshot?.signatures || {}),
+        ...(completedFormPayload.signatures || {})
       };
 
+      const res = await fetch("/api/LocalInspectionReports/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...completedFormPayload,
+          application_id: applicationId,
+          report_doc_number: `NAFDAC/VMD/GMP/${applicationId}/2026`,
+          inspected_site_name: companyName,
+          company_name: companyName,
+          facility_address: resolvedAddress,
+          inspected_site_address: resolvedAddress,
+          product_lines: resolvedProductLines,
+          productLines: resolvedProductLines,
+          applicant_email: resolvedNotificationEmail,
+          lead_signature_url: leadSignature,
+          lead_inspector_signature_url: leadSignature,
+          ddd_signature_url: dddSignature,
+          divisional_deputy_director_signature_url: dddSignature,
+          signatures: mergedSignatures
+        }),
+      });
+
+      const outcome = await res.json();
+      if (outcome.success) {
+        const finalReportHtml = outcome.report_html;
+
+        setReportHtml(finalReportHtml);
+
+        const updatedSnapshot = {
+          ...completedFormPayload,
+          compiledReportHtml: finalReportHtml
+        };
+
+        setChecklistSnapshot(updatedSnapshot);
+        await handleSaveDraft(updatedSnapshot, true);
+
+        alert("AI Technical Report Narrative compiled and saved successfully!");
+      } else {
+        alert("Synthesis aborted: " + outcome.error);
+      }
+    } catch (err: any) {
+      alert(`Execution Error: ${err.message}`);
+    }
+  };
+
+  const handleCommitPdfToStorage = async (): Promise<string | null> => {
+    if (!reportHtml) {
+      alert("No compiled report content available to commit to PDF.");
+      return null;
+    }
+
+    setIsRenderingPdf(true);
+    try {
+      const docNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+
+      const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reportHtml: reportHtml,
+          applicationId: applicationId,
+          docNumber: docNo,
+          baseUrl: baseUrl
+        })
+      });
+
+      if (!pdfRes.ok) {
+        const errorData = await pdfRes.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to render official PDF binary from current report HTML.");
+      }
+
+      const pdfBlob = await pdfRes.blob();
+      const fileName = `Local_Inspection_Report_${docNo}.pdf`;
+      const pdfFile = new File([pdfBlob], fileName, {
+        type: "application/pdf"
+      });
+
+      const storagePath = buildCompanyFilePath(
+        companyId,
+        '01_Local_Inspection_Reports',
+        fileName,
+        applicationId
+      );
+
+      const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
+
+      if (!uploadedUrl) {
+        throw new Error("Failed to retrieve public storage URL after upload.");
+      }
+
+      const cacheBustedUrl = `${uploadedUrl}?v=${Date.now()}`;
+      setPdfStorageUrl(cacheBustedUrl);
+
+      const updatedSnapshot = {
+        ...checklistSnapshot,
+        pdfStorageUrl: cacheBustedUrl
+      };
       setChecklistSnapshot(updatedSnapshot);
+      await handleSaveDraft(updatedSnapshot);
 
-      // 2. Save draft seamlessly in background without calling router.refresh()
-      await handleSaveDraft(updatedSnapshot, true);
-
-      alert("AI Technical Report Narrative compiled and saved successfully!");
-    } else {
-      alert("Synthesis aborted: " + outcome.error);
+      alert("PDF successfully compiled and committed to Supabase 'Documents' bucket!");
+      return cacheBustedUrl;
+    } catch (err: any) {
+      alert(`PDF Storage Error: ${err.message}`);
+      return null;
+    } finally {
+      setIsRenderingPdf(false);
     }
-  } catch (err: any) {
-    alert(`Execution Error: ${err.message}`);
-  }
-};
-
- const handleCommitPdfToStorage = async (): Promise<string | null> => {
-  if (!reportHtml) {
-    alert("No compiled report content available to commit to PDF.");
-    return null;
-  }
-
-  setIsRenderingPdf(true);
-  try {
-    const docNo = checklistSnapshot?.report_doc_number || `NAFDAC-GMP-${applicationId}`;
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-
-    const pdfRes = await fetch("/api/LocalInspectionReports/export-pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        reportHtml: reportHtml, // 👈 Pass reportHtml directly without injectSignaturesIntoHtml
-        applicationId: applicationId,
-        docNumber: docNo,
-        baseUrl: baseUrl
-      })
-    });
-
-    if (!pdfRes.ok) {
-      const errorData = await pdfRes.json().catch(() => ({}));
-      throw new Error(errorData.error || "Failed to render official PDF binary from current report HTML.");
-    }
-
-    const pdfBlob = await pdfRes.blob();
-    const fileName = `Local_Inspection_Report_${docNo}.pdf`;
-    const pdfFile = new File([pdfBlob], fileName, {
-      type: "application/pdf"
-    });
-
-    const storagePath = buildCompanyFilePath(
-      companyId,
-      '01_Local_Inspection_Reports',
-      fileName,
-      applicationId
-    );
-
-    const uploadedUrl = await uploadDossierPdf(pdfFile, storagePath);
-
-    if (!uploadedUrl) {
-      throw new Error("Failed to retrieve public storage URL after upload.");
-    }
-
-    const cacheBustedUrl = `${uploadedUrl}?v=${Date.now()}`;
-    setPdfStorageUrl(cacheBustedUrl);
-
-    const updatedSnapshot = {
-      ...checklistSnapshot,
-      pdfStorageUrl: cacheBustedUrl
-    };
-    setChecklistSnapshot(updatedSnapshot);
-    await handleSaveDraft(updatedSnapshot);
-
-    alert("PDF successfully compiled and committed to Supabase 'Documents' bucket!");
-    return cacheBustedUrl;
-  } catch (err: any) {
-    alert(`PDF Storage Error: ${err.message}`);
-    return null;
-  } finally {
-    setIsRenderingPdf(false);
-  }
-};
+  };
 
   const handleTransition = async (
     direction: "FORWARD" | "REWORK" | "TARGETED_REWORK",
@@ -549,7 +553,11 @@ const handleAICorrelationCompile = async (completedFormPayload: any) => {
         setRemarks("");
         setSelectedStaff("");
 
-        handleStepSwitch(nextStepKey);
+        if (process.env.NODE_ENV === 'development') {
+          handleStepSwitch(nextStepKey);
+        } else {
+          router.push(`/LocalInspectionReports`);
+        }
         router.refresh();
       } else {
         const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing sequence breakdown";
@@ -564,27 +572,29 @@ const handleAICorrelationCompile = async (completedFormPayload: any) => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Simulation Rig Container */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
-        <div>
-          <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
-          <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
+      {/* Simulation Rig Container (Active only in Development) */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
+          <div>
+            <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
+            <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
+            <select
+              value={currentStep}
+              onChange={(e) => handleStepSwitch(e.target.value)}
+              className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
+            >
+              {Object.keys(inspectionReportWorkflow.steps).map((key) => (
+                <option key={key} value={key}>
+                  {key.replace(/DDD/g, "Divisional Deputy Director")} - {formatDeskTitle(inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title)}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
-          <select
-            value={currentStep}
-            onChange={(e) => handleStepSwitch(e.target.value)}
-            className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
-          >
-            {Object.keys(inspectionReportWorkflow.steps).map((key) => (
-              <option key={key} value={key}>
-                {key.replace(/DDD/g, "Divisional Deputy Director")} - {formatDeskTitle(inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      )}
 
       {/* Header Panel */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">

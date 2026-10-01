@@ -105,7 +105,7 @@ export async function executeInspectionReportTransition({
         timestamp: timestamp.toISOString()
       };
 
-      // 4. Update core application state
+      // 4. Update core application state (Caching metadata in JSONB)
       await tx.update(applications)
         .set({
           currentPoint: finalTitle.replace(/DDD/g, "Divisional Deputy Director"), 
@@ -118,7 +118,8 @@ export async function executeInspectionReportTransition({
             inspectionWorkflowMeta: {
               ...(oldDetails.inspectionWorkflowMeta || {}),
               currentStepKey: targetStepKey,
-              currentOwnerId: targetUserId,
+              currentOwnerId: targetUserId || actingUserId, // 🌟 Guarantees owner assigned in JSONB
+              assignedVettingInspectorId: targetUserId,    // 🌟 Explicit JSON cache for IRSD Inspector
               lastAction: direction
             }
           }
@@ -179,27 +180,27 @@ export async function executeInspectionReportTransition({
             .delete(inspectionObservationsAnalytics)
             .where(eq(inspectionObservationsAnalytics.reportId, upsertedReport.id));
 
-          // Replace this line inside analyticsRows map in executeInspectionReportTransition:
-            const analyticsRows = obsList.map((obs: any) => ({
-              reportId: upsertedReport.id,
-              companyId: app.companyId,
-              qualitySystem: obs.qualitySystem || obs.quality_system || obs.system || "General Quality System",
-              severity: String(obs.severity || "OTHER").toUpperCase(),
-              // Check snake_case, camelCase, and direct keys
-              rootCauseCategory: 
-                obs.root_cause_category || 
-                obs.rootCauseCategory || 
-                obs.root_cause || 
-                obs.rootCause || 
-                "Uncategorized",
-              observationText: obs.observationText || obs.observation_text || obs.text || obs.observation || "Observation recorded without description.",
-            }));
+          const analyticsRows = obsList.map((obs: any) => ({
+            reportId: upsertedReport.id,
+            companyId: app.companyId,
+            qualitySystem: obs.qualitySystem || obs.quality_system || obs.system || "General Quality System",
+            severity: String(obs.severity || "OTHER").toUpperCase(),
+            rootCauseCategory: 
+              obs.root_cause_category || 
+              obs.rootCauseCategory || 
+              obs.root_cause || 
+              obs.rootCause || 
+              "Uncategorized",
+            observationText: obs.observationText || obs.observation_text || obs.text || obs.observation || "Observation recorded without description.",
+          }));
 
           await tx.insert(inspectionObservationsAnalytics).values(analyticsRows);
         }
       }
 
-      // 6. Close previous QMS Session tracking clock
+      // ------------------------------------------------------------------
+      // ⏱️ 6. CLOSE PREVIOUS QMS TIMELINE RECORD
+      // ------------------------------------------------------------------
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
         .where(and(
@@ -207,13 +208,22 @@ export async function executeInspectionReportTransition({
           isNull(qmsTimelines.endTime)
         ));
 
-      // 7. Start new QMS timing interval
+      // ------------------------------------------------------------------
+      // ⏱️ 7. OPEN NEW AUTHORITATIVE QMS TIMELINE INTERVAL
+      // ------------------------------------------------------------------
       await tx.insert(qmsTimelines).values({
         applicationId,
         point: finalTitle.replace(/DDD/g, "Divisional Deputy Director"),
-        division: nextStep.division,
-        staffId: targetUserId || actingUserId,
+        division: nextStep.division, // Stores "IRSD"
+        staffId: targetUserId || actingUserId, // 🌟 Assigns selected IRSD staff member!
         startTime: timestamp,
+        details: {
+          stepKey: targetStepKey,
+          action: direction,
+          assignedBy: actingUserId,
+          assignedByName: actingUserName,
+          remarks: remarks
+        }
       });
 
       // 8. Refresh dashboard views
@@ -227,4 +237,4 @@ export async function executeInspectionReportTransition({
     console.error("INSPECTION_ROUTING_ENGINE_ERROR:", error);
     return { success: false, error: error.message };
   }
-}
+}   
