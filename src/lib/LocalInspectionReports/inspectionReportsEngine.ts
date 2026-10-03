@@ -1,7 +1,8 @@
-"use server"
+"use server";
 
 import { db } from "@/db";
 import { 
+  users,
   applications, 
   qmsTimelines, 
   localInspectionReports, 
@@ -41,6 +42,11 @@ export async function executeInspectionReportTransition({
     const activeStep = config.steps[currentStepKey];
     if (!activeStep) throw new Error(`Step ${currentStepKey} is not configured.`);
 
+    // Prevents illegal transition calls past the terminal archived state
+    if (currentStepKey === "FINALIZED" && direction === "FORWARD") {
+      throw new Error("This inspection report has already been finalized and archived.");
+    }
+
     // 1. Resolve Target State Node using routing direction
     let targetStepKey: keyof typeof config.steps | null;
     if (direction === "FORWARD") {
@@ -53,8 +59,9 @@ export async function executeInspectionReportTransition({
       targetStepKey = currentStepKey; 
     }
 
-    if (!targetStepKey) throw new Error(`Invalid destination logic route.`);
+    if (!targetStepKey) throw new Error(`Invalid destination step for route transition.`);
     const nextStep = config.steps[targetStepKey];
+    if (!nextStep) throw new Error(`Destination step ${targetStepKey} does not exist in configuration.`);
 
     return await db.transaction(async (tx) => {
       // 2. Locate Application parameters
@@ -72,12 +79,12 @@ export async function executeInspectionReportTransition({
       let finalStatusLabel = nextStep.statusLabel;
       let finalTitle = nextStep.title;
 
-      // --- 🌟 STRATEGIC INTERCEPTOR: MOVING OUT OF FIELD INSPECTION 🌟 ---
+      // --- 🌟 STRATEGIC INTERCEPTOR: STAFF REVIEW TO DDD ENDORSEMENT 🌟 ---
       if (currentStepKey === "STAFF_TECHNICAL_REVIEW" && direction === "FORWARD") {
-        finalStatusLabel = "UNDER_DD_REVIEW";
+        finalStatusLabel = "PENDING_TECHNICAL_ENDORSEMENT";
       }
 
-      // --- 🌟 STRATEGIC INTERCEPTOR FOR TERMINAL STATUS FORK 🌟 ---
+      // --- 🌟 STRATEGIC INTERCEPTOR FOR TERMINAL STATUS FORK (DIRECTOR SIGN-OFF) 🌟 ---
       if (currentStepKey === "DIRECTOR_FINAL_SIGN_OFF" && direction === "FORWARD") {
         const recommendation = incomingSnapshot?.final_recommendation || "PENDING";
         
@@ -93,9 +100,12 @@ export async function executeInspectionReportTransition({
       }
 
       // 3. Build standardized, title-compliant audit notation
+      const formattedFromStep = activeStep.title.replace(/DDD/g, "Divisional Deputy Director");
+      const formattedToStep = finalTitle.replace(/DDD/g, "Divisional Deputy Director");
+
       const systemLogEntry = {
-        fromStep: activeStep.title.replace(/DDD/g, "Divisional Deputy Director"),
-        toStep: finalTitle.replace(/DDD/g, "Divisional Deputy Director"),
+        fromStep: formattedFromStep,
+        toStep: formattedToStep,
         actorName: actingUserName,
         actorId: actingUserId,
         actorRole: actingUserRole,
@@ -105,21 +115,58 @@ export async function executeInspectionReportTransition({
         timestamp: timestamp.toISOString()
       };
 
-      // 4. Update core application state (Caching metadata in JSONB)
+      // ------------------------------------------------------------------
+      // 4. UPDATE CORE APPLICATION STATE & TARGET ASSIGNMENT
+      // ------------------------------------------------------------------
+      
+      const isValidUuid = (id: string | null | undefined): boolean => 
+        !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+      let finalVettingInspectorId: string | null = isValidUuid(targetUserId) ? targetUserId : null;
+
+      // Pool-based intake vs explicit user fallback
+      const isIrsdDDDDesk = 
+        targetStepKey === "DDD_IRSD_INTAKE" || 
+        targetStepKey === "DDD_IRSD_REVIEW" ||
+        formattedToStep === "Divisional Deputy Director IRSD Routing" ||
+        formattedToStep === "Divisional Deputy Director IRSD Concurrence";
+
+      // Role LOD steps (e.g. DIRECTOR_FINAL_SIGN_OFF) should remain UNPINNED (null assignedVettingInspectorId)
+      // so ANY user with role = 'LOD' can see and adjudicate it in their inbox.
+      const isLODPoolDesk = targetStepKey === "DIRECTOR_FINAL_SIGN_OFF" || nextStep.role === "LOD" || nextStep.role === "Director";
+
+      if (!finalVettingInspectorId && isIrsdDDDDesk && !isLODPoolDesk) {
+        const [irsdDDD] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            and(
+              eq(users.role, "Divisional Deputy Director"),
+              eq(users.division, "IRSD")
+            )
+          );
+
+        if (irsdDDD) {
+          finalVettingInspectorId = irsdDDD.id;
+        }
+      }
+
       await tx.update(applications)
         .set({
-          currentPoint: finalTitle.replace(/DDD/g, "Divisional Deputy Director"), 
-          status: finalStatusLabel, 
+          currentPoint: formattedToStep,
+          status: finalStatusLabel,
+          assignedVettingInspectorId: isLODPoolDesk ? null : finalVettingInspectorId,
           updatedAt: timestamp,
           details: {
             ...oldDetails,
-            savedChecklistSnapshot: incomingSnapshot, 
+            savedChecklistSnapshot: incomingSnapshot,
             comments: [...(oldDetails.comments || []), systemLogEntry],
             inspectionWorkflowMeta: {
               ...(oldDetails.inspectionWorkflowMeta || {}),
               currentStepKey: targetStepKey,
-              currentOwnerId: targetUserId || actingUserId, // 🌟 Guarantees owner assigned in JSONB
-              assignedVettingInspectorId: targetUserId,    // 🌟 Explicit JSON cache for IRSD Inspector
+              currentOwnerId: isLODPoolDesk ? null : (finalVettingInspectorId || actingUserId),
+              assignedVettingInspectorId: isLODPoolDesk ? null : finalVettingInspectorId,
+              assignedAt: timestamp.toISOString(),
               lastAction: direction
             }
           }
@@ -213,9 +260,9 @@ export async function executeInspectionReportTransition({
       // ------------------------------------------------------------------
       await tx.insert(qmsTimelines).values({
         applicationId,
-        point: finalTitle.replace(/DDD/g, "Divisional Deputy Director"),
-        division: nextStep.division, // Stores "IRSD"
-        staffId: targetUserId || actingUserId, // 🌟 Assigns selected IRSD staff member!
+        point: formattedToStep,
+        division: nextStep.division || "ARCHIVE",
+        staffId: isLODPoolDesk ? null : (finalVettingInspectorId || actingUserId),
         startTime: timestamp,
         details: {
           stepKey: targetStepKey,
@@ -230,6 +277,8 @@ export async function executeInspectionReportTransition({
       revalidatePath("/dashboard/ddd");
       revalidatePath("/dashboard/staff");
       revalidatePath("/dashboard/director");
+      revalidatePath("/ddd/inbox");
+      revalidatePath("/director/inbox");
 
       return { success: true, arrivedAt: targetStepKey, currentStatus: finalStatusLabel };
     });
@@ -237,4 +286,4 @@ export async function executeInspectionReportTransition({
     console.error("INSPECTION_ROUTING_ENGINE_ERROR:", error);
     return { success: false, error: error.message };
   }
-}   
+}

@@ -65,7 +65,6 @@ export default async function StaffDashboard({
   const validPoints = [
     staffTechStep?.title,
     irsdVettingStep?.title,
-    // Include legacy or alternate text variants safely if needed
     'Technical DD Review Return',
     'AFPD Staff Vetting',
     'PAD Staff Vetting'
@@ -78,7 +77,7 @@ export default async function StaffDashboard({
     'UNDER_IRSD_VETTING'
   ].filter(Boolean) as string[];
 
-  // 3. FETCH TASKS (Scoped to Staff ID, Division, Workflow Points, and Status Labels)
+  // 3. FETCH TASKS (Scoped to Staff ID, Division, Workflow Points, AND Restricted to Facility Verification)
   const staffTasksRaw = await db
     .select({
       id: qmsTimelines.id,
@@ -86,6 +85,7 @@ export default async function StaffDashboard({
       startTime: qmsTimelines.startTime,
       point: qmsTimelines.point,
       applicationNumber: applications.applicationNumber,
+      applicationType: applications.type,
       applicationDetails: applications.details, 
       companyName: companies.name,
       status: applications.status,
@@ -97,6 +97,7 @@ export default async function StaffDashboard({
       and(
         ilike(qmsTimelines.division, userDivision),
         eq(qmsTimelines.staffId, authUser.id),
+        eq(applications.type, "Facility Verification"), // 🎯 FILTER: Exclusively allow Facility Verification applications
         or(
           inArray(qmsTimelines.point, validPoints),
           inArray(applications.status, validStatuses)
@@ -155,7 +156,7 @@ export default async function StaffDashboard({
               <LayoutDashboard className="w-8 h-8 text-blue-600" />
               {userDivision} Staff Workspace
             </h1>
-            <p className="text-slate-500 text-sm font-medium">Manage your active regulatory assessments and dossiers.</p>
+            <p className="text-slate-500 text-sm font-medium">Manage your active facility verification assessments and compliance audits.</p>
           </div>
           <div className="bg-white px-6 py-3 rounded-2xl border border-slate-200 shadow-sm text-[10px] font-black uppercase tracking-widest text-slate-400">
             QMS Tracking Active
@@ -180,7 +181,7 @@ export default async function StaffDashboard({
                     <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Inbox className="w-6 h-6 text-slate-300" />
                     </div>
-                    <p className="text-xs font-black uppercase tracking-widest text-slate-300">Your assignment queue is currently clear.</p>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-300">Your facility verification assignment queue is currently clear.</p>
                   </td>
                 </tr>
               ) : safeTasks.map((task) => (
@@ -203,7 +204,7 @@ export default async function StaffDashboard({
                         task.isComplianceReview ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
                       }`}>
                         {task.isComplianceReview ? <Landmark className="w-3 h-3" /> : <Factory className="w-3 h-3" />}
-                        {task.isComplianceReview ? 'Compliance Audit' : 'Dossier Review'}
+                        {task.isComplianceReview ? 'Compliance Audit' : 'Facility Verification'}
                       </span>
                       <span className="text-[9px] font-bold text-slate-400 uppercase italic">
                         {task.point}

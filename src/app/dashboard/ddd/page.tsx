@@ -100,10 +100,12 @@ export default async function DDDInboxPage({
   ].filter(Boolean) as string[];
 
   // 5. Config-Driven Database Query
+ // 5. Config-Driven Database Query
   const rawInbox = await db
     .select({
       id: applications.id,
       applicationNumber: applications.applicationNumber,
+      type: applications.type, // Added type selection
       details: applications.details,
       status: applications.status,
       currentPoint: applications.currentPoint,
@@ -115,6 +117,7 @@ export default async function DDDInboxPage({
     .leftJoin(companies, eq(applications.companyId, companies.id))
     .innerJoin(qmsTimelines, eq(qmsTimelines.applicationId, applications.id))
     .where(and(
+      eq(applications.type, 'Facility Verification'), // Filter strictly for Facility Verification
       isNull(qmsTimelines.endTime),
       eq(qmsTimelines.division, actingDivision),
       isAssignedView 

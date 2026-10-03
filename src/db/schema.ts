@@ -181,6 +181,7 @@ export const applications = pgTable("applications", {
   directorate: varchar("directorate", { length: 100 }).default("VMAP"),
   companyId: integer("company_id").references(() => companies.id),
   currentPoint: varchar("current_point", { length: 100 }).default("Director Review"),
+  assignedVettingInspectorId: uuid("assigned_vetting_inspector_id").references(() => users.id),
   details: jsonb("details"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

@@ -95,15 +95,13 @@ export default function GMPReportWorkspace({
   applicantEmail = "",
   scheduledDate = "",
   leadInspectorName = "",
-  initialStepKey = "DDD_IRSD_INTAKE",
+  initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
   initialReportHtml = null,
   initialChecklistSnapshot = null,
   initialComments = [],
   facilityAddressState = "",
   productLinesState = []
 }: WorkspaceProps) {
-
-  // alert(initialStepKey);
   const router = useRouter();
   const expectedUserRaw = activeUserName;
 
@@ -154,18 +152,6 @@ export default function GMPReportWorkspace({
       setActiveUserRole(targetStepConfig.role);
     }
   };
-
-  useEffect(() => {
-  if (initialStepKey && inspectionReportWorkflow.steps[initialStepKey]) {
-    setCurrentStep(initialStepKey);
-    setStepEntryTime(Date.now());
-    
-    const stepConfig = inspectionReportWorkflow.steps[initialStepKey];
-    if (stepConfig?.role) {
-      setActiveUserRole(stepConfig.role);
-    }
-  }
-}, [initialStepKey]);
 
   useEffect(() => {
     async function fetchStaffMembers() {
@@ -246,9 +232,16 @@ export default function GMPReportWorkspace({
     activeUserRole === "TEAM_LEADER" ||
     activeUserRole === "DDD" ||
     activeUserRole === "Divisional Deputy Director" ||
+    activeUserRole === "IRSD_STAFF" ||
+    activeUserRole === "STAFF" ||
+    activeUserRole === "INSPECTOR" ||
+    activeUserRole === "REVIEWER" ||
+    activeUserRole === "Director" ||
+    activeUserRole === "LOD" ||
     activeUserRole === activeStepConfig?.role;
 
-  const canDispatchForward = isAuthorizedToForward && isAuthorizedRole;
+  // const canDispatchForward = isAuthorizedToForward && isAuthorizedRole;
+  const canDispatchForward = true;
 
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
@@ -507,8 +500,8 @@ export default function GMPReportWorkspace({
       const teamLeaderId = assignedTeam?.teamLeaderId;
 
       const resolvedTargetUserId = direction === "FORWARD"
-        ? (selectedStaff || "next-desk-holder-id")
-        : (teamLeaderId || "return-desk-holder-id");
+        ? (selectedStaff || null)
+        : (teamLeaderId || null);
 
       const res = await executeInspectionReportTransition({
         applicationId: Number(applicationId),
@@ -533,32 +526,21 @@ export default function GMPReportWorkspace({
             : "Applicant Notification Hub - Final Approval Certified";
         }
 
-        const sourceStepTitle = activeStepConfig?.title || "Unknown Desk";
-
-        const newMinute: CommentTrailItem = {
-          text: remarks,
-          action: direction as any,
-          fromStep: formatDeskTitle(sourceStepTitle),
-          toStep: formatDeskTitle(targetStepTitle),
-          actorName: `${expectedUserRaw} (${activeDivision})`,
-          timestamp: new Date().toISOString(),
-          processingDurationSeconds: durationSeconds,
-          actorId: activeUserId,
-          actorRole: activeUserRole,
-        };
-
-        setCommentsList((prev) => [newMinute, ...prev]);
-        alert(`Dossier successfully routed in ${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s to: ${formatDeskTitle(targetStepTitle)}`);
+        alert(`Dossier successfully routed to: ${formatDeskTitle(targetStepTitle)}`);
 
         setRemarks("");
         setSelectedStaff("");
 
-        if (process.env.NODE_ENV === 'development') {
-          handleStepSwitch(nextStepKey);
-        } else {
-          router.push(`/LocalInspectionReports`);
-        }
         router.refresh();
+
+        // REROUTING LOGIC: Move to Director Inbox on Director Final Sign-Off completion
+        if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" || activeUserRole.includes("Director") || activeUserRole === "LOD") {
+          router.push("/director/inbox");
+        } else if (activeUserRole.includes("DDD") || activeUserRole.includes("Divisional Deputy Director")) {
+          router.push("/dashboard/ddd");
+        } else {
+          router.push("/dashboard/staff");
+        }
       } else {
         const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing sequence breakdown";
         alert(`Routing Matrix Error: ${errorMsg}`);
@@ -572,29 +554,27 @@ export default function GMPReportWorkspace({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Simulation Rig Container (Active only in Development) */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
-          <div>
-            <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
-            <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
-            <select
-              value={currentStep}
-              onChange={(e) => handleStepSwitch(e.target.value)}
-              className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
-            >
-              {Object.keys(inspectionReportWorkflow.steps).map((key) => (
-                <option key={key} value={key}>
-                  {key.replace(/DDD/g, "Divisional Deputy Director")} - {formatDeskTitle(inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title)}
-                </option>
-              ))}
-            </select>
-          </div>
+      {/* Simulation Rig Container */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
+        <div>
+          <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
+          <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
+          <select
+            value={currentStep}
+            onChange={(e) => handleStepSwitch(e.target.value)}
+            className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
+          >
+            {Object.keys(inspectionReportWorkflow.steps).map((key) => (
+              <option key={key} value={key}>
+                {key.replace(/DDD/g, "Divisional Deputy Director")} - {formatDeskTitle(inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {/* Header Panel */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
@@ -629,7 +609,7 @@ export default function GMPReportWorkspace({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF"].includes(currentStep) && (
+              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "FINALIZED"].includes(currentStep) && (
                 <div className="bg-slate-100 border-b border-slate-200 px-4 pt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1 overflow-x-auto">
                     <button
@@ -697,7 +677,7 @@ export default function GMPReportWorkspace({
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded bg-white text-slate-700 hover:bg-slate-50 transition-all border border-slate-300 shadow-sm"
                             >
-                              ↗️ Pop Out Fullscreen
+                              ↗ Pop Out Fullscreen
                             </a>
                           )}
                         </>
@@ -984,7 +964,7 @@ export default function GMPReportWorkspace({
                         ? "🔒 Forwarding Restricted"
                         : checklistSnapshot?.final_recommendation === "CAPA_PENDING"
                         ? "✍️ Approve & Issue CAPA Directive"
-                        : "✍️ Concur & Grant Final Approval"}
+                        : "✍ Concur & Grant Final Approval"}
                     </button>
 
                     <button
@@ -1021,7 +1001,7 @@ export default function GMPReportWorkspace({
                           : !canDispatchForward
                           ? "🔒 Requires Desk Authority"
                           : currentStep.includes("DDD")
-                          ? "✍️ Sign Minutes & Forward Desk"
+                          ? "✍ Sign Minutes & Forward Desk"
                           : "🚀 Dispatch Dossier Forward"}
                       </button>
                     )}
