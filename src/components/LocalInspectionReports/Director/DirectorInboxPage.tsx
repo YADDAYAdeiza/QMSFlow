@@ -137,10 +137,10 @@ export default async function DirectorInboxPage({ searchParams }: PageProps) {
                 </div>
 
                 <a
-                  href={`/dashboard/inspection-report/${app.id}`}
+                  href={`/LocalInspectionReports/${app.id}`}
                   className="inline-flex items-center justify-center px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg transition-all shadow-sm shrink-0"
                 >
-                  View Dossier ➔
+                  Approval ➔
                 </a>
               </div>
             );

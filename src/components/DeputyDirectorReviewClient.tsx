@@ -71,18 +71,12 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
   const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
 
-  // const isTechnicalReturn = app?.currentPoint === 'Technical DD Review Return';
-  // const isIRSDStaffReturn = app?.currentPoint === 'IRSD Staff Vetting Return';
-  // const isHubEntry = app?.currentPoint === 'IRSD Hub Clearance';
-  // const isAssignmentPhase = app?.currentPoint === 'Technical DD Review' || isHubEntry;
-  // const isReviewPhase = isTechnicalReturn || isIRSDStaffReturn;
-
   // Database fields and programmatic identifiers
   const currentPoint = app?.currentPoint || '';
   const currentStatus = app?.status || '';
   const currentStepKey = app?.currentStepKey || app?.stepKey || '';
 
-  // 1. Assignment Phase: Aligned with 'Technical DD Review', 'PENDING_DIRECTOR_ALLOCATION', and keys
+  // 1. Assignment Phase
   const isAssignmentPhase = 
     currentPoint === 'Technical DD Review' || 
     currentPoint === 'Divisional Deputy Director Technical Assignment' ||
@@ -90,19 +84,24 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     currentStatus === 'PENDING_DIRECTOR_ALLOCATION' ||
     currentStepKey === 'DDD_TECHNICAL_ASSIGNMENT';
 
-  // 2. Hub Entry / Delegation: Aligned with IRSD intake steps
+  // 2. Hub Entry / Delegation
   const isHubEntry = 
     currentPoint === 'Divisional Deputy Director IRSD Routing' || 
     currentStepKey === 'DDD_IRSD_INTAKE';
 
-  // 3. Technical Return / Review Phase: Aligned with review steps and endorsement titles
+  // 3. Technical Return / Review Phase
   const isTechnicalReturn = 
     currentPoint === 'Technical DD Review Return' || 
     currentPoint === 'Divisional Deputy Director Technical Endorsement' ||
     currentStatus === 'PENDING_TECHNICAL_ENDORSEMENT' ||
     currentStepKey === 'DDD_TECHNICAL_REVIEW';
 
-  // 4. IRSD Staff Return Phase
+  // 4. IRSD Staff Return Phase / Review Concurrence step check
+  const isIRSDReview = 
+    currentPoint === 'Divisional Deputy Director IRSD Concurrence' ||
+    currentStatus === 'PENDING_IRSD_CONCURRENCE' ||
+    currentStepKey === 'DDD_IRSD_REVIEW';
+
   const isIRSDStaffReturn = 
     currentPoint === 'Divisional Deputy Director IRSD Concurrence' || 
     currentPoint === 'IRSD Staff Vetting Return' || 
@@ -123,8 +122,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   
   // Determine active assignment division based on IRSD mode or hub entry flags
   const activeAssignmentDivision = isIRSDActing || isHubEntry ? "IRSD" : appDivision;
-
-  console.log('This is activeAssignmentDivision: ', activeAssignmentDivision);
 
   const filteredStaff = staffList.filter((s: any) => 
     showAllStaff ? true : s.division?.toUpperCase() === activeAssignmentDivision?.toUpperCase()
@@ -198,12 +195,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const handleAssign = async () => {
     if (!selectedStaffId) return alert(`Please select an officer.`);
     
-    // Resolve targeted staff metadata for optional email transmission
     const assignedStaffObject = staffList.find(s => s.id === selectedStaffId);
     const staffEmail = assignedStaffObject?.email || null;
 
     startTransition(async () => {
-      // Passing email parameters dynamically downstream to your server actions file
       const res = await assignToStaff(
         app.id, 
         selectedStaffId, 
@@ -260,7 +255,8 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                   </button>
                 )}
                 
-                {isIRSD && (
+                {/* Only render preview button when it has reached the IRSD review/concurrence step, keeping it hidden during intake */}
+                {isIRSD && isIRSDReview && (
                   <button 
                     onClick={() => setViewMode('preview')} 
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'preview' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
@@ -294,7 +290,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         </div>
 
         <div className="bg-white p-3 rounded-[3rem] shadow-2xl border border-slate-200 h-[82vh] relative overflow-hidden">
-          {viewMode === 'preview' && isIRSD ? (
+          {viewMode === 'preview' && isIRSD && isIRSDReview ? (
             <BlobProvider document={docConfig.component}>
               {({ url, loading }) => loading ? (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-[2.2rem] text-slate-400 gap-2">
@@ -400,7 +396,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
               </select>
               <textarea value={assignmentRemarks} onChange={(e) => setAssignmentRemarks(e.target.value)} placeholder="Specific instructions for vetting..." className="w-full h-24 bg-black/10 border border-white/10 rounded-2xl p-4 text-xs text-white outline-none placeholder:text-white/40" />
               
-              {/* SLIDER / CHECKBOX TOGGLE FOR NOTIFYING OFFICERS */}
               <div className="flex items-center justify-between bg-black/10 border border-white/10 rounded-2xl p-4">
                 <div className="flex items-center gap-2.5">
                   <Mail className={`w-4 h-4 transition-colors duration-300 ${shouldNotifyStaff ? 'text-white' : 'text-white/50'}`} />

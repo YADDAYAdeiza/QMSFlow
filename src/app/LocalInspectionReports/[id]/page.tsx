@@ -189,7 +189,6 @@ export default async function LocalReportPage({ params, searchParams }: PageProp
     if (roleUpper === "LEAD_INSPECTOR" || roleUpper === "TEAM_LEADER") {
       leadInspectorName = name;
       leadSignatureUrl = signaturesMap[name] || "";
-      console.log('leadSignatureUrl in page.tsx: ', leadSignatureUrl);
     } else if (roleUpper.includes("TRAINEE")) {
       traineeInspectorNames.push(name);
     } else {
@@ -208,7 +207,12 @@ export default async function LocalReportPage({ params, searchParams }: PageProp
     .single();
 
   const authenticatedUserSessionName = userData.data?.name || user.email || "Authenticated User";
-  const structuralBaseRole = userData.data?.role || "Staff";
+  const rawBaseRole = userData.data?.role || "Staff";
+  
+  // Normalize role string to handle "DDD" -> "Divisional Deputy Director" formatting
+  const structuralBaseRole = rawBaseRole.includes("DDD") 
+    ? rawBaseRole.replace(/DDD/g, "Divisional Deputy Director") 
+    : rawBaseRole;
 
   // 4. Fetch QMS metrics ledger
   const rawTimeLogs = await db
@@ -309,13 +313,12 @@ export default async function LocalReportPage({ params, searchParams }: PageProp
   const initialChecklistSnapshot = activeSnapshot 
     ? {
         ...BASE_CHECKLIST_TEMPLATE,
-        ...activeSnapshot, // 👈 1. Spread draft first so intentional field overrides below take priority!
-        
+        ...activeSnapshot,
         inspection_dates: activeSnapshot.inspection_dates || scheduledDate,
         lead_inspector: resolvedLeadInspectorName,
         co_inspectors: activeSnapshot.co_inspectors || coInspectorsFormatted,
         trainee_inspectors: activeSnapshot.trainee_inspectors || traineeInspectorsFormatted,
-        lead_signature_url: resolvedLeadSig, // 👈 2. Explicit override safely preserved
+        lead_signature_url: resolvedLeadSig,
         leadSignatureUrl: resolvedLeadSig,
         signatures: {
           ...signaturesMap,
@@ -353,8 +356,6 @@ export default async function LocalReportPage({ params, searchParams }: PageProp
         report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`,
         final_recommendation: "PENDING"
       };
-
-  console.log('Just before passing to Workspace: ', initialChecklistSnapshot.lead_signature_url);
 
   return (
     <div className="bg-slate-50 min-h-screen py-6">

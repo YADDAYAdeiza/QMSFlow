@@ -8,7 +8,7 @@ import {
   localInspectionReports, 
   inspectionObservationsAnalytics 
 } from "@/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
@@ -91,8 +91,6 @@ export async function executeInspectionReportTransition({
         if (recommendation === "CAPA_PENDING") {
           finalStatusLabel = "AWAITING_CAPA";
           finalTitle = "Applicant Notification Hub - CAPA Request Issued";
-          
-          console.log(`[QMS MAIL]: Dispatching CAPA directive to ${oldDetails.notificationEmail || 'applicant'}`);
         } else {
           finalStatusLabel = "APPROVED";
           finalTitle = "Applicant Notification Hub - Final Approval Certified";
@@ -116,26 +114,47 @@ export async function executeInspectionReportTransition({
       };
 
       // ------------------------------------------------------------------
-      // 4. UPDATE CORE APPLICATION STATE & TARGET ASSIGNMENT
+      // 4. RESOLVE ASSIGNEE FOR REVERSE / POOL PATHWAYS
       // ------------------------------------------------------------------
-      
       const isValidUuid = (id: string | null | undefined): boolean => 
         !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
       let finalVettingInspectorId: string | null = isValidUuid(targetUserId) ? targetUserId : null;
 
-      // Pool-based intake vs explicit user fallback
-      const isIrsdDDDDesk = 
-        targetStepKey === "DDD_IRSD_INTAKE" || 
-        targetStepKey === "DDD_IRSD_REVIEW" ||
-        formattedToStep === "Divisional Deputy Director IRSD Routing" ||
-        formattedToStep === "Divisional Deputy Director IRSD Concurrence";
+      // Determine if destination is a Role/Pool level desk (e.g. Director, LOD)
+      const isLODPoolDesk = targetStepKey === "DIRECTOR_FINAL_SIGN_OFF" || 
+                            targetStepKey === "DIRECTOR_INTAKE" ||
+                            nextStep.role === "LOD" || 
+                            nextStep.role === "Director";
 
-      // Role LOD steps (e.g. DIRECTOR_FINAL_SIGN_OFF) should remain UNPINNED (null assignedVettingInspectorId)
-      // so ANY user with role = 'LOD' can see and adjudicate it in their inbox.
-      const isLODPoolDesk = targetStepKey === "DIRECTOR_FINAL_SIGN_OFF" || nextStep.role === "LOD" || nextStep.role === "Director";
+      // Check if destination is specifically IRSD Intake / Routing Desk
+      const isIrsdIntakeDesk = targetStepKey === "DDD_IRSD_INTAKE" || 
+                                formattedToStep === "Divisional Deputy Director IRSD Routing";
 
-      if (!finalVettingInspectorId && isIrsdDDDDesk && !isLODPoolDesk) {
+      // A. IF NO EXPLICIT TARGET & RETURNING BACKWARD (e.g. DDD_TECHNICAL_REVIEW -> STAFF_TECHNICAL_REVIEW or DDD_IRSD_REVIEW -> IRSD_STAFF_VETTING)
+      if (!finalVettingInspectorId && (direction === "REWORK" || direction === "TARGETED_REWORK") && !isLODPoolDesk && !isIrsdIntakeDesk) {
+        
+        // Query qms_timelines for the most recent staff member who held this exact destination step point
+        const [priorTimeline] = await tx
+          .select({ staffId: qmsTimelines.staffId })
+          .from(qmsTimelines)
+          .where(
+            and(
+              eq(qmsTimelines.applicationId, applicationId),
+              eq(qmsTimelines.point, formattedToStep)
+            )
+          )
+          .orderBy(desc(qmsTimelines.startTime))
+          .limit(1);
+
+        if (priorTimeline?.staffId && isValidUuid(priorTimeline.staffId)) {
+          finalVettingInspectorId = priorTimeline.staffId;
+        }
+      }
+
+      // B. IRSD INTAKE DESK OVERRIDE (Preserved Desirable Authority)
+      // Any file entering IRSD_INTAKE auto-assigns to the IRSD Divisional Deputy Director unless explicitly targeted
+      if (!finalVettingInspectorId && isIrsdIntakeDesk) {
         const [irsdDDD] = await tx
           .select({ id: users.id })
           .from(users)
@@ -151,11 +170,16 @@ export async function executeInspectionReportTransition({
         }
       }
 
+      // ------------------------------------------------------------------
+      // 5. UPDATE CORE APPLICATION STATE
+      // ------------------------------------------------------------------
+      const assignedOwner = isLODPoolDesk ? null : finalVettingInspectorId;
+
       await tx.update(applications)
         .set({
           currentPoint: formattedToStep,
           status: finalStatusLabel,
-          assignedVettingInspectorId: isLODPoolDesk ? null : finalVettingInspectorId,
+          assignedVettingInspectorId: assignedOwner,
           updatedAt: timestamp,
           details: {
             ...oldDetails,
@@ -164,8 +188,8 @@ export async function executeInspectionReportTransition({
             inspectionWorkflowMeta: {
               ...(oldDetails.inspectionWorkflowMeta || {}),
               currentStepKey: targetStepKey,
-              currentOwnerId: isLODPoolDesk ? null : (finalVettingInspectorId || actingUserId),
-              assignedVettingInspectorId: isLODPoolDesk ? null : finalVettingInspectorId,
+              currentOwnerId: assignedOwner,
+              assignedVettingInspectorId: assignedOwner,
               assignedAt: timestamp.toISOString(),
               lastAction: direction
             }
@@ -174,9 +198,9 @@ export async function executeInspectionReportTransition({
         .where(eq(applications.id, applicationId));
 
       // ------------------------------------------------------------------
-      // 📊 5. ANALYTICAL WAREHOUSE PIPELINE: UPSERT REPORT & OBSERVATIONS
+      // 📊 6. ANALYTICAL WAREHOUSE PIPELINE (FORWARD ONLY)
       // ------------------------------------------------------------------
-      if (incomingSnapshot) {
+      if (incomingSnapshot && direction === "FORWARD") {
         const docNumber = incomingSnapshot.report_doc_number || `NAFDAC/VMD/GMP/${applicationId}/2026`;
         const obsList = incomingSnapshot.observations || [];
 
@@ -188,7 +212,6 @@ export async function executeInspectionReportTransition({
         const rec = incomingSnapshot.final_recommendation || "PENDING";
         const isCapaReq = rec === "CAPA_PENDING";
 
-        // Upsert Header Report Entry
         const [upsertedReport] = await tx
           .insert(localInspectionReports)
           .values({
@@ -221,7 +244,6 @@ export async function executeInspectionReportTransition({
           })
           .returning({ id: localInspectionReports.id });
 
-        // Populate Granular Findings for Analytics (Clear and Re-Insert)
         if (upsertedReport?.id && obsList.length > 0) {
           await tx
             .delete(inspectionObservationsAnalytics)
@@ -246,7 +268,7 @@ export async function executeInspectionReportTransition({
       }
 
       // ------------------------------------------------------------------
-      // ⏱️ 6. CLOSE PREVIOUS QMS TIMELINE RECORD
+      // ⏱️ 7. CLOSE PREVIOUS & OPEN NEW AUTHORITATIVE QMS TIMELINE INTERVAL
       // ------------------------------------------------------------------
       await tx.update(qmsTimelines)
         .set({ endTime: timestamp })
@@ -255,14 +277,11 @@ export async function executeInspectionReportTransition({
           isNull(qmsTimelines.endTime)
         ));
 
-      // ------------------------------------------------------------------
-      // ⏱️ 7. OPEN NEW AUTHORITATIVE QMS TIMELINE INTERVAL
-      // ------------------------------------------------------------------
       await tx.insert(qmsTimelines).values({
         applicationId,
         point: formattedToStep,
         division: nextStep.division || "ARCHIVE",
-        staffId: isLODPoolDesk ? null : (finalVettingInspectorId || actingUserId),
+        staffId: assignedOwner,
         startTime: timestamp,
         details: {
           stepKey: targetStepKey,
@@ -274,11 +293,17 @@ export async function executeInspectionReportTransition({
       });
 
       // 8. Refresh dashboard views
-      revalidatePath("/dashboard/ddd");
-      revalidatePath("/dashboard/staff");
-      revalidatePath("/dashboard/director");
-      revalidatePath("/ddd/inbox");
-      revalidatePath("/director/inbox");
+      // revalidatePath("/LocalInspectionReports/ddd", "layout");
+      // revalidatePath("/LocalInspectionReports/staff", "layout");
+      // revalidatePath("/LocalInspectionReports/director", "layout");
+      // revalidatePath("/ddd/inbox");
+      // revalidatePath("/director/inbox");
+
+
+      // In your POST handler after database mutation:
+      revalidatePath("/LocalInspectionReports/ddd/inbox", "page");
+      revalidatePath("/LocalInspectionReports/Director/Inbox", "page");
+      revalidatePath("/LocalInspectionReports/Inspectors/Inbox", "page");
 
       return { success: true, arrivedAt: targetStepKey, currentStatus: finalStatusLabel };
     });

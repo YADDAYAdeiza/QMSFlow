@@ -4,6 +4,7 @@ import { eq, or, inArray, ne, and } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
 import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
+import RecallApplicationButton from "@/components/LocalInspectionReports/RecallApplicationButton";
 
 interface CommentTrail {
   text?: string;
@@ -41,6 +42,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
     "unassigned", 
     "assigned", 
     "irsd_intake", 
+    "irsd_in_flight", 
     "irsd_review", 
     "approved", 
     "capa_approved"
@@ -72,6 +74,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
               "INSPECTION_PENDING", 
               "INSPECTION_SCHEDULED", 
               "PENDING_IRSD_ROUTING",
+              "UNDER_IRSD_VETTING",
               "PENDING_IRSD_CONCURRENCE",
               "APPROVED", 
               "CAPA_APPROVED",
@@ -82,6 +85,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
               "Divisional Deputy Director Technical Assignment",
               "Divisional Deputy Director Technical Endorsement",
               "Divisional Deputy Director IRSD Routing",
+              "IRSD Staff Compliance Vetting",
               "Divisional Deputy Director IRSD Concurrence",
               "Applicant Notification Hub - Final Approval Certified"
             ])
@@ -126,6 +130,10 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
     app => app.currentPoint === "Divisional Deputy Director IRSD Routing" || app.status === "PENDING_IRSD_ROUTING"
   );
 
+  const irsdInFlight = filteredRecords.filter(
+    app => app.currentPoint === "IRSD Staff Compliance Vetting" || app.status === "UNDER_IRSD_VETTING"
+  );
+
   const irsdReview = filteredRecords.filter(
     app => app.currentPoint === "Divisional Deputy Director IRSD Concurrence" || app.status === "PENDING_IRSD_CONCURRENCE"
   );
@@ -142,18 +150,19 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
   if (activeTab === "unassigned") currentList = unassigned;
   else if (activeTab === "assigned") currentList = assigned;
   else if (activeTab === "irsd_intake") currentList = irsdIntake;
+  else if (activeTab === "irsd_in_flight") currentList = irsdInFlight;
   else if (activeTab === "irsd_review") currentList = irsdReview;
   else if (activeTab === "approved") currentList = approved;
   else if (activeTab === "capa_approved") currentList = capaApproved;
 
-  const isIrsdTab = activeTab === "irsd_intake" || activeTab === "irsd_review";
+  const isIrsdTab = activeTab === "irsd_intake" || activeTab === "irsd_review" || activeTab === "irsd_in_flight";
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-5 border-slate-200">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Divisional Deputy Director Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage, endorse, route, and track veterinary product pipeline applications.</p>
+          <p className="text-sm text-slate-500 mt-1">Manage, endorse, route, recall, and track veterinary product pipeline applications.</p>
         </div>
       </header>
 
@@ -188,6 +197,16 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
           }`}
         >
           IRSD Intake Routing ({irsdIntake.length})
+        </Link>
+        <Link 
+          href="?tab=irsd_in_flight" 
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+            activeTab === "irsd_in_flight" 
+              ? "border-amber-600 text-amber-600 font-semibold" 
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+          }`}
+        >
+          IRSD Active / Recall ({irsdInFlight.length})
         </Link>
         <Link 
           href="?tab=irsd_review" 
@@ -256,11 +275,18 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                     </td>
                     <td className="p-4 text-slate-600 max-w-xs truncate">{app.currentPoint || "N/A"}</td>
                     
-                    {/* Replaced System Status column with Action Target for IRSD tabs */}
                     {isIrsdTab ? (
                       <td className="p-4">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
-                          {activeTab === "irsd_intake" ? "Assign IRSD Staff" : "IRSD Final Concurrence"}
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                          activeTab === "irsd_in_flight"
+                            ? "bg-amber-100 text-amber-900 border-amber-300"
+                            : "bg-amber-50 text-amber-800 border-amber-200"
+                        }`}>
+                          {activeTab === "irsd_intake" 
+                            ? "Assign IRSD Staff" 
+                            : activeTab === "irsd_in_flight"
+                            ? "IRSD Staff Vetting In-Progress"
+                            : "IRSD Final Concurrence"}
                         </span>
                       </td>
                     ) : (
@@ -289,18 +315,22 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                         </Link>
                       )}
 
-                      {/* Changed to Review for both IRSD Intake and Review tabs */}
-                      {/* For IRSD Intake / Review Links */}
-                        {isIrsdTab && (
-                          <Link
-                            href={`/LocalInspectionReports/${app.id}?step=${
-                              activeTab === "irsd_intake" ? "DDD_IRSD_INTAKE" : "DDD_IRSD_REVIEW"
-                            }`}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
-                          >
-                            <span>👁️</span> Review Application
-                          </Link>
-                        )}
+                      {/* IRSD Intake & Review Links */}
+                      {(activeTab === "irsd_intake" || activeTab === "irsd_review") && (
+                        <Link
+                          href={`/LocalInspectionReports/${app.id}?step=${
+                            activeTab === "irsd_intake" ? "DDD_IRSD_INTAKE" : "DDD_IRSD_REVIEW"
+                          }`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                        >
+                          <span>👁️</span> Review Application
+                        </Link>
+                      )}
+
+                      {/* Recall Button Component for IRSD In-Flight Assignments */}
+                      {activeTab === "irsd_in_flight" && (
+                        <RecallApplicationButton applicationId={app.id} />
+                      )}
                       
                       <AuditTrailButton id={app.id} applicationNumber={app.applicationNumber} />
                     </td>

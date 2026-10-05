@@ -20,6 +20,7 @@ const BASE_CHECKLIST_TEMPLATE = {
   vicinity_assessment: "",
   lead_inspector: "",
   co_inspectors: "",
+  trainee_inspectors: "",
   historical_baseline: {
     prev_date_type: "",
     prev_team: "",
@@ -70,6 +71,8 @@ interface WorkspaceProps {
   applicantEmail?: string;
   scheduledDate?: string;
   leadInspectorName?: string;
+  coInspectors?: string;
+  traineeInspectors?: string;
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps;
   initialReportHtml?: string | null;
   initialChecklistSnapshot?: any;
@@ -95,6 +98,8 @@ export default function GMPReportWorkspace({
   applicantEmail = "",
   scheduledDate = "",
   leadInspectorName = "",
+  coInspectors = "",
+  traineeInspectors = "",
   initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
   initialReportHtml = null,
   initialChecklistSnapshot = null,
@@ -126,7 +131,14 @@ export default function GMPReportWorkspace({
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
   const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
   const [checklistSnapshot, setChecklistSnapshot] = useState<any>(() => {
-    return initialChecklistSnapshot || BASE_CHECKLIST_TEMPLATE;
+    const base = initialChecklistSnapshot || BASE_CHECKLIST_TEMPLATE;
+    return {
+      ...BASE_CHECKLIST_TEMPLATE,
+      ...base,
+      lead_inspector: base.lead_inspector || leadInspectorName,
+      co_inspectors: base.co_inspectors || coInspectors,
+      trainee_inspectors: base.trainee_inspectors || traineeInspectors,
+    };
   });
 
   const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
@@ -228,6 +240,7 @@ export default function GMPReportWorkspace({
 
   const isAuthorizedToForward = !!activeUserId && !!activeUserRole;
 
+  // Permissive check so IRSD staff, reviewers, DDDs, and technical staff can all dispatch forward
   const isAuthorizedRole =
     activeUserRole === "TEAM_LEADER" ||
     activeUserRole === "DDD" ||
@@ -236,11 +249,8 @@ export default function GMPReportWorkspace({
     activeUserRole === "STAFF" ||
     activeUserRole === "INSPECTOR" ||
     activeUserRole === "REVIEWER" ||
-    activeUserRole === "Director" ||
-    activeUserRole === "LOD" ||
     activeUserRole === activeStepConfig?.role;
 
-  // const canDispatchForward = isAuthorizedToForward && isAuthorizedRole;
   const canDispatchForward = true;
 
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
@@ -424,7 +434,7 @@ export default function GMPReportWorkspace({
     }
   };
 
-  const handleTransition = async (
+ const handleTransition = async (
     direction: "FORWARD" | "REWORK" | "TARGETED_REWORK",
     targetStepOverride?: keyof typeof inspectionReportWorkflow.steps
   ) => {
@@ -531,15 +541,27 @@ export default function GMPReportWorkspace({
         setRemarks("");
         setSelectedStaff("");
 
+        // Invalidate current route cache
         router.refresh();
 
-        // REROUTING LOGIC: Move to Director Inbox on Director Final Sign-Off completion
-        if (currentStep === "DIRECTOR_FINAL_SIGN_OFF" || activeUserRole.includes("Director") || activeUserRole === "LOD") {
-          router.push("/director/inbox");
-        } else if (activeUserRole.includes("DDD") || activeUserRole.includes("Divisional Deputy Director")) {
-          router.push("/dashboard/ddd");
+        // 🎯 Direct push using authentic logged-in user profile role (globalStructuralRole)
+        const loggedInRole = globalStructuralRole || "";
+
+        console.log('loggedInRole: ', loggedInRole);
+
+        if (
+          loggedInRole.includes("Director") && 
+          !loggedInRole.includes("Deputy") && 
+          !loggedInRole.includes("Divisional")
+        ) {
+          router.push("/LocalInspectionReports/Director/Inbox");
+        } else if (
+          loggedInRole.includes("DDD") || 
+          loggedInRole.includes("Divisional Deputy Director")
+        ) {
+          router.push("/LocalInspectionReports/ddd/inbox");
         } else {
-          router.push("/dashboard/staff");
+          router.push("/LocalInspectionReports/Inspectors/Inbox");
         }
       } else {
         const errorMsg = ("error" in res && res.error) ? String(res.error) : "Unknown routing sequence breakdown";
@@ -609,7 +631,7 @@ export default function GMPReportWorkspace({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "FINALIZED"].includes(currentStep) && (
+              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF"].includes(currentStep) && (
                 <div className="bg-slate-100 border-b border-slate-200 px-4 pt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1 overflow-x-auto">
                     <button
