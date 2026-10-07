@@ -6,16 +6,18 @@ import {
   companies, 
   inspectionSchedules, 
   inspectionTeamAssignments, 
+  qmsTimelines,
   scheduleBatches,
   users 
 } from "@/db/schema";
-import { eq, and, inArray, or } from "drizzle-orm";
+import { eq, and, inArray, or, isNull } from "drizzle-orm";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { ShieldAlert, ClipboardList, UserCheck, Eye, Lock, FileCheck, CheckCircle2 } from "lucide-react";
+import { ShieldAlert, ClipboardList, UserCheck, Eye, Lock, FileCheck, CheckCircle2, Layers } from "lucide-react";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
+import { facilityCategorizationWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +51,14 @@ interface EndorsementTask {
   companyName: string;
   currentPoint: string;
   updatedAt: string;
+}
+
+interface CategorizationTask {
+  applicationId: string;
+  fileNumber: string;
+  companyName: string;
+  currentPoint: string;
+  assignedAt: string;
 }
 
 function formatDateSafe(dateInput: string | Date | null | undefined): string {
@@ -149,10 +159,49 @@ export default async function InspectorWorkspacePage({
   }
 
   const isDDD = userRecord.role === "Divisional Deputy Director";
-  const activeTab = requestedTab || (isDDD ? "endorsements" : "field");
+  const activeTab = requestedTab || (isDDD ? "endorsements" : "categorization");
 
   // ------------------------------------------------------------------
-  // 1. Fetch Field Tasks (For Staff/Inspectors)
+  // 1. Fetch Facility Categorization Tasks (via Active QMS Timelines + Point)
+  // ------------------------------------------------------------------
+  let categorizationTasks: CategorizationTask[] = [];
+  try {
+    const rawCategorization = await db
+      .select({
+        applicationId: applications.id,
+        fileNumber: applications.applicationNumber,
+        currentPoint: applications.currentPoint,
+        companyName: companies.name,
+        startTime: qmsTimelines.startTime,
+      })
+      .from(qmsTimelines)
+      .innerJoin(applications, eq(qmsTimelines.applicationId, applications.id))
+      .innerJoin(companies, eq(applications.companyId, companies.id))
+      .where(
+        and(
+          eq(qmsTimelines.staffId, userRecord.id),
+          isNull(qmsTimelines.endTime),
+          inArray(qmsTimelines.point, [
+            facilityCategorizationWorkflow.steps.UNDER_CATEGORIZATION.key,
+            facilityCategorizationWorkflow.steps.UNDER_CATEGORIZATION.title,
+            "UNDER_CATEGORIZATION"
+          ])
+        )
+      );
+
+    categorizationTasks = rawCategorization.map((row) => ({
+      applicationId: String(row.applicationId),
+      fileNumber: row.fileNumber || "No File #",
+      companyName: row.companyName,
+      currentPoint: row.currentPoint || "Staff Facility Categorization Desk Review",
+      assignedAt: formatDateSafe(row.startTime),
+    }));
+  } catch (err) {
+    console.error("Categorization Query Error:", err);
+  }
+
+  // ------------------------------------------------------------------
+  // 2. Fetch Field Tasks (For Staff/Inspectors)
   // ------------------------------------------------------------------
   let fieldTasks: Task[] = [];
   try {
@@ -213,7 +262,7 @@ export default async function InspectorWorkspacePage({
   }
 
   // ------------------------------------------------------------------
-  // 2. Fetch IRSD Vetting Tasks (For IRSD Staff / IRSD Divisional Deputy Director)
+  // 3. Fetch IRSD Vetting Tasks
   // ------------------------------------------------------------------
   let vettingTasks: VettingTask[] = [];
   try {
@@ -252,7 +301,7 @@ export default async function InspectorWorkspacePage({
   }
 
   // ------------------------------------------------------------------
-  // 3. Fetch Technical Endorsement Tasks (For Divisional Deputy Director)
+  // 4. Fetch Technical Endorsement Tasks (For Divisional Deputy Director)
   // ------------------------------------------------------------------
   let endorsementTasks: EndorsementTask[] = [];
   try {
@@ -318,6 +367,16 @@ export default async function InspectorWorkspacePage({
           </Link>
         )}
         <Link
+          href="?tab=categorization"
+          className={`pb-3 text-xs font-bold transition-colors border-b-2 flex items-center gap-2 ${
+            activeTab === "categorization"
+              ? "border-amber-600 text-amber-600"
+              : "border-transparent text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          Facility Categorization ({categorizationTasks.length})
+        </Link>
+        <Link
           href="?tab=field"
           className={`pb-3 text-xs font-bold transition-colors border-b-2 ${
             activeTab === "field"
@@ -338,6 +397,56 @@ export default async function InspectorWorkspacePage({
           IRSD Vetting Desk ({vettingTasks.length})
         </Link>
       </div>
+
+      {/* Tab: Facility Categorization */}
+      {activeTab === "categorization" && (
+        <>
+          {categorizationTasks.length === 0 ? (
+            <div className="text-center py-12 border-2 border-dashed border-amber-100 rounded-lg text-slate-400 text-xs font-medium bg-amber-50/20">
+              No facility categorization tasks currently assigned to your desk.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {categorizationTasks.map((catTask) => (
+                <div
+                  key={catTask.applicationId}
+                  className="bg-white border border-amber-200 rounded-lg shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+                >
+                  <div className="p-4 flex flex-col gap-3">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded font-semibold">
+                        {catTask.fileNumber}
+                      </span>
+                      <span className="text-[9px] font-bold border border-amber-200 bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                        Desk Review
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 line-clamp-1">
+                        {catTask.companyName}
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Assigned on: <span className="font-semibold text-slate-600">{catTask.assignedAt}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="px-4 py-3 bg-amber-50/50 border-t border-amber-100 rounded-b-lg flex justify-end">
+                    <Link
+                      href={`/LocalInspectionReports/Inspectors/Categorization?facilityId=${catTask.applicationId}&step=UNDER_CATEGORIZATION`}
+                      className="w-full text-center text-xs font-semibold py-2 px-3 rounded bg-amber-600 hover:bg-amber-700 text-white transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      Perform Categorization
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Tab: Technical Endorsements (Divisional Deputy Director) */}
       {activeTab === "endorsements" && (
