@@ -1,10 +1,11 @@
 import { db } from "@/db"; 
-import { applications, companies, capaSubmissions } from "@/db/schema"; 
-import { eq, or, inArray, ne, and } from "drizzle-orm";
+import { applications, companies, capaSubmissions, facilities } from "@/db/schema"; 
+import { eq, or, inArray } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
 import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
 import RecallApplicationButton from "@/components/LocalInspectionReports/RecallApplicationButton";
+import CategorizeButton from "@/components/LocalInspectionReports/CategorizeButton";
 
 interface CommentTrail {
   text?: string;
@@ -18,6 +19,11 @@ interface CommentTrail {
   assignedToId?: string;
 }
 
+interface ApplicationDetails {
+  comments?: CommentTrail[];
+  [key: string]: unknown;
+}
+
 interface ApplicationItem {
   id: number;
   applicationNumber: string;
@@ -25,12 +31,14 @@ interface ApplicationItem {
   status: string;
   currentPoint: string | null;
   companyName: string;
-  details: string | any; 
+  facilityId: string | null;
+  isCategorized: boolean | null;
+  details: ApplicationDetails | null; 
   capaStatus?: string | null;
   updatedAt?: Date | string | null;
 }
 
-export default async function DivisionalDeputyDirectorInboxDashboardPage({
+export default async function DivisionalDeputyDirectorDashboardPage({
   searchParams,
 }: {
   searchParams: Promise<{ tab?: string }>;
@@ -39,6 +47,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
   const { tab } = resolvedSearchParams;
   
   const validTabs = [
+    "categorization",
     "unassigned", 
     "assigned", 
     "irsd_intake", 
@@ -47,11 +56,13 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
     "approved", 
     "capa_approved"
   ];
-  const activeTab = validTabs.includes(tab || "") ? tab : "unassigned";
+  const activeTab = validTabs.includes(tab || "") ? tab : "categorization";
   
   let records: ApplicationItem[] = [];
+  let queryError = false;
+
   try {
-    records = await db
+    const rawRecords = await db
       .select({
         id: applications.id,
         applicationNumber: applications.applicationNumber,
@@ -59,95 +70,104 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
         status: applications.status,
         currentPoint: applications.currentPoint,
         companyName: companies.name,
+        facilityId: applications.facilityId,
+        isCategorized: facilities.isCategorized,
         details: applications.details, 
         capaStatus: capaSubmissions.status,
         updatedAt: applications.updatedAt,
       })
       .from(applications)
       .innerJoin(companies, eq(applications.companyId, companies.id))
+      .leftJoin(facilities, eq(applications.facilityId, facilities.id))
       .leftJoin(capaSubmissions, eq(applications.id, capaSubmissions.applicationId))
       .where(
-        and(
-          ne(applications.type, "Facility Verification"),
-          or(
-            inArray(applications.status, [
-              "INSPECTION_PENDING", 
-              "INSPECTION_SCHEDULED", 
-              "PENDING_IRSD_ROUTING",
-              "UNDER_IRSD_VETTING",
-              "PENDING_IRSD_CONCURRENCE",
-              "APPROVED", 
-              "CAPA_APPROVED",
-              "FINALIZED"
-            ]),
-            inArray(applications.currentPoint, [
-              "Staff Technical Field Review",
-              "Divisional Deputy Director Technical Assignment",
-              "Divisional Deputy Director Technical Endorsement",
-              "Divisional Deputy Director IRSD Routing",
-              "IRSD Staff Compliance Vetting",
-              "Divisional Deputy Director IRSD Concurrence",
-              "Applicant Notification Hub - Final Approval Certified"
-            ])
-          )
+        or(
+          inArray(applications.status, [
+            "INSPECTION_PENDING", 
+            "INSPECTION_SCHEDULED", 
+            "PENDING_IRSD_ROUTING",
+            "UNDER_IRSD_VETTING",
+            "PENDING_IRSD_CONCURRENCE",
+            "APPROVED", 
+            "CAPA_APPROVED",
+            "FINALIZED"
+          ]),
+          inArray(applications.currentPoint, [
+            "Staff Technical Field Review",
+            "DDD_TECHNICAL_ASSIGNMENT",
+            "Divisional Deputy Director Technical Assignment",
+            "DDD_TECHNICAL_REVIEW",
+            "Divisional Deputy Director Technical Endorsement",
+            "DDD_IRSD_INTAKE",
+            "Divisional Deputy Director IRSD Routing",
+            "IRSD_STAFF_VETTING",
+            "IRSD Staff Compliance Vetting",
+            "DDD_IRSD_REVIEW",
+            "Divisional Deputy Director IRSD Concurrence",
+            "Applicant Notification Hub - Final Approval Certified"
+          ])
         )
       );
+
+    records = rawRecords.map((rec) => ({
+      ...rec,
+      details: typeof rec.details === "string" ? JSON.parse(rec.details) : rec.details,
+    }));
   } catch (error) {
     console.error("Direct Database Fetch Failure:", error);
+    queryError = true;
   }
 
-  const filteredRecords = records.filter(
-    app => app.type?.toLowerCase() !== "facility verification"
-  );
-
   const hasDivisionalDeputyDirectorHistory = (app: ApplicationItem): boolean => {
-    try {
-      if (!app.details) return false;
-      const parsedDetails = typeof app.details === "string" ? JSON.parse(app.details) : app.details;
-      const comments: CommentTrail[] = parsedDetails?.comments || [];
-      
-      return comments.some((comment) => 
+    if (!app.details || !Array.isArray(app.details.comments)) return false;
+    return app.details.comments.some(
+      (comment) => 
         (comment.fromStep && comment.fromStep.includes("Divisional Deputy Director")) ||
         (comment.toStep && comment.toStep.includes("Divisional Deputy Director"))
-      );
-    } catch (e) {
-      console.error(`Failed parsing details history for application ID ${app.id}:`, e);
-      return false;
-    }
+    );
   };
 
-  const unassigned = filteredRecords.filter(
-    app => app.currentPoint === "Divisional Deputy Director Technical Assignment" && app.status === "INSPECTION_PENDING"
+  // Tab Filtering Logic
+  const categorizationList = records.filter(
+    app => (app.currentPoint === "DDD_TECHNICAL_ASSIGNMENT" || app.currentPoint === "Divisional Deputy Director Technical Assignment") &&
+           app.isCategorized === false
+  );
+
+  const unassigned = records.filter(
+    app => (app.currentPoint === "DDD_TECHNICAL_ASSIGNMENT" || app.currentPoint === "Divisional Deputy Director Technical Assignment") &&
+           app.isCategorized === true &&
+           app.status === "INSPECTION_PENDING"
   );
   
-  const assigned = filteredRecords.filter(
+  const assigned = records.filter(
     app => 
       (app.currentPoint && app.currentPoint.includes("Divisional Deputy Director") && app.status !== "INSPECTION_PENDING") ||
       (app.status === "INSPECTION_SCHEDULED" && hasDivisionalDeputyDirectorHistory(app))
   );
 
-  const irsdIntake = filteredRecords.filter(
-    app => app.currentPoint === "Divisional Deputy Director IRSD Routing" || app.status === "PENDING_IRSD_ROUTING"
+  const irsdIntake = records.filter(
+    app => app.currentPoint === "DDD_IRSD_INTAKE" || app.currentPoint === "Divisional Deputy Director IRSD Routing" || app.status === "PENDING_IRSD_ROUTING"
   );
 
-  const irsdInFlight = filteredRecords.filter(
-    app => app.currentPoint === "IRSD Staff Compliance Vetting" || app.status === "UNDER_IRSD_VETTING"
+  const irsdInFlight = records.filter(
+    app => app.currentPoint === "IRSD_STAFF_VETTING" || app.currentPoint === "IRSD Staff Compliance Vetting" || app.status === "UNDER_IRSD_VETTING"
   );
 
-  const irsdReview = filteredRecords.filter(
-    app => app.currentPoint === "Divisional Deputy Director IRSD Concurrence" || app.status === "PENDING_IRSD_CONCURRENCE"
+  const irsdReview = records.filter(
+    app => app.currentPoint === "DDD_IRSD_REVIEW" || app.currentPoint === "Divisional Deputy Director IRSD Concurrence" || app.status === "PENDING_IRSD_CONCURRENCE"
   );
 
-  const approved = filteredRecords.filter(
+  const approved = records.filter(
     app => (app.status === "APPROVED" || app.status === "FINALIZED") && hasDivisionalDeputyDirectorHistory(app)
   );
   
-  const capaApproved = filteredRecords.filter(
+  const capaApproved = records.filter(
     app => app.status === "CAPA_APPROVED" && hasDivisionalDeputyDirectorHistory(app)
   );
   
   let currentList: ApplicationItem[] = [];
-  if (activeTab === "unassigned") currentList = unassigned;
+  if (activeTab === "categorization") currentList = categorizationList;
+  else if (activeTab === "unassigned") currentList = unassigned;
   else if (activeTab === "assigned") currentList = assigned;
   else if (activeTab === "irsd_intake") currentList = irsdIntake;
   else if (activeTab === "irsd_in_flight") currentList = irsdInFlight;
@@ -162,12 +182,34 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-5 border-slate-200">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Divisional Deputy Director Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage, endorse, route, recall, and track veterinary product pipeline applications.</p>
+          <p className="text-sm text-slate-500 mt-1">Manage, categorize, endorse, route, recall, and track veterinary product pipeline applications.</p>
         </div>
       </header>
 
+      {queryError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-sm">
+          Unable to fetch dashboard applications. Please refresh or contact system administration.
+        </div>
+      )}
+
       {/* Navigation Tabs */}
       <div className="flex border-b border-slate-200 gap-2 overflow-x-auto">
+        <Link 
+          href="?tab=categorization" 
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
+            activeTab === "categorization" 
+              ? "border-blue-600 text-blue-600 font-semibold" 
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+          }`}
+        >
+          <span>🏷️ Facility Categorization</span>
+          {categorizationList.length > 0 && (
+            <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 font-bold">
+              {categorizationList.length}
+            </span>
+          )}
+        </Link>
+
         <Link 
           href="?tab=unassigned" 
           className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
@@ -244,7 +286,7 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
         {currentList.length === 0 ? (
           <div className="p-12 text-center text-slate-400 text-sm">
-            No dynamic workflow applications matching this criteria were found.
+            No applications matching this criteria were found.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -254,8 +296,10 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                   <th className="p-4">Application ID</th>
                   <th className="p-4">Company Name</th>
                   <th className="p-4">Type</th>
-                  <th className="p-4">Current Desk Location</th>
-                  {isIrsdTab ? (
+                  <th className="p-4">Current Location</th>
+                  {activeTab === "categorization" ? (
+                    <th className="p-4">Categorization Status</th>
+                  ) : isIrsdTab ? (
                     <th className="p-4">Action Target</th>
                   ) : (
                     <th className="p-4">System Status</th>
@@ -275,7 +319,13 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                     </td>
                     <td className="p-4 text-slate-600 max-w-xs truncate">{app.currentPoint || "N/A"}</td>
                     
-                    {isIrsdTab ? (
+                    {activeTab === "categorization" ? (
+                      <td className="p-4">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                          Pending PIC/S Categorization
+                        </span>
+                      </td>
+                    ) : isIrsdTab ? (
                       <td className="p-4">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
                           activeTab === "irsd_in_flight"
@@ -306,6 +356,14 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                     )}
 
                     <td className="p-4 text-right whitespace-nowrap space-x-2">
+                      {activeTab === "categorization" && (
+                        <CategorizeButton
+                          applicationId={app.id}
+                          companyName={app.companyName}
+                          applicationNumber={app.applicationNumber}
+                        />
+                      )}
+
                       {activeTab === "unassigned" && (
                         <Link
                           href={`/LocalInspectionReports/ddd/applications/${app.id}`}
@@ -315,7 +373,6 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                         </Link>
                       )}
 
-                      {/* IRSD Intake & Review Links */}
                       {(activeTab === "irsd_intake" || activeTab === "irsd_review") && (
                         <Link
                           href={`/LocalInspectionReports/${app.id}?step=${
@@ -327,7 +384,6 @@ export default async function DivisionalDeputyDirectorInboxDashboardPage({
                         </Link>
                       )}
 
-                      {/* Recall Button Component for IRSD In-Flight Assignments */}
                       {activeTab === "irsd_in_flight" && (
                         <RecallApplicationButton applicationId={app.id} />
                       )}

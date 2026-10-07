@@ -154,8 +154,10 @@ export default function InspectionChecklistForm({
   const [formData, setFormData] = useState<ChecklistData>(() => {
     const resolvedEmail = resolveInitialEmail(initialData);
 
-    const initialCoList = parseInspectorList(initialData?.co_inspectors);
-    const initialTraineeList = parseInspectorList(initialData?.trainees ?? initialData?.traineeInspectors);
+    const initialCoList = parseInspectorList(initialData?.co_inspectors || initialData?.coInspectors);
+    const initialTraineeList = parseInspectorList(
+      initialData?.trainee_inspectors ?? initialData?.trainees ?? initialData?.traineeInspectors
+    );
 
     return {
       report_doc_number: initialData?.report_doc_number || "OKL-LA-PRI-01-2026",
@@ -180,6 +182,7 @@ export default function InspectionChecklistForm({
       // Fallback: If initialData has items, use them; otherwise fallback to props
       co_inspectors: initialCoList.length > 0 ? initialCoList : parseInspectorList(coInspectors),
       trainees: initialTraineeList.length > 0 ? initialTraineeList : parseInspectorList(traineeInspectors),
+    
       
       historical_baseline: initialData?.historical_baseline || { prev_date_type: "", prev_team: "", past_capa_status: "", major_changes: "" },
       

@@ -110,6 +110,8 @@ export default function GMPReportWorkspace({
   const router = useRouter();
   const expectedUserRaw = activeUserName;
 
+  console.log('From client - traineeInspectors:', traineeInspectors)
+
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [activeUserRole, setActiveUserRole] = useState<string>(initialActiveUserRole);
   const [remarks, setRemarks] = useState("");
@@ -795,6 +797,8 @@ export default function GMPReportWorkspace({
               scheduledDate={scheduledDate}
               notificationEmail={resolvedNotificationEmail}
               leadInspectorName={leadInspectorName}
+              coInspectors={coInspectors}
+              traineeInspectors={traineeInspectors}
               onSave={handleAICorrelationCompile}
               onSaveDraft={handleSaveDraft}
               onChange={(updatedData: any) => setChecklistSnapshot(updatedData)}

@@ -356,7 +356,7 @@ export default async function LocalReportPage({ params, searchParams }: PageProp
         report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`,
         final_recommendation: "PENDING"
       };
-
+console.log('traineeInspectorsFormatted: ', traineeInspectorsFormatted);
   return (
     <div className="bg-slate-50 min-h-screen py-6">
       <GMPReportWorkspace 

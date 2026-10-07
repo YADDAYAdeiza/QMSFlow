@@ -59,6 +59,9 @@ export const facilities = pgTable("facilities", {
   longitude: doublePrecision("longitude"),
   geom: geographyPoint("geom"), // PostGIS column handled automatically by the database trigger
   // ------------------------
+  isCategorized: boolean("is_categorized").default(false).notNull(),
+  categorizedBy: uuid("categorized_by").references(() => users.id, { onDelete: "set null" }),
+  categorizedAt: timestamp("categorized_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -113,6 +116,15 @@ export const productLinesLocal = pgTable(
       onDelete: "cascade",
     }),
     name: varchar("name", { length: 255 }).notNull(),
+    // --- PIC/S Categorization Fields ---
+    sterilityLevel: varchar("sterility_level", { length: 100 })
+      .default("Non-Sterile")
+      .notNull(),
+    containmentCategory: varchar("containment_category", { length: 100 })
+      .default("None / Standard General Facility")
+      .notNull(),
+    isDedicatedLine: boolean("is_dedicated_line").default(false).notNull(),
+    // -----------------------------------
     createdAt: timestamp("created_at", { mode: "string" }).defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow(),
   },
@@ -159,6 +171,7 @@ export const productsLocal = pgTable("products_local", {
   name: text("name").notNull(),
   classification: text("classification"),
   targetSpecies: text("target_species"),
+  vmdApproved: boolean("vmd_approved").default(false).notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .defaultNow()

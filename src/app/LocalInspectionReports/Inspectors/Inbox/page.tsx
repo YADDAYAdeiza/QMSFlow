@@ -217,7 +217,6 @@ export default async function InspectorWorkspacePage({
   // ------------------------------------------------------------------
   let vettingTasks: VettingTask[] = [];
   try {
-    // If the user is the IRSD Divisional Deputy Director, they also see tasks fallbacked to them
     const isIRSD_DDD = userRecord.role === "Divisional Deputy Director" && userRecord.division === "IRSD";
 
     const rawVetting = await db
