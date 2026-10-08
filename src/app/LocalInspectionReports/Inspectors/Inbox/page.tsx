@@ -200,6 +200,8 @@ export default async function InspectorWorkspacePage({
     console.error("Categorization Query Error:", err);
   }
 
+  console.log('Categorisation Tasks: ', categorizationTasks);
+
   // ------------------------------------------------------------------
   // 2. Fetch Field Tasks (For Staff/Inspectors)
   // ------------------------------------------------------------------

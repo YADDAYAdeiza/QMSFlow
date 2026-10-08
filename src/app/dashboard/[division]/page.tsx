@@ -65,6 +65,7 @@ export default async function StaffDashboard({
   const validPoints = [
     staffTechStep?.title,
     irsdVettingStep?.title,
+    'IRSD Staff Vetting', // Added explicitly -LEGACY
     'Technical DD Review Return',
     'AFPD Staff Vetting',
     'PAD Staff Vetting'
@@ -74,7 +75,8 @@ export default async function StaffDashboard({
     staffTechStep?.statusLabel,
     irsdVettingStep?.statusLabel,
     'UNDER_TECHNICAL_REVIEW',
-    'UNDER_IRSD_VETTING'
+    'UNDER_IRSD_VETTING',
+    'UNDER_HUB_VETTING' // Added explicitly -LEGACY
   ].filter(Boolean) as string[];
 
   // 3. FETCH TASKS (Scoped to Staff ID, Division, Workflow Points, AND Restricted to Facility Verification)

@@ -33,8 +33,8 @@ interface ProductLineLocal {
   id: string;
   facility_id: string;
   name: string;
-  sterility_level: string; // e.g., 'Sterile', 'Non-Sterile'
-  containment_category: string; // e.g., 'High Containment', 'None / Standard General Facility'
+  sterility_level: string;
+  containment_category: string;
   is_dedicated_line: boolean;
   products: ProductLocal[];
 }
@@ -48,17 +48,14 @@ interface FacilityData {
   product_lines: ProductLineLocal[];
 }
 
-// PIC/S PI 037-1 Calculations
 type IntrinsicLevel = "Low" | "Medium" | "High";
 type ComplianceLevel = "Low" | "Medium" | "High";
 type RiskRating = "A" | "B" | "C";
 
 function CategorizationContent() {
-  // Instantiate Supabase client inside the Client Component
   const supabase = createClient();
 
   const searchParams = useSearchParams();
-  // Accepts either 'facilityId' or 'applicationId' depending on caller parameter key
   const facilityIdParam = searchParams.get("facilityId") || searchParams.get("applicationId") || "fac-1029384";
   const stepParam = searchParams.get("step") || "UNDER_CATEGORIZATION";
 
@@ -70,140 +67,6 @@ function CategorizationContent() {
   const [facility, setFacility] = useState<FacilityData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-useEffect(() => {
-  async function fetchFacilityData() {
-    if (!facilityIdParam) return;
-    setIsLoading(true);
-
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(facilityIdParam);
-    const isNumeric = /^\d+$/.test(facilityIdParam);
-
-    try {
-      let resolvedFacilityId: string | null = null;
-
-      if (isUUID) {
-        resolvedFacilityId = facilityIdParam;
-      } else if (isNumeric) {
-        const numericId = parseInt(facilityIdParam, 10);
-
-        // 1. Resolve application -> facility_id
-        const { data: appData, error: appError } = await supabase
-          .from("applications")
-          .select("facility_id")
-          .eq("id", numericId)
-          .maybeSingle();
-
-        if (appError) {
-          console.error("Application Lookup Error:", appError.message);
-        }
-
-        if (appData?.facility_id) {
-          resolvedFacilityId = appData.facility_id;
-        } else {
-          // 2. Fallback: Resolve company -> facility_id
-          const { data: compFacility, error: compError } = await supabase
-            .from("facilities")
-            .select("id")
-            .eq("company_id", numericId)
-            .maybeSingle();
-
-          if (compError) {
-            console.error("Company Facility Lookup Error:", compError.message);
-          }
-
-          if (compFacility?.id) {
-            resolvedFacilityId = compFacility.id;
-          }
-        }
-      }
-
-      // Early return if no valid UUID could be resolved
-      if (!resolvedFacilityId) {
-        console.warn(`[QMS Warning] Could not resolve a valid Facility UUID for parameter: "${facilityIdParam}"`);
-        setIsLoading(false);
-        return;
-      }
-
-      // STRICT CHECK: Ensure resolvedFacilityId is actually a valid UUID before hitting facilities table
-      const isValidResolvedUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedFacilityId);
-
-      if (!isValidResolvedUUID) {
-        console.error(`Invalid resolved UUID format: "${resolvedFacilityId}"`);
-        setIsLoading(false);
-        return;
-      }
-
-      // Query facilities table using GUARANTEED UUID string
-      const { data: facilityData, error: facilityError } = await supabase
-        .from("facilities")
-        .select("id, name, facility_type, address, is_categorized, company_id")
-        .eq("id", resolvedFacilityId)
-        .maybeSingle();
-
-      if (facilityError) {
-        console.error("Facility Query Error:", facilityError);
-        setIsLoading(false);
-        return;
-      }
-
-      if (!facilityData) {
-        console.warn(`No facility record found for ID: ${resolvedFacilityId}`);
-        setIsLoading(false);
-        return;
-      }
-
-      // Fetch child product lines using the resolved facility UUID
-      const { data: linesData, error: linesError } = await supabase
-        .from("product_lines_local")
-        .select(`
-          id,
-          facility_id,
-          name,
-          sterility_level,
-          containment_category,
-          is_dedicated_line,
-          products_local (
-            id,
-            line_id,
-            name,
-            classification,
-            target_species,
-            vmd_approved
-          )
-        `)
-        .eq("facility_id", facilityData.id);
-
-      if (linesError) {
-        console.error("Product Lines Query Error:", linesError);
-      }
-
-      const formattedFacility: FacilityData = {
-        id: facilityData.id,
-        name: facilityData.name,
-        facility_type: facilityData.facility_type,
-        address: facilityData.address,
-        is_categorized: facilityData.is_categorized ?? false,
-        product_lines: (linesData ?? []).map((line: any) => ({
-          id: line.id,
-          facility_id: line.facility_id,
-          name: line.name,
-          sterility_level: line.sterility_level,
-          containment_category: line.containment_category,
-          is_dedicated_line: line.is_dedicated_line,
-          products: line.products_local ?? [],
-        })),
-      };
-
-      setFacility(formattedFacility);
-    } catch (err: any) {
-      console.error("Unexpected fetch exception:", err?.message || err);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  fetchFacilityData();
-}, [facilityIdParam, supabase]);
   // PIC/S Part B: Intrinsic Risk Inputs
   const [complexityScore, setComplexityScore] = useState<1 | 2 | 3>(3);
   const [criticalityScore, setCriticalityScore] = useState<1 | 2 | 3>(2);
@@ -222,89 +85,152 @@ useEffect(() => {
   // Reviewing Official Title
   const [reviewerTitle] = useState<string>("Divisional Deputy Director");
 
-  // QMS Timer
-useEffect(() => {
-  async function fetchFacilityData() {
-    setIsLoading(true);
-
-    try {
-      // 1. Fetch main facility record
-      const { data: facilityData, error: facilityError } = await supabase
-        .from("facilities")
-        .select("id, name, facility_type, address, is_categorized")
-        .eq("id", facilityIdParam)
-        .maybeSingle();
-
-      if (facilityError) {
-        console.error("Facility Query Error:", JSON.stringify(facilityError, null, 2));
-        setIsLoading(false);
-        return;
-      }
-
-      if (!facilityData) {
-        console.warn(`No facility found for ID: ${facilityIdParam}`);
-        setIsLoading(false);
-        return;
-      }
-
-      // 2. Fetch related product lines separately to avoid nested foreign key join failures
-      const { data: linesData, error: linesError } = await supabase
-        .from("product_lines_local")
-        .select(`
-          id,
-          facility_id,
-          name,
-          sterility_level,
-          containment_category,
-          is_dedicated_line,
-          products_local (
-            id,
-            line_id,
-            name,
-            classification,
-            target_species,
-            vmd_approved
-          )
-        `)
-        .eq("facility_id", facilityData.id);
-
-      if (linesError) {
-        console.error("Product Lines Query Error:", JSON.stringify(linesError, null, 2));
-      }
-
-      // 3. Construct formatted object
-      const formattedFacility: FacilityData = {
-        id: facilityData.id,
-        name: facilityData.name,
-        facility_type: facilityData.facility_type,
-        address: facilityData.address,
-        is_categorized: facilityData.is_categorized ?? false,
-        product_lines: (linesData ?? []).map((line: any) => ({
-          id: line.id,
-          facility_id: line.facility_id,
-          name: line.name,
-          sterility_level: line.sterility_level,
-          containment_category: line.containment_category,
-          is_dedicated_line: line.is_dedicated_line,
-          products: line.products_local ?? []
-        }))
-      };
-
-      setFacility(formattedFacility);
-    } catch (err: any) {
-      console.error("Unexpected fetch exception:", err?.message || err);
-    } finally {
-      setIsLoading(false);
+  // QMS Timer Interval
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isTimerRunning) {
+      interval = setInterval(() => {
+        setTimerSeconds((prev) => prev + 1);
+      }, 1000);
     }
-  }
+    return () => clearInterval(interval);
+  }, [isTimerRunning]);
 
-  if (facilityIdParam) {
+  // Single Data Fetching Effect
+  useEffect(() => {
+    async function fetchFacilityData() {
+      if (!facilityIdParam) return;
+      setIsLoading(true);
+
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(facilityIdParam);
+      const isNumeric = /^\d+$/.test(facilityIdParam);
+
+      try {
+        let resolvedFacilityId: string | null = null;
+
+        if (isUUID) {
+          resolvedFacilityId = facilityIdParam;
+        } else if (isNumeric) {
+          const numericId = parseInt(facilityIdParam, 10);
+
+          // 1. Resolve application -> facility_id
+          const { data: appData, error: appError } = await supabase
+            .from("applications")
+            .select("facility_id")
+            .eq("id", numericId)
+            .maybeSingle();
+
+          if (appError) {
+            console.error("Application Lookup Error:", appError.message);
+          }
+
+          if (appData?.facility_id) {
+            resolvedFacilityId = appData.facility_id;
+          } else {
+            // 2. Fallback: Search facilities by application_id reference if present
+            const { data: compFacility, error: compError } = await supabase
+              .from("facilities")
+              .select("id")
+              .eq("application_id", numericId)
+              .maybeSingle();
+
+            if (compError) {
+              console.error("Facility Application Search Error:", compError.message);
+            }
+
+            if (compFacility?.id) {
+              resolvedFacilityId = compFacility.id;
+            }
+          }
+        }
+
+        if (!resolvedFacilityId) {
+          console.warn(`[QMS Warning] Could not resolve a valid Facility UUID for parameter: "${facilityIdParam}"`);
+          setIsLoading(false);
+          return;
+        }
+
+        const isValidResolvedUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedFacilityId);
+
+        if (!isValidResolvedUUID) {
+          console.error(`Invalid resolved UUID format: "${resolvedFacilityId}"`);
+          setIsLoading(false);
+          return;
+        }
+
+        // Fetch facility record using verified UUID
+        const { data: facilityData, error: facilityError } = await supabase
+          .from("facilities")
+          .select("id, name, facility_type, address, is_categorized")
+          .eq("id", resolvedFacilityId)
+          .maybeSingle();
+
+        if (facilityError) {
+          console.error("Facility Query Error:", facilityError);
+          setIsLoading(false);
+          return;
+        }
+
+        if (!facilityData) {
+          console.warn(`No facility record found for ID: ${resolvedFacilityId}`);
+          setIsLoading(false);
+          return;
+        }
+
+        // Fetch child product lines
+        const { data: linesData, error: linesError } = await supabase
+          .from("product_lines_local")
+          .select(`
+            id,
+            facility_id,
+            name,
+            sterility_level,
+            containment_category,
+            is_dedicated_line,
+            products_local (
+              id,
+              line_id,
+              name,
+              classification,
+              target_species,
+              vmd_approved
+            )
+          `)
+          .eq("facility_id", facilityData.id);
+
+        if (linesError) {
+          console.error("Product Lines Query Error:", linesError);
+        }
+
+        const formattedFacility: FacilityData = {
+          id: facilityData.id,
+          name: facilityData.name,
+          facility_type: facilityData.facility_type,
+          address: facilityData.address,
+          is_categorized: facilityData.is_categorized ?? false,
+          product_lines: (linesData ?? []).map((line: any) => ({
+            id: line.id,
+            facility_id: line.facility_id,
+            name: line.name,
+            sterility_level: line.sterility_level,
+            containment_category: line.containment_category,
+            is_dedicated_line: line.is_dedicated_line,
+            products: line.products_local ?? [],
+          })),
+        };
+
+        setFacility(formattedFacility);
+      } catch (err: any) {
+        console.error("Unexpected fetch exception:", err?.message || err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
     fetchFacilityData();
-  }
-}, [facilityIdParam, supabase]);
-  // --- PIC/S Matrix Logic ---
+  }, [facilityIdParam, supabase]);
 
-  // 1. Calculate Intrinsic Risk Score (Matrix 1)
+  // --- PIC/S Matrix Logic ---
   const getIntrinsicRisk = (comp: number, crit: number): IntrinsicLevel => {
     const score = comp * crit;
     if (score >= 6) return "High";
@@ -314,7 +240,6 @@ useEffect(() => {
 
   const intrinsicRisk = getIntrinsicRisk(complexityScore, criticalityScore);
 
-  // 2. Calculate Compliance Risk (Part C Table)
   const getComplianceRisk = (criticals: number, majors: number): ComplianceLevel => {
     if (criticals >= 1 || majors > 5) return "High";
     if (majors >= 1 && majors <= 5) return "Medium";
@@ -323,7 +248,6 @@ useEffect(() => {
 
   const complianceRisk = getComplianceRisk(criticalDeficiencies, majorDeficiencies);
 
-  // 3. Overall Risk Rating (Part D Matrix Table 3)
   const getOverallRiskRating = (intrinsic: IntrinsicLevel, compliance: ComplianceLevel): RiskRating => {
     if (intrinsic === "High" && compliance === "High") return "C";
     if (intrinsic === "High" || compliance === "High") return "C";
@@ -335,7 +259,6 @@ useEffect(() => {
 
   const overallRiskRating = getOverallRiskRating(intrinsicRisk, complianceRisk);
 
-  // 4. Inspection Frequency (Part E Table 4)
   const getInspectionFrequency = (rating: RiskRating): string => {
     switch (rating) {
       case "C": return "Increased Frequency (< 12 months)";
@@ -350,50 +273,62 @@ useEffect(() => {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Submit Handler -> Save to 'facilities' table
-  const handleSaveCategorization = async () => {
-    if (!facility) return;
+  const calculateNextInspectionDate = (rating: RiskRating): string => {
+  const date = new Date();
+  if (rating === "C") date.setMonth(date.getMonth() + 12);
+  else if (rating === "B") date.setMonth(date.getMonth() + 18);
+  else date.setMonth(date.getMonth() + 36);
+  return date.toISOString();
+};
 
-    setIsSaving(true);
-    setIsTimerRunning(false);
+const handleSaveCategorization = async () => {
+  if (!facility) return;
+  setIsSaving(true);
+  setIsTimerRunning(false);
 
-    const payload = {
-      facility_id: facility.id,
-      step: stepParam,
-      is_categorized: true,
-      categorized_at: new Date().toISOString(),
-      pics_assessment: {
+  const targetDate = calculateNextInspectionDate(overallRiskRating);
+
+  try {
+    // 1. Record the detailed risk assessment evaluation
+    const { error: riskError } = await supabase
+      .from("risk_assessments")
+      .upsert({
+        facility_id: facility.id,
+        application_id: /^\d+$/.test(facilityIdParam) ? parseInt(facilityIdParam, 10) : null,
         complexity_score: complexityScore,
         criticality_score: criticalityScore,
-        intrinsic_risk: intrinsicRisk,
-        deficiencies: { critical: criticalDeficiencies, major: majorDeficiencies },
-        compliance_risk: complianceRisk,
+        intrinsic_level: intrinsicRisk,
+        critical_deficiencies: criticalDeficiencies,
+        major_deficiencies: majorDeficiencies,
+        compliance_level: complianceRisk,
         overall_risk_rating: overallRiskRating,
-        recommended_frequency: getInspectionFrequency(overallRiskRating),
-        scope: {
-          notes: inspectionScopeNotes,
-          inspectors_count: recommendedInspectors,
-          duration_days: recommendedDurationDays
-        },
-        time_spent_seconds: timerSeconds,
-        categorized_by_title: reviewerTitle
-      }
-    };
+        next_inspection_date: targetDate,
+        status: "COMPLETED",
+        updated_at: new Date().toISOString()
+      }, { onConflict: "application_id" });
 
-    try {
-      // You can replace this with your actual Supabase update query
-      // const { error } = await supabase.from('facilities').update(payload).eq('id', facility.id);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.log("Updated Facilities Record in Supabase:", payload);
-      setSaveSuccess(true);
-    } catch (err) {
-      console.error("Save error:", err);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+    if (riskError) throw riskError;
 
-  // Guard Loading State
+    // 2. Update the active status on the facility record
+    const { error: facilityError } = await supabase
+      .from("facilities")
+      .update({
+        is_categorized: true,
+        current_risk_rating: overallRiskRating,
+        next_inspection_date: targetDate,
+      })
+      .eq("id", facility.id);
+
+    if (facilityError) throw facilityError;
+
+    setSaveSuccess(true);
+  } catch (err: any) {
+    console.error("Save error:", err?.message || err);
+  } finally {
+    setIsSaving(false);
+  }
+};
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans text-slate-600">
@@ -405,7 +340,6 @@ useEffect(() => {
     );
   }
 
-  // Guard Empty / Not Found State
   if (!facility) {
     return (
       <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900 flex items-center justify-center">
