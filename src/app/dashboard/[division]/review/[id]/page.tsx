@@ -78,6 +78,8 @@ export default async function TechnicalReviewPage(props: PageProps) {
   const staffIdToLookup = isHubVetting ? details.irsd_reviewer_id : details.staff_reviewer_id;
 
   if (authUser.id !== staffIdToLookup && profile.role !== "Admin") {
+    console.log('authUser.id: ', authUser.id);
+    console.log('staffIdToLookup', staffIdToLookup);
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50">
         <div className="p-12 bg-white rounded-[3rem] shadow-2xl border border-rose-100 max-w-md text-center">
