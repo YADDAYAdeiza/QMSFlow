@@ -1,8 +1,9 @@
 "use client";
+import { facilityCategorizationWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { 
   Building2, 
   ShieldAlert, 
@@ -54,8 +55,9 @@ type RiskRating = "A" | "B" | "C";
 
 function CategorizationContent() {
   const supabase = createClient();
-
+  const router = useRouter();
   const searchParams = useSearchParams();
+
   const facilityIdParam = searchParams.get("facilityId") || searchParams.get("applicationId") || "fac-1029384";
   const stepParam = searchParams.get("step") || "UNDER_CATEGORIZATION";
 
@@ -274,12 +276,13 @@ function CategorizationContent() {
   };
 
   const calculateNextInspectionDate = (rating: RiskRating): string => {
-  const date = new Date();
-  if (rating === "C") date.setMonth(date.getMonth() + 12);
-  else if (rating === "B") date.setMonth(date.getMonth() + 18);
-  else date.setMonth(date.getMonth() + 36);
-  return date.toISOString();
-};
+    const date = new Date();
+    if (rating === "C") date.setMonth(date.getMonth() + 12);
+    else if (rating === "B") date.setMonth(date.getMonth() + 18);
+    else date.setMonth(date.getMonth() + 36);
+    return date.toISOString();
+  };
+
 
 const handleSaveCategorization = async () => {
   if (!facility) return;
@@ -287,14 +290,20 @@ const handleSaveCategorization = async () => {
   setIsTimerRunning(false);
 
   const targetDate = calculateNextInspectionDate(overallRiskRating);
+  const numericAppId = /^\d+$/.test(facilityIdParam) ? parseInt(facilityIdParam, 10) : null;
+  const now = new Date().toISOString();
+
+  // Target step definitions from config
+  const currentStep = facilityCategorizationWorkflow.steps.UNDER_CATEGORIZATION;
+  const nextStep = facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT;
 
   try {
-    // 1. Record the detailed risk assessment evaluation
+    // 1. Record detailed risk assessment evaluation
     const { error: riskError } = await supabase
       .from("risk_assessments")
       .upsert({
         facility_id: facility.id,
-        application_id: /^\d+$/.test(facilityIdParam) ? parseInt(facilityIdParam, 10) : null,
+        application_id: numericAppId,
         complexity_score: complexityScore,
         criticality_score: criticalityScore,
         intrinsic_level: intrinsicRisk,
@@ -304,12 +313,12 @@ const handleSaveCategorization = async () => {
         overall_risk_rating: overallRiskRating,
         next_inspection_date: targetDate,
         status: "COMPLETED",
-        updated_at: new Date().toISOString()
+        updated_at: now
       }, { onConflict: "application_id" });
 
     if (riskError) throw riskError;
 
-    // 2. Update the active status on the facility record
+    // 2. Update facilities table status
     const { error: facilityError } = await supabase
       .from("facilities")
       .update({
@@ -321,7 +330,66 @@ const handleSaveCategorization = async () => {
 
     if (facilityError) throw facilityError;
 
+    if (numericAppId) {
+      // 3. Close the active QMS timeline record for UNDER_CATEGORIZATION
+      const { error: closeTimelineError } = await supabase
+        .from("qms_timelines")
+        .update({
+          end_time: now,
+          details: {
+            time_spent_seconds: timerSeconds,
+            action: "FORWARD_TO_ENDORSEMENT",
+            categorized_by_title: reviewerTitle,
+          }
+        })
+        .eq("application_id", numericAppId)
+        .is("end_time", null);
+
+      if (closeTimelineError) {
+        console.error("QMS Timeline Close Error:", closeTimelineError.message);
+      }
+
+      // 4. Open NEW QMS timeline record using key (or step.title) based on schema standards
+      const { error: openTimelineError } = await supabase
+        .from("qms_timelines")
+        .insert({
+          application_id: numericAppId,
+          point: nextStep.key, // Or nextStep.title if your timeline point column stores full titles
+          division: nextStep.division,
+          start_time: now,
+          end_time: null,
+          details: {
+            routed_from: currentStep.key,
+            assigned_role: nextStep.role,
+          }
+        });
+
+      if (openTimelineError) {
+        console.error("QMS Timeline Create Error:", openTimelineError.message);
+      }
+
+      // 5. Update applications table current_point and status from workflow config
+      const { error: appUpdateError } = await supabase
+        .from("applications")
+        .update({
+          current_point: nextStep.key,
+          status: nextStep.statusLabel,
+          updated_at: now,
+        })
+        .eq("id", numericAppId);
+
+      if (appUpdateError) {
+        console.error("Application Point Update Error:", appUpdateError.message);
+      }
+    }
+
     setSaveSuccess(true);
+
+    // 6. Route back to Inbox
+    setTimeout(() => {
+      router.push("/LocalInspectionReports/Inspectors/Inbox?tab=unassigned");
+    }, 1200);
+
   } catch (err: any) {
     console.error("Save error:", err?.message || err);
   } finally {
@@ -350,7 +418,7 @@ const handleSaveCategorization = async () => {
             Could not locate a facility record matching ID: <code className="font-mono text-slate-700">{facilityIdParam}</code>.
           </p>
           <Link
-            href="/Inspectors/Inbox"
+            href="/LocalInspectionReports/Inspectors/Inbox"
             className="inline-flex items-center text-sm font-semibold text-blue-600 hover:text-blue-700"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -368,7 +436,7 @@ const handleSaveCategorization = async () => {
         {/* Navigation & QMS Header */}
         <div className="flex items-center justify-between">
           <Link
-            href="/Inspectors/Inbox"
+            href="/LocalInspectionReports/Inspectors/Inbox"
             className="inline-flex items-center text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -420,10 +488,10 @@ const handleSaveCategorization = async () => {
         {saveSuccess && (
           <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-emerald-900">
             <div className="flex items-center space-x-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-              <span className="font-medium text-sm">Facility categorization and PIC/S risk profile successfully saved!</span>
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 animate-bounce" />
+              <span className="font-medium text-sm">Facility categorization saved! Redirecting to Inbox...</span>
             </div>
-            <Link href="/Inspectors/Inbox" className="text-xs font-bold underline hover:text-emerald-700">
+            <Link href="/LocalInspectionReports/Inspectors/Inbox" className="text-xs font-bold underline hover:text-emerald-700">
               Return to Inbox
             </Link>
           </div>

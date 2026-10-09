@@ -88,7 +88,7 @@ const isHubVetting =
           <Lock className="w-12 h-12 text-rose-500 mx-auto mb-4" />
           <h2 className="text-xl font-black uppercase italic text-slate-900">Access Restricted</h2>
           <p className="text-[10px] text-slate-400 mt-4 uppercase font-bold tracking-widest leading-relaxed">
-            This dossier is locked to another officer's credentials.
+            This dossier is locked to another officer's credentials
           </p>
         </div>
       </div>

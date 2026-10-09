@@ -24,6 +24,7 @@ export const PRODUCTION_LINE_TYPES = [
   "Oral Liquid",
   "Dry Powder",
   "Solid",
+  "Bolus",
   "Aerosol",
   "Powder",
   "Semi-Solid / Ointment",
@@ -55,7 +56,7 @@ export default function ApplicationCreationPage() {
   const [companyName, setCompanyName] = useState("");
   const [facilityName, setFacilityName] = useState("");
   const [facilityAddress, setFacilityAddress] = useState("");
-  const [inspectionType, setInspectionType] = useState<"Pre-Production" | "Pre-Registration" | "Renewal" | "GMP-Reassessment">("Pre-Registration");
+  const [inspectionType, setInspectionType] = useState<"Pre-Production" | "Pre-Registration" | "Renewal" | "GMP-Reassessment" | "Routine">("Pre-Registration");
   const [notificationEmail, setNotificationEmail] = useState("");
   const [targetDirectorate, setTargetDirectorate] = useState<DirectorateCategory>("VMD");
   const [estimatedInspectionDays, setEstimatedInspectionDays] = useState<number>(2);
@@ -429,6 +430,7 @@ export default function ApplicationCreationPage() {
                   <option value="Pre-Registration">Pre-Registration Inspection (PRI)</option>
                   <option value="Renewal">Renewal Inspection (REN)</option>
                   <option value="GMP-Reassessment">GMP-Reassessment (GMP)</option>
+                  <option value="Routine">Routine (RI)</option>
                 </select>
               </div>
 

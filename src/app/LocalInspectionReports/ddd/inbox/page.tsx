@@ -6,6 +6,7 @@ import Link from "next/link";
 import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
 import RecallApplicationButton from "@/components/LocalInspectionReports/RecallApplicationButton";
 import CategorizeButton from "@/components/LocalInspectionReports/CategorizeButton";
+import { facilityCategorizationWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
 interface CommentTrail {
   text?: string;
@@ -48,6 +49,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
   
   const validTabs = [
     "categorization",
+    "endorse_categorization",
     "unassigned", 
     "assigned", 
     "irsd_intake", 
@@ -85,6 +87,8 @@ export default async function DivisionalDeputyDirectorDashboardPage({
           inArray(applications.status, [
             "INSPECTION_PENDING", 
             "INSPECTION_SCHEDULED", 
+            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.statusLabel, // "PENDING_CATEGORIZATION_ASSIGNMENT"
+            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.statusLabel, // "PENDING_CATEGORIZATION_ENDORSEMENT"
             "PENDING_IRSD_ROUTING",
             "UNDER_IRSD_VETTING",
             "PENDING_IRSD_CONCURRENCE",
@@ -94,8 +98,11 @@ export default async function DivisionalDeputyDirectorDashboardPage({
           ]),
           inArray(applications.currentPoint, [
             "Staff Technical Field Review",
-            "DDD_TECHNICAL_ASSIGNMENT",
-            "Divisional Deputy Director Technical Assignment",
+            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key,   // "DDD_TECHNICAL_ASSIGNMENT"
+            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title, // "Divisional Deputy Director Technical & Categorization Assignment"
+            "Divisional Deputy Director Technical Assignment",                   // Fallback legacy string
+            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.key,   // "DDD_CATEGORIZATION_ENDORSEMENT"
+            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.title, // "Divisional Deputy Director Categorization Endorsement"
             "DDD_TECHNICAL_REVIEW",
             "Divisional Deputy Director Technical Endorsement",
             "DDD_IRSD_INTAKE",
@@ -129,19 +136,41 @@ export default async function DivisionalDeputyDirectorDashboardPage({
 
   // Tab Filtering Logic
   const categorizationList = records.filter(
-    app => (app.currentPoint === "DDD_TECHNICAL_ASSIGNMENT" || app.currentPoint === "Divisional Deputy Director Technical Assignment") &&
-           app.isCategorized === false
+    app => 
+      (
+        app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key ||
+        app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title ||
+        app.currentPoint === "Divisional Deputy Director Technical Assignment" ||
+        app.status === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.statusLabel
+      ) && app.isCategorized === false
+  );
+
+  const endorseCategorizationList = records.filter(
+    app => 
+      app.currentPoint === facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.key || 
+      app.currentPoint === facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.title ||
+      app.status === facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.statusLabel
   );
 
   const unassigned = records.filter(
-    app => (app.currentPoint === "DDD_TECHNICAL_ASSIGNMENT" || app.currentPoint === "Divisional Deputy Director Technical Assignment") &&
-           app.isCategorized === true &&
-           app.status === "INSPECTION_PENDING"
+    app => 
+      (
+        app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key || 
+        app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title ||
+        app.currentPoint === "Divisional Deputy Director Technical Assignment"
+      ) &&
+      app.isCategorized === true &&
+      app.status === "INSPECTION_PENDING"
   );
   
   const assigned = records.filter(
     app => 
-      (app.currentPoint && app.currentPoint.includes("Divisional Deputy Director") && app.status !== "INSPECTION_PENDING") ||
+      (
+        app.currentPoint && 
+        app.currentPoint.includes("Divisional Deputy Director") && 
+        app.status !== "INSPECTION_PENDING" && 
+        app.status !== facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.statusLabel
+      ) ||
       (app.status === "INSPECTION_SCHEDULED" && hasDivisionalDeputyDirectorHistory(app))
   );
 
@@ -167,6 +196,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
   
   let currentList: ApplicationItem[] = [];
   if (activeTab === "categorization") currentList = categorizationList;
+  else if (activeTab === "endorse_categorization") currentList = endorseCategorizationList;
   else if (activeTab === "unassigned") currentList = unassigned;
   else if (activeTab === "assigned") currentList = assigned;
   else if (activeTab === "irsd_intake") currentList = irsdIntake;
@@ -206,6 +236,22 @@ export default async function DivisionalDeputyDirectorDashboardPage({
           {categorizationList.length > 0 && (
             <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 font-bold">
               {categorizationList.length}
+            </span>
+          )}
+        </Link>
+
+        <Link 
+          href="?tab=endorse_categorization" 
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
+            activeTab === "endorse_categorization" 
+              ? "border-purple-600 text-purple-600 font-semibold" 
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+          }`}
+        >
+          <span>🛡️ Endorse Categorization</span>
+          {endorseCategorizationList.length > 0 && (
+            <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800 font-bold">
+              {endorseCategorizationList.length}
             </span>
           )}
         </Link>
@@ -299,6 +345,8 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                   <th className="p-4">Current Location</th>
                   {activeTab === "categorization" ? (
                     <th className="p-4">Categorization Status</th>
+                  ) : activeTab === "endorse_categorization" ? (
+                    <th className="p-4">Endorsement Status</th>
                   ) : isIrsdTab ? (
                     <th className="p-4">Action Target</th>
                   ) : (
@@ -323,6 +371,12 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                       <td className="p-4">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
                           Pending PIC/S Categorization
+                        </span>
+                      </td>
+                    ) : activeTab === "endorse_categorization" ? (
+                      <td className="p-4">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                          Awaiting Categorization Endorsement
                         </span>
                       </td>
                     ) : isIrsdTab ? (
@@ -362,6 +416,15 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                           companyName={app.companyName}
                           applicationNumber={app.applicationNumber}
                         />
+                      )}
+
+                      {activeTab === "endorse_categorization" && (
+                        <Link
+                          href={`/LocalInspectionReports/${app.id}?step=DDD_CATEGORIZATION_ENDORSEMENT`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                        >
+                          <span>🛡️</span> Endorse Risk Tier
+                        </Link>
                       )}
 
                       {activeTab === "unassigned" && (
