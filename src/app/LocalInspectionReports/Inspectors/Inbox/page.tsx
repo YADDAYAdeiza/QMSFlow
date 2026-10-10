@@ -17,7 +17,7 @@ import { redirect } from "next/navigation";
 import { ShieldAlert, ClipboardList, UserCheck, Eye, Lock, FileCheck, CheckCircle2, Layers } from "lucide-react";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
-import { facilityCategorizationWorkflow } from "@/config/workflows/inspectionReportWorkflow";
+import { facilityCategorizationWorkflow } from "@/config/workflows/facilityCategorizationWorkflow";
 
 export const dynamic = "force-dynamic";
 

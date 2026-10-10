@@ -1,5 +1,4 @@
 "use client";
-import { facilityCategorizationWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
@@ -19,6 +18,7 @@ import {
   Loader2
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { facilityCategorizationWorkflow } from "@/config/workflows/facilityCategorizationWorkflow";
 
 // --- Schema Types ---
 interface ProductLocal {
@@ -349,12 +349,12 @@ const handleSaveCategorization = async () => {
         console.error("QMS Timeline Close Error:", closeTimelineError.message);
       }
 
-      // 4. Open NEW QMS timeline record using key (or step.title) based on schema standards
+      // 4. Open NEW QMS timeline record using exact currentPoint title string from workflow config
       const { error: openTimelineError } = await supabase
         .from("qms_timelines")
         .insert({
           application_id: numericAppId,
-          point: nextStep.key, // Or nextStep.title if your timeline point column stores full titles
+          point: nextStep.currentPoint, // Uses full title: "Divisional Deputy Director Categorization Endorsement"
           division: nextStep.division,
           start_time: now,
           end_time: null,
@@ -368,12 +368,12 @@ const handleSaveCategorization = async () => {
         console.error("QMS Timeline Create Error:", openTimelineError.message);
       }
 
-      // 5. Update applications table current_point and status from workflow config
+      // 5. Update applications table current_point and status using workflow config title and statusLabel
       const { error: appUpdateError } = await supabase
         .from("applications")
         .update({
-          current_point: nextStep.key,
-          status: nextStep.statusLabel,
+          current_point: nextStep.currentPoint, // Matches full title string
+          status: nextStep.statusLabel,         // "PENDING_CATEGORIZATION_ENDORSEMENT"
           updated_at: now,
         })
         .eq("id", numericAppId);

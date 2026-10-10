@@ -14,71 +14,65 @@ export const inspectionScheduleBatchWorkflow = {
   workflowType: "INSPECTION_SCHEDULE_BATCH",
 
   statuses: {
+    INSPECTION_PENDING: "INSPECTION_PENDING",
     DRAFT: "DRAFT",
     PENDING_APPROVAL: "PENDING_APPROVAL",
     REWORK_REQUIRED: "REWORK_REQUIRED",
     APPROVED: "APPROVED",
+    INSPECTION_SCHEDULED: "INSPECTION_SCHEDULED",
   },
 
   steps: {
-    SCHEDULE_DRAFT: {
-      key: "SCHEDULE_DRAFT",
-      title: "Inspection Schedule Drafting",
+    // 1. Entry Step: Triggered automatically when facility categorization is endorsed and completed
+    INSPECTION_PENDING: {
+      key: "INSPECTION_PENDING",
+      title: "Facility Awaiting Inspection Scheduling",
       division: "IRSD",
       role: "Divisional Deputy Director",
-      currentPoint: "Divisional Deputy Director IRSD Routing",
-      statusLabel: "DRAFT",
-      nextStepKey: "DIRECTOR_APPROVAL_REVIEW",
-      prevStepKey: null,
-      description: "Head (IRSD) prepares and reviews schedule entries.",
+      currentPoint: "Facility Awaiting Inspection Scheduling",
+      statusLabel: "INSPECTION_PENDING",
+      nextStepKey: "SCHEDULE_DRAFT",
+      prevStepKey: "DDD_CATEGORIZATION_ENDORSEMENT",
+      description: "Facility has been risk-categorized and logged, awaiting grouping into a schedule batch.",
     },
 
-    DIRECTOR_APPROVAL_REVIEW: {
-      key: "DIRECTOR_APPROVAL_REVIEW",
-      title: "Director Review & Approval",
+    // 2. Drafting & Submission Step: DDD bundles applications; picked up directly by the Director
+    SCHEDULE_DRAFT: {
+      key: "SCHEDULE_DRAFT",
+      title: "Director Routing",
       division: "DIRECTORATE",
       role: "Director",
-      currentPoint: "Director Review & Approval",
-      statusLabel: "PENDING_APPROVAL",
-      nextStepKey: "STAFF_TECHNICAL_REVIEW",
-      prevStepKey: "SCHEDULE_DRAFT",
-      description: "Schedule submitted to Director for technical approval or rework.",
+      currentPoint: "Director Routing",
+      statusLabel: "DRAFT",
+      nextStepKey: "INSPECTION_SCHEDULED",
+      prevStepKey: "INSPECTION_PENDING",
+      description: "Schedule batch submitted by DDD, awaiting Director review, sign-off, or rework.",
     },
 
+    // 3. Rework Step: Returned by Director to DDD for modification
     REWORK_REQUIRED: {
       key: "REWORK_REQUIRED",
       title: "Schedule Rework & Modification",
       division: "IRSD",
       role: "Divisional Deputy Director",
-      currentPoint: "Divisional Deputy Director IRSD Routing",
+      currentPoint: "Schedule Rework & Modification",
       statusLabel: "REWORK_REQUIRED",
-      nextStepKey: "DIRECTOR_APPROVAL_REVIEW",
-      prevStepKey: "DIRECTOR_APPROVAL_REVIEW",
+      nextStepKey: "SCHEDULE_DRAFT",
+      prevStepKey: "SCHEDULE_DRAFT",
       description: "Returned by Director to Head (IRSD) with remarks for revision.",
     },
 
-    STAFF_TECHNICAL_REVIEW: {
-      key: "STAFF_TECHNICAL_REVIEW",
+    // 4. Final Dispatched State: Director approves, handing over execution to inspectionReportWorkflow
+    INSPECTION_SCHEDULED: {
+      key: "INSPECTION_SCHEDULED",
       title: "Staff Technical Field Review",
-      division: "DIRECTORATE",
+      division: "VMD",
       role: "Technical Staff Reviewer",
       currentPoint: "Staff Technical Field Review",
-      statusLabel: "UNDER_TECHNICAL_REVIEW",
-      nextStepKey: "DDD_TECHNICAL_REVIEW",
-      prevStepKey: "DIRECTOR_APPROVAL_REVIEW",
-      description: "Approved schedule dispatched to assigned inspectors across the Directorate for field execution.",
-    },
-
-    FINAL_APPROVED: {
-      key: "FINAL_APPROVED",
-      title: "Approved for Publication & Execution",
-      division: "DIRECTORATE",
-      role: "System",
-      currentPoint: "Schedule Final Approved",
-      statusLabel: "APPROVED",
-      nextStepKey: null,
-      prevStepKey: "STAFF_TECHNICAL_REVIEW",
-      description: "Schedule approved and published for Notice Board printing and inspection teams.",
+      statusLabel: "INSPECTION_SCHEDULED",
+      nextStepKey: null, // Clean hand-off point to inspectionReportWorkflow
+      prevStepKey: "SCHEDULE_DRAFT",
+      description: "Schedule approved by the Director and dispatched to assigned inspectors across the Directorate for field execution.",
     },
   } as Record<string, ScheduleBatchStepConfig>,
 

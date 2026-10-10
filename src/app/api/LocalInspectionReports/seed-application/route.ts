@@ -9,6 +9,7 @@ import {
   qmsTimelines 
 } from '@/db/schema';
 import { eq, and, ilike } from 'drizzle-orm';
+import { applicationIntakeWorkflow } from '@/config/workflows/applicationIntakeWorkflow';
 
 export async function POST(req: Request) {
   try {
@@ -185,8 +186,12 @@ export async function POST(req: Request) {
         }
       }
 
-      // Standardized role title for initial schedule routing
-      const initialPoint = 'Divisional Deputy Director Technical Assignment';
+      // Use the workflow config's DIRECTOR_INTAKE step as the universal entry gate
+      const intakeStep = applicationIntakeWorkflow.steps.DIRECTOR_INTAKE;
+      const initialPoint = intakeStep.currentPoint; // "Director Initial Allocation"
+      const initialStatus = intakeStep.statusLabel; // "PENDING_DIRECTOR_ALLOCATION"
+      const initialDivision = intakeStep.division; // "DIRECTORATE"
+
       // 4. Create Application Tracking Record
       const [application] = await tx
         .insert(applications)
@@ -196,7 +201,7 @@ export async function POST(req: Request) {
           companyId: company.id,
           facilityId: facility.id,
           currentPoint: initialPoint,
-          status: 'INSPECTION_PENDING',
+          status: initialStatus,
           details: {
             targetDirectorate,
             estimatedInspectionDays,
@@ -207,11 +212,13 @@ export async function POST(req: Request) {
         })
         .returning();
 
-      // 5. QMS Timing Enforcement: Record start time for SLA tracking
+      // 5. QMS Timing Enforcement: Record active timeline entry for SLA tracking
       await tx.insert(qmsTimelines).values({
         applicationId: application.id,
         point: initialPoint,
+        division: initialDivision,
         startTime: new Date(),
+        // endTime is intentionally left null as this is the current active step
       });
 
       return application;

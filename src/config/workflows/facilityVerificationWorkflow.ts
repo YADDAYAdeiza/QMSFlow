@@ -8,6 +8,7 @@ export interface WorkflowStep {
   directorate: Directorate;
   division?: string;
   role: string;
+  currentPoint: string;
   nextStepKey: string | null;
   prevStepKey: string | null;
   statusLabel: string;
@@ -30,6 +31,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "LOD",
         role: "LOD_Officer",
+        currentPoint: "Letter of Deliberation Intake",
         nextStepKey: "DIRECTOR_INTAKE", 
         prevStepKey: null,
         statusLabel: "LOD_INTAKE"
@@ -40,6 +42,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "DIRECTORATE",
         role: "Director",
+        currentPoint: "Director Initial Assignment",
         nextStepKey: "DDD_TECHNICAL_ASSIGNMENT",
         prevStepKey: "LOD",
         statusLabel: "PENDING_DIRECTOR_ASSIGNMENT"
@@ -49,6 +52,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         title: "Divisional Deputy Director Technical Assignment",
         directorate: "VMAP",
         role: "Divisional Deputy Director",
+        currentPoint: "Divisional Deputy Director Technical Assignment",
         nextStepKey: "STAFF_TECHNICAL_REVIEW",
         prevStepKey: "DIRECTOR_INTAKE",
         statusLabel: "PENDING_TECHNICAL_ASSIGNMENT"
@@ -59,6 +63,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "VMD",
         role: "Technical Staff Reviewer",
+        currentPoint: "Staff Technical Review",
         nextStepKey: "DDD_TECHNICAL_REVIEW",
         prevStepKey: "DDD_TECHNICAL_ASSIGNMENT",
         statusLabel: "UNDER_TECHNICAL_REVIEW"
@@ -69,6 +74,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "VMD",
         role: "Divisional Deputy Director",
+        currentPoint: "Divisional Deputy Director Technical Endorsement",
         nextStepKey: "DDD_IRSD_INTAKE",
         prevStepKey: "STAFF_TECHNICAL_REVIEW",
         statusLabel: "PENDING_TECHNICAL_ENDORSEMENT"
@@ -79,6 +85,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "IRSD",
         role: "Divisional Deputy Director",
+        currentPoint: "Divisional Deputy Director IRSD Routing",
         nextStepKey: "IRSD_STAFF_VETTING",
         prevStepKey: "DDD_TECHNICAL_REVIEW",
         statusLabel: "PENDING_IRSD_ROUTING"
@@ -89,6 +96,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "IRSD",
         role: "IRSD Staff Reviewer",
+        currentPoint: "IRSD Staff Compliance Vetting",
         nextStepKey: "DDD_IRSD_REVIEW",
         prevStepKey: "DDD_IRSD_INTAKE",
         statusLabel: "UNDER_IRSD_VETTING"
@@ -99,6 +107,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "IRSD",
         role: "Divisional Deputy Director",
+        currentPoint: "Divisional Deputy Director IRSD Concurrence",
         nextStepKey: "DIRECTOR_FINAL_SIGN_OFF",
         prevStepKey: "IRSD_STAFF_VETTING",
         statusLabel: "PENDING_IRSD_CONCURRENCE"
@@ -109,6 +118,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "DIRECTORATE",
         role: "Director",
+        currentPoint: "Director Final Review",
         nextStepKey: "FINALIZED",
         prevStepKey: "DDD_IRSD_REVIEW",
         statusLabel: "PENDING_FINAL_SIGN_OFF"
@@ -119,6 +129,7 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
         directorate: "VMAP",
         division: "ARCHIVE",
         role: "System",
+        currentPoint: "Report Approved and Archived",
         nextStepKey: null,
         prevStepKey: null,
         statusLabel: "APPROVED_AND_ARCHIVED"

@@ -6,7 +6,8 @@ import Link from "next/link";
 import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
 import RecallApplicationButton from "@/components/LocalInspectionReports/RecallApplicationButton";
 import CategorizeButton from "@/components/LocalInspectionReports/CategorizeButton";
-import { facilityCategorizationWorkflow } from "@/config/workflows/inspectionReportWorkflow";
+import CategorizeEndorsementTrigger from "@/components/LocalInspectionReports/CategorizeEndorsementTrigger"; // Modal trigger component
+import { facilityCategorizationWorkflow } from "@/config/workflows/facilityCategorizationWorkflow";
 
 interface CommentTrail {
   text?: string;
@@ -87,8 +88,8 @@ export default async function DivisionalDeputyDirectorDashboardPage({
           inArray(applications.status, [
             "INSPECTION_PENDING", 
             "INSPECTION_SCHEDULED", 
-            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.statusLabel, // "PENDING_CATEGORIZATION_ASSIGNMENT"
-            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.statusLabel, // "PENDING_CATEGORIZATION_ENDORSEMENT"
+            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.statusLabel, 
+            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.statusLabel, 
             "PENDING_IRSD_ROUTING",
             "UNDER_IRSD_VETTING",
             "PENDING_IRSD_CONCURRENCE",
@@ -98,11 +99,11 @@ export default async function DivisionalDeputyDirectorDashboardPage({
           ]),
           inArray(applications.currentPoint, [
             "Staff Technical Field Review",
-            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key,   // "DDD_TECHNICAL_ASSIGNMENT"
-            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title, // "Divisional Deputy Director Technical & Categorization Assignment"
-            "Divisional Deputy Director Technical Assignment",                   // Fallback legacy string
-            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.key,   // "DDD_CATEGORIZATION_ENDORSEMENT"
-            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.title, // "Divisional Deputy Director Categorization Endorsement"
+            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key,   
+            facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title, 
+            "Divisional Deputy Director Technical Assignment",                     
+            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.key,   
+            facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.title, 
             "DDD_TECHNICAL_REVIEW",
             "Divisional Deputy Director Technical Endorsement",
             "DDD_IRSD_INTAKE",
@@ -155,11 +156,15 @@ export default async function DivisionalDeputyDirectorDashboardPage({
   const unassigned = records.filter(
     app => 
       (
-        app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key || 
-        app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title ||
-        app.currentPoint === "Divisional Deputy Director Technical Assignment"
+        // Either it's an old intake item that was categorized...
+        ((
+          app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key || 
+          app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title ||
+          app.currentPoint === "Divisional Deputy Director Technical Assignment"
+        ) && app.isCategorized === true) ||
+        // ...OR it just finished endorsement and is ready for inspection scheduling assignment
+        app.currentPoint === facilityCategorizationWorkflow.steps.CATEGORIZATION_COMPLETED.currentPoint
       ) &&
-      app.isCategorized === true &&
       app.status === "INSPECTION_PENDING"
   );
   
@@ -248,7 +253,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
               : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
           }`}
         >
-          <span>🛡️ Endorse Categorization</span>
+          <span>🛡️ Categorization Endorsements</span>
           {endorseCategorizationList.length > 0 && (
             <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800 font-bold">
               {endorseCategorizationList.length}
@@ -419,12 +424,12 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                       )}
 
                       {activeTab === "endorse_categorization" && (
-                        <Link
-                          href={`/LocalInspectionReports/${app.id}?step=DDD_CATEGORIZATION_ENDORSEMENT`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
-                        >
-                          <span>🛡️</span> Endorse Risk Tier
-                        </Link>
+                        <CategorizeEndorsementTrigger
+                          applicationId={app.id}
+                          facilityId={app.facilityId}
+                          companyName={app.companyName}
+                          applicationNumber={app.applicationNumber}
+                        />
                       )}
 
                       {activeTab === "unassigned" && (

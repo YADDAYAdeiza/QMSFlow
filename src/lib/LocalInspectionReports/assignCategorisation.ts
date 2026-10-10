@@ -5,6 +5,7 @@ import { applications, qmsTimelines, users } from "@/db/schema";
 import { createClient } from "@/utils/supabase/server";
 import { eq, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { facilityCategorizationWorkflow } from "@/config/workflows/facilityCategorizationWorkflow";
 
 interface AssignCategorizationPayload {
   applicationId: number;
@@ -34,7 +35,10 @@ export async function assignCategorizationTaskAction(
   }
 
   const currentUserId = user.id;
-  const stepKey = targetStepKey || "UNDER_CATEGORIZATION";
+  const targetKey = targetStepKey || "UNDER_CATEGORIZATION";
+  const stepConfig = 
+    facilityCategorizationWorkflow.steps[targetKey] || 
+    facilityCategorizationWorkflow.steps.UNDER_CATEGORIZATION;
 
   // Fetch target staff member to extract division details
   const assignedStaff = await db.query.users.findFirst({
@@ -47,13 +51,13 @@ export async function assignCategorizationTaskAction(
 
   // Execute in a single transaction to maintain state & QMS integrity
   await db.transaction(async (tx) => {
-    // 1. Update Application status and current macro point
+    // 1. Update Application status and current macro point using workflow config
     await tx
       .update(applications)
       .set({
-        currentPoint: stepKey,
-        assignedToId: assignedStaffId, // Cached snapshot for quick macro lookup
-        status: "UNDER_CATEGORIZATION",
+        currentPoint: stepConfig.currentPoint, // "Staff Facility Categorization Desk Review"
+        assignedToId: assignedStaffId,         // Cached snapshot for quick macro lookup
+        status: stepConfig.statusLabel,         // "UNDER_CATEGORIZATION"
         internalNotes: instructions || null,
         updatedAt: new Date(),
       })
@@ -76,7 +80,7 @@ export async function assignCategorizationTaskAction(
     await tx.insert(qmsTimelines).values({
       applicationId: applicationId,
       staffId: assignedStaffId, // Inspector ownership
-      point: stepKey,
+      point: stepConfig.currentPoint,
       division: assignedStaff.division || "VMD",
       startTime: new Date(),
       details: {

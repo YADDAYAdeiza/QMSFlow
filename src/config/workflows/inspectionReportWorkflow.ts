@@ -1,49 +1,36 @@
-// @/config/workflows/inspectionReportWorkflow.ts
+export interface ReportStepConfig {
+  key: string;
+  title: string;
+  division: string;
+  role: string;
+  currentPoint: string;
+  nextStepKey: string | null;
+  prevStepKey: string | null;
+  statusLabel: string;
+}
 
 export const inspectionReportWorkflow = {
   workflowType: "INSPECTION_REVIEW_REPORT",
+
   steps: {
-    LOD: {
-      key: "LOD",
-      title: "Letter of Deliberation Intake",
-      division: "REGISTRATION",
-      role: "LOD_Officer",
-      nextStepKey: "DIRECTOR_INTAKE",
-      prevStepKey: null,
-      statusLabel: "LOD_INTAKE"
-    },
-    DIRECTOR_INTAKE: {
-      key: "DIRECTOR_INTAKE",
-      title: "Director Initial Allocation",
-      division: "DIRECTORATE",
-      role: "Director",
-      nextStepKey: "DDD_TECHNICAL_ASSIGNMENT",
-      prevStepKey: "LOD",
-      statusLabel: "PENDING_DIRECTOR_ALLOCATION"
-    },
-    DDD_TECHNICAL_ASSIGNMENT: {
-      key: "DDD_TECHNICAL_ASSIGNMENT",
-      title: "Divisional Deputy Director Technical Assignment",
-      division: "VMD",
-      role: "Divisional Deputy Director",
-      nextStepKey: "STAFF_TECHNICAL_REVIEW",
-      prevStepKey: "DIRECTOR_INTAKE",
-      statusLabel: "PENDING_TECHNICAL_ASSIGNMENT"
-    },
+    // 1. Entry Step: Picks up immediately after Director approves the inspection schedule batch
     STAFF_TECHNICAL_REVIEW: {
       key: "STAFF_TECHNICAL_REVIEW",
       title: "Staff Technical Field Review",
       division: "VMD",
       role: "Technical Staff Reviewer",
+      currentPoint: "Staff Technical Field Review",
       nextStepKey: "DDD_TECHNICAL_REVIEW",
-      prevStepKey: "DDD_TECHNICAL_ASSIGNMENT",
+      prevStepKey: "INSPECTION_SCHEDULED",
       statusLabel: "UNDER_TECHNICAL_REVIEW"
     },
+    
     DDD_TECHNICAL_REVIEW: {
       key: "DDD_TECHNICAL_REVIEW",
       title: "Divisional Deputy Director Technical Endorsement",
       division: "VMD",
       role: "Divisional Deputy Director",
+      currentPoint: "Divisional Deputy Director Technical Endorsement",
       nextStepKey: "DDD_IRSD_INTAKE",
       prevStepKey: "STAFF_TECHNICAL_REVIEW",
       statusLabel: "PENDING_TECHNICAL_ENDORSEMENT"
@@ -53,6 +40,7 @@ export const inspectionReportWorkflow = {
       title: "Divisional Deputy Director IRSD Routing",
       division: "IRSD",
       role: "Divisional Deputy Director",
+      currentPoint: "Divisional Deputy Director IRSD Routing",
       nextStepKey: "IRSD_STAFF_VETTING",
       prevStepKey: "DDD_TECHNICAL_REVIEW",
       statusLabel: "PENDING_IRSD_ROUTING"
@@ -62,6 +50,7 @@ export const inspectionReportWorkflow = {
       title: "IRSD Staff Compliance Vetting",
       division: "IRSD",
       role: "IRSD Staff Reviewer",
+      currentPoint: "IRSD Staff Compliance Vetting",
       nextStepKey: "DDD_IRSD_REVIEW",
       prevStepKey: "DDD_IRSD_INTAKE",
       statusLabel: "UNDER_IRSD_VETTING"
@@ -71,6 +60,7 @@ export const inspectionReportWorkflow = {
       title: "Divisional Deputy Director IRSD Concurrence",
       division: "IRSD",
       role: "Divisional Deputy Director",
+      currentPoint: "Divisional Deputy Director IRSD Concurrence",
       nextStepKey: "DIRECTOR_FINAL_SIGN_OFF",
       prevStepKey: "IRSD_STAFF_VETTING",
       statusLabel: "PENDING_IRSD_CONCURRENCE"
@@ -80,6 +70,7 @@ export const inspectionReportWorkflow = {
       title: "Director Final Approval & Sign-Off",
       division: "DIRECTORATE",
       role: "Director",
+      currentPoint: "Director Final Approval & Sign-Off",
       nextStepKey: "FINALIZED",
       prevStepKey: "DDD_IRSD_REVIEW",
       statusLabel: "PENDING_FINAL_SIGN_OFF"
@@ -89,62 +80,24 @@ export const inspectionReportWorkflow = {
       title: "Report Approved and Archived",
       division: "ARCHIVE",
       role: "System",
+      currentPoint: "Report Approved and Archived",
       nextStepKey: null,
       prevStepKey: null,
       statusLabel: "APPROVED_AND_ARCHIVED"
     }
-  }
-};
+  } as Record<string, ReportStepConfig>,
 
-/**
- * Dedicated Sub-Workflow for Facility PIC/S Risk Categorization Desk Review
- */// @/config/workflows/inspectionReportWorkflow.ts
-
-export const facilityCategorizationWorkflow = {
-  workflowType: "FACILITY_CATEGORIZATION_REVIEW",
-  steps: {
-    // 1. Entry Step: Sitting on the Divisional Deputy Director's desk waiting for assignment
-    DDD_TECHNICAL_ASSIGNMENT: {
-      key: "DDD_TECHNICAL_ASSIGNMENT",
-      title: "Divisional Deputy Director Technical & Categorization Assignment",
-      division: "VMD",
-      role: "Divisional Deputy Director",
-      nextStepKey: "UNDER_CATEGORIZATION",
-      prevStepKey: "DIRECTOR_INTAKE",
-      statusLabel: "PENDING_CATEGORIZATION_ASSIGNMENT"
+  helpers: {
+    getStepByCurrentPoint(currentPoint: string): ReportStepConfig | undefined {
+      return Object.values(inspectionReportWorkflow.steps).find(
+        (step) => step.currentPoint === currentPoint
+      );
     },
 
-    // 2. Desk Review Step: Assigned Technical Officer filling PIC/S attributes from hard-copy file
-    UNDER_CATEGORIZATION: {
-      key: "UNDER_CATEGORIZATION",
-      title: "Staff Facility Categorization Desk Review",
-      division: "VMD",
-      role: "Technical Staff Reviewer",
-      nextStepKey: "DDD_CATEGORIZATION_ENDORSEMENT",
-      prevStepKey: "DDD_TECHNICAL_ASSIGNMENT",
-      statusLabel: "UNDER_CATEGORIZATION"
+    getStepByStatus(status: string): ReportStepConfig | undefined {
+      return Object.values(inspectionReportWorkflow.steps).find(
+        (step) => step.statusLabel === status
+      );
     },
-
-    // 3. Endorsement Step: Divisional Deputy Director verifies calculated risk tier & categorizations
-    DDD_CATEGORIZATION_ENDORSEMENT: {
-      key: "DDD_CATEGORIZATION_ENDORSEMENT",
-      title: "Divisional Deputy Director Categorization Endorsement",
-      division: "VMD",
-      role: "Divisional Deputy Director",
-      nextStepKey: "CATEGORIZATION_COMPLETED",
-      prevStepKey: "UNDER_CATEGORIZATION",
-      statusLabel: "PENDING_CATEGORIZATION_ENDORSEMENT"
-    },
-
-    // 4. Final State: Facility is categorized, risk score logged, ready for future inspection scheduling
-    CATEGORIZATION_COMPLETED: {
-      key: "CATEGORIZATION_COMPLETED",
-      title: "Facility Risk Categorized and Logged",
-      division: "VMD",
-      role: "System",
-      nextStepKey: null,
-      prevStepKey: "DDD_CATEGORIZATION_ENDORSEMENT",
-      statusLabel: "CATEGORIZED_AND_LOGGED"
-    }
-  }
+  },
 };
