@@ -8,6 +8,7 @@ import {
   inspectionTeamAssignments, 
   users 
 } from "@/db/schema";
+import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 import { eq, inArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import React from "react";
@@ -130,7 +131,8 @@ export default async function DirectorBatchDetailsPage(props: PageProps) {
     }
   }
 
-  const isApproved = batch.status === "APPROVED";
+  // Fixed status check aligned with workflow config
+  const isApproved = batch.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED;
 
   const formattedHeaderDate =
     batch.startDate && batch.endDate
@@ -160,7 +162,7 @@ export default async function DirectorBatchDetailsPage(props: PageProps) {
             history={batch.history as any}
           />
 
-          {batch.status === "PENDING_APPROVAL" && (
+          {batch.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL && (
             <DirectorBatchActionModal batchId={batch.id} title={batch.title} />
           )}
 
@@ -216,7 +218,7 @@ export default async function DirectorBatchDetailsPage(props: PageProps) {
             {schedules.length === 0 ? (
               <tr>
                 <td colSpan={6} className="p-8 text-center text-slate-500 italic">
-                  No inspection schedules linked to this batch reference ({batchId}).
+                  No inspection schedules linked to this batch reference.
                 </td>
               </tr>
             ) : (

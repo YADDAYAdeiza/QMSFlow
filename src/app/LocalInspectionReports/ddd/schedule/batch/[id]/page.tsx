@@ -16,6 +16,7 @@ import { ArrowLeft, Printer } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import BatchHistoryModal from "../../BatchHistoryModal";
 import BatchScheduleInteractiveTable from "@/components/LocalInspectionReports/BatchScheduleInteractiveTable";
+import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 
 export const dynamic = "force-dynamic";
 
@@ -185,7 +186,7 @@ export default async function DeputyDirectorBatchDetailsPage(props: PageProps) {
     };
   });
 
-  const isApproved = batch.status === "APPROVED";
+  const isApproved = batch.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED;
 
   const formattedHeaderDate =
     filterStartDate && filterEndDate

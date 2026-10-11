@@ -31,12 +31,25 @@ export const inspectionScheduleBatchWorkflow = {
       role: "Divisional Deputy Director",
       currentPoint: "Facility Awaiting Inspection Scheduling",
       statusLabel: "INSPECTION_PENDING",
-      nextStepKey: "SCHEDULE_DRAFT",
+      nextStepKey: "DDD_SCHEDULE_ROUTING",
       prevStepKey: "DDD_CATEGORIZATION_ENDORSEMENT",
       description: "Facility has been risk-categorized and logged, awaiting grouping into a schedule batch.",
     },
 
-    // 2. Drafting & Submission Step: DDD bundles applications; picked up directly by the Director
+    // 2. Intermediate Step: DDD drafts the schedule and routes to IRSD / Annexure preparation
+    DDD_SCHEDULE_ROUTING: {
+      key: "DDD_SCHEDULE_ROUTING",
+      title: "Divisional Deputy Director IRSD Routing",
+      division: "IRSD",
+      role: "Divisional Deputy Director",
+      currentPoint: "Divisional Deputy Director IRSD Routing",
+      statusLabel: "DRAFT",
+      nextStepKey: "SCHEDULE_DRAFT",
+      prevStepKey: "INSPECTION_PENDING",
+      description: "Inspection scheduled by DDD, preparing Annexure batch for Director review.",
+    },
+
+    // 3. Director Review Step: Picked up directly by the Director
     SCHEDULE_DRAFT: {
       key: "SCHEDULE_DRAFT",
       title: "Director Routing",
@@ -45,11 +58,11 @@ export const inspectionScheduleBatchWorkflow = {
       currentPoint: "Director Routing",
       statusLabel: "DRAFT",
       nextStepKey: "INSPECTION_SCHEDULED",
-      prevStepKey: "INSPECTION_PENDING",
+      prevStepKey: "DDD_SCHEDULE_ROUTING",
       description: "Schedule batch submitted by DDD, awaiting Director review, sign-off, or rework.",
     },
 
-    // 3. Rework Step: Returned by Director to DDD for modification
+    // 4. Rework Step: Returned by Director to DDD for modification
     REWORK_REQUIRED: {
       key: "REWORK_REQUIRED",
       title: "Schedule Rework & Modification",
@@ -57,12 +70,12 @@ export const inspectionScheduleBatchWorkflow = {
       role: "Divisional Deputy Director",
       currentPoint: "Schedule Rework & Modification",
       statusLabel: "REWORK_REQUIRED",
-      nextStepKey: "SCHEDULE_DRAFT",
+      nextStepKey: "DDD_SCHEDULE_ROUTING",
       prevStepKey: "SCHEDULE_DRAFT",
       description: "Returned by Director to Head (IRSD) with remarks for revision.",
     },
 
-    // 4. Final Dispatched State: Director approves, handing over execution to inspectionReportWorkflow
+    // 5. Final Dispatched State: Director approves, handing over execution to inspectionReportWorkflow
     INSPECTION_SCHEDULED: {
       key: "INSPECTION_SCHEDULED",
       title: "Staff Technical Field Review",
@@ -70,7 +83,7 @@ export const inspectionScheduleBatchWorkflow = {
       role: "Technical Staff Reviewer",
       currentPoint: "Staff Technical Field Review",
       statusLabel: "INSPECTION_SCHEDULED",
-      nextStepKey: null, // Clean hand-off point to inspectionReportWorkflow
+      nextStepKey: null,
       prevStepKey: "SCHEDULE_DRAFT",
       description: "Schedule approved by the Director and dispatched to assigned inspectors across the Directorate for field execution.",
     },

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { scheduleBatches, inspectionSchedules, applications } from "@/db/schema";
+import { scheduleBatches, inspectionSchedules, applications, qmsTimelines } from "@/db/schema";
 import { eq, inArray, notInArray, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
@@ -47,23 +47,26 @@ export async function POST(request: Request) {
         .filter((id): id is number => id !== null);
     };
 
-    // --- ACTION HANDLER 1: Endorsements & Resubmissions ---
+    const now = new Date();
+
+    // --- ACTION HANDLER 1: Endorsements & Resubmissions (DDD -> Director) ---
     if (action === "RECOMMEND" || action === "RESUBMIT" || action === "RECOMMEND_RESUBMIT") {
       const auditAction =
         action === "RESUBMIT" ? "RESUBMITTED_AFTER_REWORK" : "RECOMMENDED_FOR_APPROVAL";
 
-      const targetStep = inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW;
+      const previousStep = inspectionScheduleBatchWorkflow.steps.DDD_SCHEDULE_ROUTING;
+      const targetStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
 
       const newHistoryEntry = {
         action: auditAction,
         actorRole: userRole || targetStep.role,
         actorId: userId || "SYSTEM",
         comments: comments || "No comments provided.",
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
       };
 
       await db.transaction(async (tx) => {
-        // 1. Update batch status and history using config values
+        // 1. Update batch status and history
         await tx
           .update(scheduleBatches)
           .set({
@@ -71,7 +74,7 @@ export async function POST(request: Request) {
             currentPoint: targetStep.currentPoint,
             endorsedBy: validUserId,
             history: [...currentHistory, newHistoryEntry],
-            updatedAt: new Date(),
+            updatedAt: now,
           })
           .where(eq(scheduleBatches.id, batchId));
 
@@ -104,10 +107,37 @@ export async function POST(request: Request) {
             );
         }
 
-        // 3. Update Applications Table dynamically via workflow config
         const applicationIds = await getBatchApplicationIds(tx, batch.id);
 
         if (applicationIds.length > 0) {
+          // Close active QMS timelines for previous step
+          await tx
+            .update(qmsTimelines)
+            .set({ endTime: now })
+            .where(
+              and(
+                inArray(qmsTimelines.applicationId, applicationIds),
+                isNull(qmsTimelines.endTime)
+              )
+            );
+
+          // Open new QMS timelines for Director review step
+          for (const appId of applicationIds) {
+            await tx.insert(qmsTimelines).values({
+              applicationId: appId,
+              staff_id: validUserId,
+              point: targetStep.currentPoint,
+              division: targetStep.division,
+              startTime: now,
+              details: {
+                routed_from: previousStep.key,
+                assigned_role: targetStep.role,
+                comments,
+              },
+            });
+          }
+
+          // Update Applications Table
           await tx
             .update(applications)
             .set({
@@ -118,7 +148,7 @@ export async function POST(request: Request) {
                 '{inspectionWorkflowMeta,currentStepKey}', 
                 ${JSON.stringify(targetStep.key)}::jsonb
               )`,
-              updatedAt: new Date(),
+              updatedAt: now,
             })
             .where(inArray(applications.id, applicationIds));
         }
@@ -135,46 +165,70 @@ export async function POST(request: Request) {
 
     // --- ACTION HANDLER 2: Final Director Approval ---
     if (action === "APPROVE") {
-      const targetStep = inspectionScheduleBatchWorkflow.steps.FINAL_APPROVED;
+      const currentStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
+      const targetStep = inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED;
       const nextAppStep = inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW;
 
       const newHistoryEntry = {
-        action: inspectionScheduleBatchWorkflow.statuses.APPROVED,
+        action: targetStep.statusLabel,
         actorRole: userRole || "Director",
         actorId: userId || "SYSTEM",
         comments: comments || "Batch approved.",
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
       };
 
       await db.transaction(async (tx) => {
-        // 1. Mark batch as APPROVED
         await tx
           .update(scheduleBatches)
           .set({
-            status: inspectionScheduleBatchWorkflow.statuses.APPROVED,
+            status: targetStep.statusLabel,
             currentPoint: targetStep.currentPoint,
             approvedBy: validUserId,
             history: [...currentHistory, newHistoryEntry],
-            updatedAt: new Date(),
+            updatedAt: now,
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. Fetch linked application IDs
         const applicationIds = await getBatchApplicationIds(tx, batchId);
 
-        // 3. Advance linked applications to Staff Technical Review using inspectionReportWorkflow config
         if (applicationIds.length > 0) {
+          // Close active QMS timelines for Director review step
+          await tx
+            .update(qmsTimelines)
+            .set({ endTime: now })
+            .where(
+              and(
+                inArray(qmsTimelines.applicationId, applicationIds),
+                isNull(qmsTimelines.endTime)
+              )
+            );
+
+          // Open new QMS timeline using config workflow references
+          for (const appId of applicationIds) {
+            await tx.insert(qmsTimelines).values({
+              applicationId: appId,
+              staff_id: validUserId,
+              point: nextAppStep.currentPoint,
+              division: nextAppStep.division,
+              startTime: now,
+              details: {
+                routed_from: currentStep.key,
+                assigned_role: nextAppStep.role,
+              },
+            });
+          }
+
           await tx
             .update(applications)
             .set({
               currentPoint: nextAppStep.title,
-              status: "INSPECTION_SCHEDULED",
+              status: targetStep.statusLabel,
               details: sql`jsonb_set(
                 COALESCE(${applications.details}, '{}'::jsonb), 
                 '{inspectionWorkflowMeta,currentStepKey}', 
                 ${JSON.stringify(nextAppStep.key)}::jsonb
               )`,
-              updatedAt: new Date(),
+              updatedAt: now,
             })
             .where(inArray(applications.id, applicationIds));
         }
@@ -188,6 +242,7 @@ export async function POST(request: Request) {
 
     // --- ACTION HANDLER 3: Director Return for Rework ---
     if (action === "REWORK") {
+      const currentStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
       const targetStep = inspectionScheduleBatchWorkflow.steps.REWORK_REQUIRED;
 
       const newHistoryEntry = {
@@ -195,25 +250,50 @@ export async function POST(request: Request) {
         actorRole: userRole || "Director",
         actorId: userId || "SYSTEM",
         comments: comments || "Revision required.",
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
       };
 
       await db.transaction(async (tx) => {
-        // 1. Update batch status
         await tx
           .update(scheduleBatches)
           .set({
-            status: inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED,
+            status: targetStep.statusLabel,
             currentPoint: targetStep.currentPoint,
             history: [...currentHistory, newHistoryEntry],
-            updatedAt: new Date(),
+            updatedAt: now,
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. Update Applications Table for REWORK using config values
         const applicationIds = await getBatchApplicationIds(tx, batchId);
 
         if (applicationIds.length > 0) {
+          // Close active QMS timelines for Director review step
+          await tx
+            .update(qmsTimelines)
+            .set({ endTime: now })
+            .where(
+              and(
+                inArray(qmsTimelines.applicationId, applicationIds),
+                isNull(qmsTimelines.endTime)
+              )
+            );
+
+          // Open new QMS timeline for DDD rework step
+          for (const appId of applicationIds) {
+            await tx.insert(qmsTimelines).values({
+              applicationId: appId,
+              staff_id: validUserId,
+              point: targetStep.currentPoint,
+              division: targetStep.division,
+              startTime: now,
+              details: {
+                routed_from: currentStep.key,
+                assigned_role: targetStep.role,
+                directive: comments,
+              },
+            });
+          }
+
           await tx
             .update(applications)
             .set({
@@ -224,7 +304,7 @@ export async function POST(request: Request) {
                 '{inspectionWorkflowMeta,currentStepKey}', 
                 ${JSON.stringify(targetStep.key)}::jsonb
               )`,
-              updatedAt: new Date(),
+              updatedAt: now,
             })
             .where(inArray(applications.id, applicationIds));
         }

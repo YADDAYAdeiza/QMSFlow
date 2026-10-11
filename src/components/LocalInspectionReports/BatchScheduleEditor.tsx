@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useTransition } from "react";
-import { Edit3, Eye, Save, AlertCircle, Trash2 } from "lucide-react";
+import { Edit3, Eye, Save, AlertCircle, Trash2, Loader2} from "lucide-react";
 import RecommendApprovalModal from "@/app/LocalInspectionReports/ddd/schedule/print/RecommendApprovalModal";
 import PrintTrigger from "@/app/LocalInspectionReports/ddd/schedule/print/PrintTrigger";
 import { useBatchScheduleManager, EditableScheduleItem, InspectorPoolItem } from "@/hooks/LocalInspectionReports/useBatchScheduleManager";
@@ -139,11 +139,19 @@ export default function BatchScheduleEditor({
               {isEditMode && (
                 <button
                   type="button"
-                  onClick={() => startTransition(() => { handleSaveChanges(); })}
+                  onClick={() => {
+                    startTransition(async () => {
+                      await handleSaveChanges();
+                    });
+                  }}
                   disabled={isPending}
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-xs font-bold rounded-md shadow-xs cursor-pointer transition-colors"
                 >
-                  <Save className="w-3.5 h-3.5" />
+                  {isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
                   {isPending ? "Saving..." : "Save Batch Edits"}
                 </button>
               )}

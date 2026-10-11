@@ -37,7 +37,7 @@ export default async function DirectorScheduleInboxPage({
         and(
           eq(
             scheduleBatches.currentPoint,
-            inspectionScheduleBatchWorkflow.steps.DIRECTOR_APPROVAL_REVIEW.currentPoint
+            inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT.currentPoint
           ),
           eq(
             scheduleBatches.status,
@@ -46,7 +46,7 @@ export default async function DirectorScheduleInboxPage({
         ),
         eq(
           scheduleBatches.status,
-          inspectionScheduleBatchWorkflow.statuses.APPROVED
+          inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED
         ),
         eq(
           scheduleBatches.status,
@@ -60,7 +60,7 @@ export default async function DirectorScheduleInboxPage({
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL
   );
   const approvedBatches = rawBatches.filter(
-    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.APPROVED
+    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED
   );
   const reworkBatches = rawBatches.filter(
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
@@ -149,7 +149,7 @@ export default async function DirectorScheduleInboxPage({
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
                           batch.status ===
-                          inspectionScheduleBatchWorkflow.statuses.APPROVED
+                          inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                             : batch.status ===
                               inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED

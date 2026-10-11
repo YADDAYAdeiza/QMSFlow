@@ -1,13 +1,14 @@
 import { db } from "@/db"; 
-import { applications, companies, capaSubmissions, facilities } from "@/db/schema"; 
+import { applications, companies, capaSubmissions, facilities, riskAssessments } from "@/db/schema"; 
 import { eq, or, inArray } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
 import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
 import RecallApplicationButton from "@/components/LocalInspectionReports/RecallApplicationButton";
 import CategorizeButton from "@/components/LocalInspectionReports/CategorizeButton";
-import CategorizeEndorsementTrigger from "@/components/LocalInspectionReports/CategorizeEndorsementTrigger"; // Modal trigger component
+import CategorizeEndorsementTrigger from "@/components/LocalInspectionReports/CategorizeEndorsementTrigger"; 
 import { facilityCategorizationWorkflow } from "@/config/workflows/facilityCategorizationWorkflow";
+import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 
 interface CommentTrail {
   text?: string;
@@ -35,6 +36,7 @@ interface ApplicationItem {
   companyName: string;
   facilityId: string | null;
   isCategorized: boolean | null;
+  nextInspectionDate?: Date | string | null;
   details: ApplicationDetails | null; 
   capaStatus?: string | null;
   updatedAt?: Date | string | null;
@@ -64,6 +66,9 @@ export default async function DivisionalDeputyDirectorDashboardPage({
   let records: ApplicationItem[] = [];
   let queryError = false;
 
+  // Workflow Config Step Aliases
+  const batchPendingStep = inspectionScheduleBatchWorkflow.steps.INSPECTION_PENDING;
+
   try {
     const rawRecords = await db
       .select({
@@ -75,6 +80,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
         companyName: companies.name,
         facilityId: applications.facilityId,
         isCategorized: facilities.isCategorized,
+        nextInspectionDate: riskAssessments.nextInspectionDate, 
         details: applications.details, 
         capaStatus: capaSubmissions.status,
         updatedAt: applications.updatedAt,
@@ -82,11 +88,12 @@ export default async function DivisionalDeputyDirectorDashboardPage({
       .from(applications)
       .innerJoin(companies, eq(applications.companyId, companies.id))
       .leftJoin(facilities, eq(applications.facilityId, facilities.id))
+      .leftJoin(riskAssessments, eq(applications.id, riskAssessments.applicationId))
       .leftJoin(capaSubmissions, eq(applications.id, capaSubmissions.applicationId))
       .where(
         or(
           inArray(applications.status, [
-            "INSPECTION_PENDING", 
+            batchPendingStep.statusLabel, 
             "INSPECTION_SCHEDULED", 
             facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.statusLabel, 
             facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.statusLabel, 
@@ -98,6 +105,9 @@ export default async function DivisionalDeputyDirectorDashboardPage({
             "FINALIZED"
           ]),
           inArray(applications.currentPoint, [
+            batchPendingStep.currentPoint,
+            batchPendingStep.title,
+            batchPendingStep.key,
             "Staff Technical Field Review",
             facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key,   
             facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title, 
@@ -156,16 +166,17 @@ export default async function DivisionalDeputyDirectorDashboardPage({
   const unassigned = records.filter(
     app => 
       (
-        // Either it's an old intake item that was categorized...
         ((
           app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.key || 
           app.currentPoint === facilityCategorizationWorkflow.steps.DDD_TECHNICAL_ASSIGNMENT.title ||
           app.currentPoint === "Divisional Deputy Director Technical Assignment"
         ) && app.isCategorized === true) ||
-        // ...OR it just finished endorsement and is ready for inspection scheduling assignment
-        app.currentPoint === facilityCategorizationWorkflow.steps.CATEGORIZATION_COMPLETED.currentPoint
+        app.currentPoint === facilityCategorizationWorkflow.steps.CATEGORIZATION_COMPLETED.currentPoint ||
+        app.currentPoint === batchPendingStep.currentPoint ||
+        app.currentPoint === batchPendingStep.key ||
+        app.currentPoint === batchPendingStep.title
       ) &&
-      app.status === "INSPECTION_PENDING"
+      app.status === batchPendingStep.statusLabel
   );
   
   const assigned = records.filter(
@@ -173,7 +184,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
       (
         app.currentPoint && 
         app.currentPoint.includes("Divisional Deputy Director") && 
-        app.status !== "INSPECTION_PENDING" && 
+        app.status !== batchPendingStep.statusLabel && 
         app.status !== facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT.statusLabel
       ) ||
       (app.status === "INSPECTION_SCHEDULED" && hasDivisionalDeputyDirectorHistory(app))
@@ -352,6 +363,8 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                     <th className="p-4">Categorization Status</th>
                   ) : activeTab === "endorse_categorization" ? (
                     <th className="p-4">Endorsement Status</th>
+                  ) : activeTab === "unassigned" ? (
+                    <th className="p-4">Tentative Inspection Date</th>
                   ) : isIrsdTab ? (
                     <th className="p-4">Action Target</th>
                   ) : (
@@ -384,6 +397,12 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                           Awaiting Categorization Endorsement
                         </span>
                       </td>
+                    ) : activeTab === "unassigned" ? (
+                      <td className="p-4">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                          📅 {app.nextInspectionDate ? new Date(app.nextInspectionDate).toLocaleDateString() : "Immediate / ASAP"}
+                        </span>
+                      </td>
                     ) : isIrsdTab ? (
                       <td className="p-4">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
@@ -405,7 +424,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                             ? "bg-purple-50 text-purple-700 border-purple-200"
                             : app.status === "APPROVED" || app.status === "FINALIZED"
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : app.status === "INSPECTION_PENDING"
+                            : app.status === batchPendingStep.statusLabel
                             ? "bg-amber-50 text-amber-700 border-amber-200"
                             : "bg-blue-50 text-blue-700 border-blue-200"
                         }`}>
