@@ -117,16 +117,16 @@ export async function POST(request: Request) {
     );
     processedNames.add(leadName);
 
-    // 2. Co-Inspectors (Restored from commented out state)
-    // coInspectorsList.forEach((inspectorName) => {
-    //   if (!processedNames.has(inspectorName)) {
-    //     const sigUrl = signatures[inspectorName] || "";
-    //     allSignCards.push(
-    //       renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", sigUrl)
-    //     );
-    //     processedNames.add(inspectorName);
-    //   }
-    // });
+    // 2. Co-Inspectors (Restored and Active)
+    coInspectorsList.forEach((inspectorName) => {
+      if (!processedNames.has(inspectorName)) {
+        const sigUrl = signatures[inspectorName] || "";
+        allSignCards.push(
+          renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", sigUrl)
+        );
+        processedNames.add(inspectorName);
+      }
+    });
 
     // 3. Trainee Inspectors
     traineesList.forEach((traineeName) => {
@@ -138,7 +138,7 @@ export async function POST(request: Request) {
         processedNames.add(traineeName);
       }
     });
-console.log('This is signatures in server: ', signatures);
+
     // 4. Fallback scanner for any remaining signed users in signatures map
     Object.keys(signatures).forEach((personName) => {
       if (!processedNames.has(personName) && signatures[personName]) {
@@ -234,22 +234,34 @@ Generate a <tr> containing a single cell (\`<td style="border:1px solid #1e293b;
 Generate the detailed expanded tabular HTML report rows using this raw snapshot:
 
 [DOCUMENT & SITE METADATA]
-- Report Doc Number: ${docNo}
-- Inspection Dates: ${auditDate}
-- Inspection Type: ${type_of_inspection || "Routine GMP Inspection"}
-- Establishment / Site Name: ${effectiveCompanyName}
-- Facility Physical Address: ${effectiveAddress}
-- Evaluated Scope & Product Lines: ${formattedProductLines}
-- Scope of Activities: ${Array.isArray(activities_carried_out) ? activities_carried_out.join(", ") : activities_carried_out || "Manufacturing operations as declared"}
-- Vicinity/Environmental Assessment: ${vicinity_assessment || "No environmental anomalies flagged."}
+- Report Doc Number: 
+${docNo}
+- Inspection Dates: 
+${auditDate}
+- Inspection Type: 
+${type_of_inspection || "Routine GMP Inspection"}
+- Establishment / Site Name: 
+${effectiveCompanyName}
+- Facility Physical Address: 
+${effectiveAddress}
+- Evaluated Scope & Product Lines: 
+${formattedProductLines}
+- Scope of Activities: 
+${Array.isArray(activities_carried_out) ? activities_carried_out.join(", ") : activities_carried_out || "Manufacturing operations as declared"}
+- Vicinity/Environmental Assessment: 
+${vicinity_assessment || "No environmental anomalies flagged."}
 
 [INSPECTION TEAM]
-- Lead Inspector: ${formattedLead}
-- Co-Inspectors: ${formattedCoInspectors}
-- Trainee Inspectors: ${formattedTrainees}
+- Lead Inspector: 
+${formattedLead}
+- Co-Inspectors: 
+${formattedCoInspectors}
+- Trainee Inspectors: 
+${formattedTrainees}
 
 [6 QUALITY SYSTEMS OBSERVATIONS TO EXPAND IN DETAIL]
-1. Pharmaceutical Quality System (Score: ${pqs_score ?? "N/A"}%):
+1. Pharmaceutical Quality System (Score: 
+${pqs_score ?? "N/A"}%):
    - Notes/Observations: ${pqs_notes || "Compliant baseline parameters."}
 
 2. Personnel & Training (Score: ${personnel_score ?? "N/A"}%):
@@ -268,11 +280,16 @@ Generate the detailed expanded tabular HTML report rows using this raw snapshot:
    - Notes/Observations: ${laboratory_control_notes || "Screening thresholds checked."}
 
 [SYNTHESIS AGGREGATES]
-- Critical Deficiencies: ${critical_count ?? 0}
-- Major Deficiencies: ${major_count ?? 0}
-- Other Deficiencies: ${other_count ?? 0}
-- Logged Non-Conformances: ${JSON.stringify(observations || [])}
-- Final Adjudication Stance: ${final_recommendation || "CAPA PENDING"}
+- Critical Deficiencies: 
+${critical_count ?? 0}
+- Major Deficiencies: 
+${major_count ?? 0}
+- Other Deficiencies: 
+${other_count ?? 0}
+- Logged Non-Conformances: 
+${JSON.stringify(observations || [])}
+- Final Adjudication Stance: 
+${final_recommendation || "CAPA PENDING"}
 `;
 
     const response = await ai.models.generateContent({

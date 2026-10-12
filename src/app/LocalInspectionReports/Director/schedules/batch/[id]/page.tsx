@@ -317,8 +317,8 @@ export default async function DirectorBatchDetailsPage(props: PageProps) {
               )}
             </div>
             <div className="border-b border-black w-52 mx-auto mb-1"></div>
-            <p className="uppercase">MUDASHIRU, I. A.</p>
-            <p className="text-[11px] font-normal">DDi/c</p>
+            <p className="uppercase">Agboola Waheed</p>
+            <p className="text-[11px] font-normal">D(VMAP)</p>
           </div>
         </div>
 

@@ -202,7 +202,7 @@ export default async function InspectorWorkspacePage({
 
   console.log('Categorisation Tasks: ', categorizationTasks);
 
-  // ------------------------------------------------------------------
+// ------------------------------------------------------------------
   // 2. Fetch Field Tasks (For Staff/Inspectors)
   // ------------------------------------------------------------------
   let fieldTasks: Task[] = [];
@@ -226,8 +226,9 @@ export default async function InspectorWorkspacePage({
       .where(
         and(
           eq(inspectionTeamAssignments.inspectorId, userRecord.id),
-          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED),
+          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED),
           inArray(applications.currentPoint, [
+            inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED.currentPoint,
             inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
             "Staff Technical Field Review",
             "STAFF_TECHNICAL_REVIEW",
@@ -249,19 +250,21 @@ export default async function InspectorWorkspacePage({
       scheduleId: String(row.scheduleId),
       rawScheduledDate: row.scheduledDate ? new Date(row.scheduledDate) : null,
       scheduledDate: formatDateSafe(row.scheduledDate),
-      scheduleStatus: row.scheduleStatus ?? "APPROVED",
+      scheduleStatus: row.scheduleStatus ?? inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED,
       assignedRole: row.assignedRole as Task["assignedRole"],
       isLocked: checkIfLocked(row.scheduledDate),
       application: {
         id: String(row.applicationId),
         fileNumber: row.fileNumber || "No File #",
         companyName: row.companyName,
-        currentPoint: row.currentPoint ?? inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title,
+        currentPoint: row.currentPoint ?? inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED.currentPoint,
       },
     }));
   } catch (err) {
     console.error("Field Query Error:", err);
   }
+
+  console.log('fieldTasks: ', fieldTasks);
 
   // ------------------------------------------------------------------
   // 3. Fetch IRSD Vetting Tasks
