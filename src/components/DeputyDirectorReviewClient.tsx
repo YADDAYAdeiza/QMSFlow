@@ -36,7 +36,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
   const [endorsementRemarks, setEndorsementRemarks] = useState("");
   const [selectedStaffId, setSelectedStaffId] = useState("");
   
-  // NEW: Notification Toggle State
   const [shouldNotifyStaff, setShouldNotifyStaff] = useState(false);
 
   const appDetails = app?.details || {};
@@ -71,12 +70,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
   const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
 
-  // Database fields and programmatic identifiers
   const currentPoint = app?.currentPoint || '';
   const currentStatus = app?.status || '';
   const currentStepKey = app?.currentStepKey || app?.stepKey || '';
 
-  // 1. Assignment Phase
   const isAssignmentPhase = 
     currentPoint === 'Technical DD Review' || 
     currentPoint === 'Divisional Deputy Director Technical Assignment' ||
@@ -84,19 +81,16 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     currentStatus === 'PENDING_DIRECTOR_ALLOCATION' ||
     currentStepKey === 'DDD_TECHNICAL_ASSIGNMENT';
 
-  // 2. Hub Entry / Delegation
   const isHubEntry = 
     currentPoint === 'Divisional Deputy Director IRSD Routing' || 
     currentStepKey === 'DDD_IRSD_INTAKE';
 
-  // 3. Technical Return / Review Phase
   const isTechnicalReturn = 
     currentPoint === 'Technical DD Review Return' || 
     currentPoint === 'Divisional Deputy Director Technical Endorsement' ||
     currentStatus === 'PENDING_TECHNICAL_ENDORSEMENT' ||
     currentStepKey === 'DDD_TECHNICAL_REVIEW';
 
-  // 4. IRSD Staff Return Phase / Review Concurrence step check
   const isIRSDReview = 
     currentPoint === 'Divisional Deputy Director IRSD Concurrence' ||
     currentStatus === 'PENDING_IRSD_CONCURRENCE' ||
@@ -107,7 +101,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     currentPoint === 'IRSD Staff Vetting Return' || 
     currentStepKey === 'IRSD_STAFF_VETTING';
 
-  // 5. Consolidated Review Phase flag
   const isReviewPhase = isTechnicalReturn || isIRSDStaffReturn;
 
   const intrinsicLevel = app?.intrinsicLevel || "Low";
@@ -117,10 +110,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
   const appDivision = appDetails?.division || app?.division || "VMD";
   
-  // Explicitly check if the current acting mode from searchParams is IRSD
   const isIRSDActing = currentActingAs.toLowerCase() === 'irsd';
-  
-  // Determine active assignment division based on IRSD mode or hub entry flags
   const activeAssignmentDivision = isIRSDActing || isHubEntry ? "IRSD" : appDivision;
 
   const filteredStaff = staffList.filter((s: any) => 
@@ -168,7 +158,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
           riskCategory: line.riskCategory || complianceRisk.overallRating || "Compliant"
         }))
       };
-      return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
+      return { component: <GmpCertificate data={certData} userRole="DDD" />, prefix: "GMP_CERTIFICATE" };
     } else {
       const flatProducts = rawLines.flatMap((line: any) => 
         (line.products || []).map((p: any) => p.name)
@@ -185,10 +175,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
       };
 
       if (siteScope === "Additional Manufacturing Site") {
-        return { component: <ClearanceLetterAMS data={clearanceData} />, prefix: "GMP_CLEARANCE_AMS" };
+        return { component: <ClearanceLetterAMS data={clearanceData} userRole="DDD" />, prefix: "GMP_CLEARANCE_AMS" };
       }
       
-      return { component: <ClearanceLetter data={clearanceData} />, prefix: "GMP_CLEARANCE" };
+      return { component: <ClearanceLetter data={clearanceData} userRole="DDD" />, prefix: "GMP_CLEARANCE" };
     }
   }, [app, appDetails, isInspection, complianceRisk]);
 
@@ -255,7 +245,6 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
                   </button>
                 )}
                 
-                {/* Only render preview button when it has reached the IRSD review/concurrence step, keeping it hidden during intake */}
                 {isIRSD && isIRSDReview && (
                   <button 
                     onClick={() => setViewMode('preview')} 

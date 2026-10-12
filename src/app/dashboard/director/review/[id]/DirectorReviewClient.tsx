@@ -77,7 +77,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
           riskCategory: line.riskCategory || complianceRisk.overallRating || "Compliant"
         }))
       };
-      return { component: <GmpCertificate data={certData} />, prefix: "GMP_CERTIFICATE" };
+      return { component: <GmpCertificate data={certData} userRole="Director" />, prefix: "GMP_CERTIFICATE" };
     } else {
       const flatProducts = rawLines.flatMap((line: any) => 
         (line.products || []).map((p: any) => p.name)
@@ -97,13 +97,12 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
       const SelectedComponent = isAdditionalSite ? ClearanceLetterAMS : ClearanceLetter;
 
       return { 
-        component: <SelectedComponent data={clearanceData} />, 
+        component: <SelectedComponent data={clearanceData} userRole="Director" />, 
         prefix: isAdditionalSite ? "GMP_CLEARANCE_AMS" : "GMP_CLEARANCE" 
       };
     }
   }, [app, details, isInspection, complianceRisk]);
 
-  // Route each tab to its unique source document URL
   const iframeSrc = useMemo(() => {
     if (viewMode === 'dossier') return pdfUrl || details.poaUrl;
     if (viewMode === 'preview') {
@@ -148,7 +147,6 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   return (
     <div className="fixed top-20 bottom-0 left-0 right-0 flex bg-slate-100 overflow-hidden font-sans">
       
-      {/* LEFT SIDE: PREVIEWER */}
       <div className="w-1/2 p-6 h-full">
         <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-200 w-full h-full overflow-hidden relative flex flex-col">
           <div className="absolute top-6 left-6 right-6 z-20 flex justify-center">
@@ -200,7 +198,6 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         </div>
       </div>
 
-      {/* RIGHT SIDE: DECISION PANEL */}
       <div className="w-1/2 p-10 overflow-y-auto custom-scrollbar h-full">
         <div className="max-w-xl mx-auto space-y-8 pb-20">
           <header className="flex justify-between items-end">

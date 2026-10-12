@@ -161,6 +161,12 @@ export default function DirectorInboxPage() {
             const currentDesk = app.currentPoint || app.current_point;
             const details = app.details || {};
             const isRemarksOpen = expandedRemarksId === app.id;
+            const effectiveCompanyName = 
+              app.companyName || 
+              app.company_name || 
+              details.companyName || 
+              details.inspected_site_name || 
+              "Registered Establishment";
 
             return (
               <div
@@ -172,7 +178,7 @@ export default function DirectorInboxPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-mono text-xs text-slate-400 font-bold">#{app.applicationNumber || app.id}</span>
                       <h4 className="font-bold text-slate-800 text-sm">
-                        {app.companyName || app.company_name || `Application #${app.id}`}
+                        {effectiveCompanyName}
                       </h4>
                       <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">
                         {app.type || "Pre-Registration"}

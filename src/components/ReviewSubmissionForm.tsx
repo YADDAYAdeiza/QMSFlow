@@ -4,7 +4,7 @@ import React, { useState, useRef } from "react";
 import { 
   ShieldAlert, CheckCircle2, FileText, 
   Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
-  Info, Activity, History, Mail 
+  Info, Activity, History, Mail, Eye 
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
@@ -46,9 +46,10 @@ export default function ReviewSubmissionForm({
   const [loading, setLoading] = useState(false);
   const [isLedgerVisible, setIsLedgerVisible] = useState(true);
   const [isSra, setIsSra] = useState(previousIsSra);
-  const [sendEmail, setSendEmail] = useState(true); // <-- Defaulted to true
+  const [sendEmail, setSendEmail] = useState(true);
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [findings, setFindings] = useState<Array<{ id: string; system: string; severity: string; text: string }>>(
     previousFindings.length > 0 ? previousFindings.map(f => ({ ...f, id: Math.random().toString(36).substr(2, 9) })) : []
   );
@@ -59,6 +60,15 @@ export default function ReviewSubmissionForm({
     critical: findings.filter(f => f.severity === "Critical" && f.text.trim()).length,
     major: findings.filter(f => f.severity === "Major" && f.text.trim()).length,
     other: findings.filter(f => f.severity === "Other" && f.text.trim()).length,
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (file) {
+      setEvidenceFile(file);
+      const objectUrl = URL.createObjectURL(file);
+      setPreviewUrl(objectUrl);
+    }
   };
 
   const addFinding = () => setFindings([...findings, { id: Math.random().toString(36).substr(2, 9), system: GMP_SYSTEMS[0], severity: "Other", text: "" }]);
@@ -296,7 +306,7 @@ export default function ReviewSubmissionForm({
         </div>
       )}
 
-      {/* VERIFICATION REPORT SECTION */}
+      {/* VERIFICATION REPORT SECTION WITH LIVE PREVIEW */}
       {!isComplianceReview && isIrsdStaff && (
         <div className="space-y-6">
           <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
@@ -304,39 +314,57 @@ export default function ReviewSubmissionForm({
             <h4 className="text-sm font-black uppercase tracking-[0.25em]">Verification Report (Optional)</h4>
           </div>
           
-          <div 
-            onClick={() => fileInputRef.current?.click()}
-            className={`p-14 rounded-[3.5rem] border-2 border-dashed cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-5 shadow-sm ${
-              evidenceFile 
-                ? "border-emerald-500 bg-emerald-50/50 shadow-inner shadow-emerald-100" 
-                : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
-            }`}
-          >
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} 
-              className="hidden" 
-              accept=".pdf" 
-            />
-            {evidenceFile ? (
-              <>
-                <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
-                  <FileCheck className="w-10 h-10 text-white" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Upload Box */}
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className={`p-10 rounded-[3.5rem] border-2 border-dashed cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-5 shadow-sm min-h-[240px] ${
+                evidenceFile 
+                  ? "border-emerald-500 bg-emerald-50/50 shadow-inner shadow-emerald-100" 
+                  : "border-slate-300 bg-slate-50/50 hover:border-blue-500 hover:bg-blue-50"
+              }`}
+            >
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                className="hidden" 
+                accept=".pdf" 
+              />
+              {evidenceFile ? (
+                <>
+                  <div className="p-5 bg-emerald-600 rounded-[1.5rem] shadow-xl shadow-emerald-600/20">
+                    <FileCheck className="w-10 h-10 text-white" />
+                  </div>
+                  <div className="text-center">
+                    <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
+                    <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to replace PDF</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
+                    <Upload className="w-10 h-10 text-slate-400" />
+                  </div>
+                  <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em] text-center">Select PDF if available</span>
+                </>
+              )}
+            </div>
+
+            {/* Live PDF Preview Pane */}
+            <div className="bg-white p-3 rounded-[3.5rem] border border-slate-200 shadow-xl h-[240px] relative overflow-hidden flex flex-col">
+              <div className="absolute top-5 left-8 z-10 flex items-center gap-1.5 px-3 py-1 bg-slate-900/80 backdrop-blur-md rounded-full text-white text-[9px] font-black uppercase">
+                <Eye className="w-3 h-3 text-emerald-400" /> Live Preview
+              </div>
+              {previewUrl ? (
+                <iframe src={`${previewUrl}#toolbar=0`} className="w-full h-full rounded-[2.8rem] border-none bg-slate-50" />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 rounded-[2.8rem] text-slate-400 gap-2">
+                  <FileText className="w-8 h-8 opacity-20" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-center px-6">No document selected for preview</p>
                 </div>
-                <div className="text-center">
-                  <span className="text-sm font-black text-emerald-800 uppercase tracking-widest block">{evidenceFile.name}</span>
-                  <span className="text-[11px] text-emerald-600 font-bold uppercase mt-2 block opacity-70">Click to replace PDF</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="p-5 bg-white rounded-[1.5rem] shadow-sm border border-slate-200">
-                  <Upload className="w-10 h-10 text-slate-400" />
-                </div>
-                <span className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Select PDF if available</span>
-              </>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -368,7 +396,6 @@ export default function ReviewSubmissionForm({
             </div>
           </div>
           
-          {/* Slider Layout - Switches to Green when active */}
           <button
             type="button"
             onClick={() => setSendEmail(!sendEmail)}
