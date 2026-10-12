@@ -77,8 +77,10 @@ export async function POST(request: Request) {
     const auditDate = inspection_dates || "2026-08-10";
 
     // Format Product Lines into readable text for AI context
+ // Format Product Lines into readable text for AI context
     const formattedProductLines = Array.isArray(effectiveProductLines) && effectiveProductLines.length > 0
       ? effectiveProductLines.map((line: any, idx: number) => {
+          if (typeof line === "string") return line;
           const name = line.lineName || line.name || `Line #${idx + 1}`;
           const type = line.lineType ? ` (${line.lineType})` : "";
           const prods = Array.isArray(line.products) && line.products.length > 0
@@ -106,21 +108,37 @@ export async function POST(request: Request) {
       `;
     };
 
-    // Track populated names to avoid duplicates in sign-off table
+ // Track populated names to avoid duplicates in sign-off table
     const processedNames = new Set<string>();
     const allSignCards: string[] = [];
 
-    // 1. Lead Inspector
-    const resolvedLeadSig = lead_inspector_signature_url || lead_signature_url || signatures[leadName];
-    allSignCards.push(
-      renderSignatureCard(leadName, "Lead Inspector, Regulatory Inspection Directorate", resolvedLeadSig)
-    );
-    processedNames.add(leadName);
+    // Helper to perform a robust case-insensitive, whitespace-trimmed lookup in the signatures map
+    const findSignatureForPerson = (name: string, sigs: Record<string, string>) => {
+      if (!name) return "";
+      console.log('Name: ', name);
+      console.log('Name: ', 'Ali');
+      const cleanName = name.trim().toLowerCase();
+      for (const [key, val] of Object.entries(sigs)) {
+        if (key.trim().toLowerCase() === cleanName) {
+          return val;
+        }
+      }
+      return "";
+    };
 
-    // 2. Co-Inspectors (Restored and Active)
+    // 1. Lead Inspector
+    const resolvedLeadSig = lead_inspector_signature_url || lead_signature_url || findSignatureForPerson(leadName, signatures);
+    if (leadName && leadName !== "Unassigned") {
+      allSignCards.push(
+        renderSignatureCard(leadName, "Lead Inspector, Regulatory Inspection Directorate", resolvedLeadSig)
+      );
+      processedNames.add(leadName);
+    }
+
+    // 2. Co-Inspectors
     coInspectorsList.forEach((inspectorName) => {
       if (!processedNames.has(inspectorName)) {
-        const sigUrl = signatures[inspectorName] || "";
+        const sigUrl = findSignatureForPerson(inspectorName, signatures);
         allSignCards.push(
           renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", sigUrl)
         );
@@ -131,21 +149,11 @@ export async function POST(request: Request) {
     // 3. Trainee Inspectors
     traineesList.forEach((traineeName) => {
       if (!processedNames.has(traineeName)) {
-        const sigUrl = signatures[traineeName] || "";
+        const sigUrl = findSignatureForPerson(traineeName, signatures);
         allSignCards.push(
           renderSignatureCard(traineeName, "Trainee Inspector / Observer", sigUrl)
         );
         processedNames.add(traineeName);
-      }
-    });
-
-    // 4. Fallback scanner for any remaining signed users in signatures map
-    Object.keys(signatures).forEach((personName) => {
-      if (!processedNames.has(personName) && signatures[personName]) {
-        allSignCards.push(
-          renderSignatureCard(personName, "Regulatory Inspector", signatures[personName])
-        );
-        processedNames.add(personName);
       }
     });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -86,12 +86,21 @@ export default function ReportRichTextEditor({
     },
   });
 
+  // Sync editor content when parent prop changes (e.g. after AI compilation)
+  useEffect(() => {
+    if (editor && contentHtml !== editor.getHTML()) {
+      editor.commands.setContent(contentHtml);
+    }
+  }, [contentHtml, editor]);
+
   if (!editor) return null;
 
+  const isTableActive = editor.isActive("table");
+
   return (
-    <div className="border border-emerald-200 rounded-lg overflow-hidden bg-white shadow-sm">
+    <div className="border border-emerald-200 rounded-lg overflow-visible bg-white shadow-sm relative">
       {!readOnly && (
-        <div className="flex flex-wrap items-center gap-1 bg-slate-50 p-2 border-b border-slate-200 text-slate-700 text-xs">
+        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-1 bg-slate-50 p-2 border-b border-slate-200 text-slate-700 text-xs shadow-xs">
           {/* Formatting Controls */}
           <button
             type="button"
@@ -161,43 +170,37 @@ export default function ReportRichTextEditor({
 
           <div className="h-4 w-[1px] bg-slate-300 mx-1" />
 
-          {/* Insert Table */}
+          {/* Insert Table Button */}
           <button
             type="button"
             onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
-            className="p-1.5 rounded hover:bg-slate-200"
+            className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-200 bg-white border border-slate-300 text-slate-700 font-medium"
             title="Insert Table"
           >
-            <TableIcon size={16} />
+            <TableIcon size={14} /> Insert Table
           </button>
           
           {/* Extended Table & Cell Controls */}
-          {editor.isActive("table") && (
-            <div className="flex items-center gap-1 bg-emerald-50/60 px-1.5 py-0.5 rounded border border-emerald-200">
+          {isTableActive && (
+            <div className="flex flex-wrap items-center gap-1 bg-emerald-50/90 px-2 py-1 rounded border border-emerald-300 ml-2">
+              <span className="text-[10px] font-bold text-emerald-800 uppercase mr-1">Table Tools:</span>
+              
               {/* Row Controls */}
               <button
                 type="button"
                 onClick={() => editor.chain().focus().addRowBefore().run()}
-                className="px-1.5 py-1 hover:bg-emerald-100 text-[11px] flex items-center gap-0.5 rounded text-emerald-900"
+                className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-medium"
                 title="Add Row Above"
               >
-                <Plus size={12} /><Rows size={12} /> Above
-              </button>
-              <button
-                type="button"
-                onClick={() => editor.chain().focus().addRowAfter().run()}
-                className="px-1.5 py-1 hover:bg-emerald-100 text-[11px] flex items-center gap-0.5 rounded text-emerald-900"
-                title="Add Row Below"
-              >
-                <Plus size={12} /><Rows size={12} /> Below
+                <Plus size={12} /><Rows size={12} /> Row (+)
               </button>
               <button
                 type="button"
                 onClick={() => editor.chain().focus().deleteRow().run()}
-                className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded"
+                className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded font-medium"
                 title="Delete Row"
               >
-                <Minus size={12} /><Rows size={12} /> Row
+                <Minus size={12} /><Rows size={12} /> Row (-)
               </button>
 
               <div className="h-3 w-[1px] bg-emerald-300 mx-0.5" />
@@ -206,26 +209,18 @@ export default function ReportRichTextEditor({
               <button
                 type="button"
                 onClick={() => editor.chain().focus().addColumnBefore().run()}
-                className="px-1.5 py-1 hover:bg-emerald-100 text-[11px] flex items-center gap-0.5 rounded text-emerald-900"
+                className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-medium"
                 title="Add Column Left"
               >
-                <Plus size={12} /><Columns size={12} /> Left
-              </button>
-              <button
-                type="button"
-                onClick={() => editor.chain().focus().addColumnAfter().run()}
-                className="px-1.5 py-1 hover:bg-emerald-100 text-[11px] flex items-center gap-0.5 rounded text-emerald-900"
-                title="Add Column Right"
-              >
-                <Plus size={12} /><Columns size={12} /> Right
+                <Plus size={12} /><Columns size={12} /> Col (+)
               </button>
               <button
                 type="button"
                 onClick={() => editor.chain().focus().deleteColumn().run()}
-                className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded"
+                className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded font-medium"
                 title="Delete Column"
               >
-                <Minus size={12} /><Columns size={12} /> Col
+                <Minus size={12} /><Columns size={12} /> Col (-)
               </button>
 
               <div className="h-3 w-[1px] bg-emerald-300 mx-0.5" />
@@ -234,15 +229,15 @@ export default function ReportRichTextEditor({
               <button
                 type="button"
                 onClick={() => editor.chain().focus().deleteTable().run()}
-                className="p-1 text-red-600 hover:bg-red-100 rounded"
+                className="p-1 text-red-600 hover:bg-red-200 rounded flex items-center gap-1 text-[11px] font-semibold px-1.5"
                 title="Delete Entire Table"
               >
-                <Trash2 size={14} />
+                <Trash2 size={13} /> Drop Table
               </button>
             </div>
           )}
 
-          <div className="h-4 w-[1px] bg-slate-300 mx-1" />
+          <div className="h-4 w-[1px] bg-slate-300 mx-1 ml-auto" />
 
           {/* Undo / Redo */}
           <button
@@ -250,6 +245,7 @@ export default function ReportRichTextEditor({
             onClick={() => editor.chain().focus().undo().run()}
             disabled={!editor.can().undo()}
             className="p-1.5 rounded hover:bg-slate-200 disabled:opacity-30"
+            title="Undo"
           >
             <Undo size={16} />
           </button>
@@ -258,6 +254,7 @@ export default function ReportRichTextEditor({
             onClick={() => editor.chain().focus().redo().run()}
             disabled={!editor.can().redo()}
             className="p-1.5 rounded hover:bg-slate-200 disabled:opacity-30"
+            title="Redo"
           >
             <Redo size={16} />
           </button>

@@ -324,7 +324,8 @@ export default function GMPReportWorkspace({
         ...(checklistSnapshot?.signatures || {}),
         ...(completedFormPayload.signatures || {})
       };
-
+      console.log('mergedSignatures: ', mergedSignatures);
+console.log('resolvedProductLines: ', resolvedProductLines);
       const res = await fetch("/api/LocalInspectionReports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
