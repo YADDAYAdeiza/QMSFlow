@@ -13,6 +13,11 @@ export const DIRECTORATE_PRODUCT_MAP: Record<DirectorateCategory, string[]> = {
     "Parasiticide / Anthelmintic",
     "Veterinary NSAID / Analgesic",
     "Vitamins, Minerals & Supplements",
+    "DISINFECTANT",
+    "VETERINARY COSMETIC",
+    "PH REGULATOR",
+    "SUPPLEMENTS/ HEPATO-RENAL TONIC",
+    "HEPATORENAL TONIC/ SUPPLEMENT"
   ],
   AFPD: ["Animal Feed", "Feed Additive & Premix"],
   PAD: ["AgroPesticides & Ectoparasiticides", "Public Health Chemicals / Disinfectants"],
@@ -35,7 +40,7 @@ export interface Product {
   id?: string;
   name: string;
   classification: string;
-  targetSpecies?: "Poultry" | "Ruminants" | "Swine" | "Aquaculture" | "Equine" | "Companion" | "Multi-Species";
+  targetSpecies?: "Poultry" | "Ruminants" | "Swine" | "Aquaculture" | "Equine" | "Companion" | "Multi-Species" ;
 }
 
 export interface ProductLine {

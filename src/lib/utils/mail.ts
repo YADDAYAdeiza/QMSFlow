@@ -7,6 +7,7 @@ export async function sendOversightEmail(appDetails: {
   facilityName: string;
   lodRemarks?: string;
   customRecipient?: string;
+  emailTitle?: string; // 👈 Added optional context title
 }) {
   console.log("\n================ [EMAIL DISPATCH PIPELINE START] ================");
   console.log(`⏱️  Timestamp: ${new Date().toISOString()}`);
@@ -19,28 +20,19 @@ export async function sendOversightEmail(appDetails: {
       process.env.DIRECTOR_EMAIL ||
       "director@nafdac.gov.ng";
 
-    // Explicit oversight copy target
-    const ccOversight = "adeiza.yusuf@nafdac.gov.ng";
-
-    // Hardcoded portal landing address
+    const ccOversight = [
+      "adeiza.yusuf@nafdac.gov.ng",
+      "agboola.waheed@nafdac.gov.ng",
+      "emmanuel.ngu@nafdac.gov.ng",
+    ];
+    
     const portalLandingPageUrl = "https://qms-flow.vercel.app";
-
-    console.log(`👉 Configured Sender Account (SMTP_USER): ${senderEmail}`);
-    console.log(`👉 Target Destination: ${recipientEmail}`);
-    console.log(`👁️  Oversight CC Monitored at: ${ccOversight}`);
-    console.log(`🔗 Redirect Target Configured: ${portalLandingPageUrl}`);
-    console.log(
-      `⚙️  SMTP Host Server: ${process.env.SMTP_HOST || "smtp.gmail.com"} on Port: ${
-        process.env.SMTP_PORT || "465"
-      }`
-    );
 
     if (!senderEmail || !process.env.SMTP_PASS) {
       console.log("❌ ERROR: Missing SMTP credentials in Environment settings!");
       return { success: false, error: "SMTP credentials are misconfigured." };
     }
 
-    // Instantiate transporter inside the execution block to capture live env variables
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || "smtp.gmail.com",
       port: parseInt(process.env.SMTP_PORT || "465"),
@@ -55,15 +47,18 @@ export async function sendOversightEmail(appDetails: {
       },
     });
 
+    // Safe fallback title and subject
+    const contextTitle = appDetails.emailTitle || "VMAP Application Milestone";
+
     const mailOptions = {
       from: `"VMAP Digital Portal" <${senderEmail}>`,
       to: recipientEmail,
       cc: ccOversight,
-      subject: `🚨 LIVE PROCESSING ALERT: Application #${appDetails.appNumber}`,
+      subject: `🚨 ${contextTitle.toUpperCase()}: Application #${appDetails.appNumber}`,
       html: `
         <div style="font-family: sans-serif; padding: 20px; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 16px;">
           <h2 style="color: #0f172a; text-transform: uppercase; font-size: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">
-            Dossier Workflow Notification
+            ${contextTitle}
           </h2>
           <p style="font-size: 14px; color: #475569;">
             A high-priority application workflow milestone has been recorded within the VMAP portal.
@@ -89,7 +84,7 @@ export async function sendOversightEmail(appDetails: {
               appDetails.lodRemarks
                 ? `
             <tr>
-              <td style="padding: 8px 0; font-weight: bold; color: #64748b; vertical-align: top;">Specialist Notes:</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #64748b; vertical-align: top;">Milestone Notes:</td>
               <td style="padding: 8px 0; color: #475569; background: #f8fafc; padding: 10px; border-radius: 8px; font-style: italic;">
                 "${appDetails.lodRemarks}"
               </td>
@@ -99,7 +94,6 @@ export async function sendOversightEmail(appDetails: {
             }
           </table>
 
-          <!-- Interactive Action Redirection Button -->
           <div style="text-align: center; margin: 25px 0 15px 0;">
             <a href="${portalLandingPageUrl}" 
                style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 8px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
@@ -115,9 +109,7 @@ export async function sendOversightEmail(appDetails: {
       `,
     };
 
-    console.log("⚡ Connecting to server and attempting handshake transmission...");
     const info = await transporter.sendMail(mailOptions);
-
     console.log("✅ SUCCESS: Email passed verification checks and handshakes completed!");
     console.log(`🆔 Message ID Reference: ${info.messageId}`);
     console.log("================ [EMAIL DISPATCH PIPELINE END] ================\n");

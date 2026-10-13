@@ -10,6 +10,7 @@ import {
 } from '@/db/schema';
 import { eq, and, ilike } from 'drizzle-orm';
 import { applicationIntakeWorkflow } from '@/config/workflows/applicationIntakeWorkflow';
+import { sendOversightEmail } from '@/lib/utils/mail';
 
 export async function POST(req: Request) {
   try {
@@ -25,12 +26,10 @@ export async function POST(req: Request) {
     const applicationNumber = body.applicationNumber || `APP-${Date.now()}`;
     const type = body.type || body.inspectionType || 'Pre-Registration';
     
-    // Standardized directorate default: VMD
     const targetDirectorate = body.targetDirectorate || 'VMD';
     const estimatedInspectionDays = body.estimatedInspectionDays ?? 3;
     const notificationEmail = body.notificationEmail;
     
-    // Standardized division array replacement: ["VMD", "PAD", "AFPD", "IRSD"]
     const assignedDivisions = body.assignedDivisions || ["VMD", "PAD", "AFPD", "IRSD"];
     const productLines = body.productLines || [];
 
@@ -186,11 +185,10 @@ export async function POST(req: Request) {
         }
       }
 
-      // Use the workflow config's DIRECTOR_INTAKE step as the universal entry gate
       const intakeStep = applicationIntakeWorkflow.steps.DIRECTOR_INTAKE;
-      const initialPoint = intakeStep.currentPoint; // "Director Initial Allocation"
-      const initialStatus = intakeStep.statusLabel; // "PENDING_DIRECTOR_ALLOCATION"
-      const initialDivision = intakeStep.division; // "DIRECTORATE"
+      const initialPoint = intakeStep.currentPoint;
+      const initialStatus = intakeStep.statusLabel;
+      const initialDivision = intakeStep.division;
 
       // 4. Create Application Tracking Record
       const [application] = await tx
@@ -212,22 +210,31 @@ export async function POST(req: Request) {
         })
         .returning();
 
-      // 5. QMS Timing Enforcement: Record active timeline entry for SLA tracking
+      // 5. QMS Timing Enforcement
       await tx.insert(qmsTimelines).values({
         applicationId: application.id,
         point: initialPoint,
         division: initialDivision,
         startTime: new Date(),
-        // endTime is intentionally left null as this is the current active step
       });
 
-      return application;
+      return { application, companyName, facilityName };
+    });
+
+    // 🚀 Trigger Email Notification Post-Transaction
+    await sendOversightEmail({
+      appNumber: result.application.applicationNumber,
+      type: result.application.type,
+      companyName: result.companyName,
+      facilityName: result.facilityName,
+      lodRemarks: "New application intake successfully processed and routed to Director Initial Allocation.",
+      customRecipient: notificationEmail || undefined, // Sends to applicant/stakeholder if provided, else falls back to director
     });
 
     return NextResponse.json({ 
       success: true, 
-      applicationNumber: result.applicationNumber, 
-      data: result 
+      applicationNumber: result.application.applicationNumber, 
+      data: result.application 
     }, { status: 201 });
   } catch (error: any) {
     console.error('Failed to submit local application:', error);

@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
-import { applications, qmsTimelines, riskAssessments, facilities } from '@/db/schema';
+import { applications, companies, qmsTimelines, riskAssessments, facilities } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { facilityCategorizationWorkflow } from '@/config/workflows/facilityCategorizationWorkflow';
+import { sendOversightEmail } from '@/lib/utils/mail';
 
 export async function GET(req: Request) {
   try {
@@ -39,11 +40,10 @@ export async function POST(req: Request) {
     const appIdNum = Number(applicationId);
     const currentStep = facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT;
     
-    // Determine next step based on DDD decision
-    const nextStepKey = action === "ENDORSE" ? currentStep.nextStepKey : currentStep.prevStepKey; // "CATEGORIZATION_COMPLETED" or "UNDER_CATEGORIZATION"
+    const nextStepKey = action === "ENDORSE" ? currentStep.nextStepKey : currentStep.prevStepKey;
     const nextStep = facilityCategorizationWorkflow.steps[nextStepKey as string];
 
-    await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // 1. Close active QMS timeline entry for DDD Endorsement
       await tx
         .update(qmsTimelines)
@@ -55,7 +55,22 @@ export async function POST(req: Request) {
           )
         );
 
-      // 2. Update Application Status & Point
+      // 2. Fetch application details and company name for context-aware emails
+      const [appRecord] = await tx
+        .select({
+          id: applications.id,
+          applicationNumber: applications.applicationNumber,
+          type: applications.type,
+          details: applications.details,
+          companyName: companies.name,
+        })
+        .from(applications)
+        .innerJoin(companies, eq(applications.companyId, companies.id))
+        .where(eq(applications.id, appIdNum));
+
+      const existingDetails = (appRecord?.details as Record<string, any>) || {};
+
+      // 3. Update Application Status & Point
       await tx
         .update(applications)
         .set({
@@ -65,7 +80,7 @@ export async function POST(req: Request) {
         })
         .where(eq(applications.id, appIdNum));
 
-      // 3. If endorsed, ensure facility is formally marked as categorized
+      // 4. If endorsed, ensure facility is formally marked as categorized
       if (action === "ENDORSE" && facilityId) {
         await tx
           .update(facilities)
@@ -73,7 +88,7 @@ export async function POST(req: Request) {
           .where(eq(facilities.id, facilityId));
       }
 
-      // 4. Open new QMS timeline record for the subsequent step
+      // 5. Open new QMS timeline record for the subsequent step
       await tx.insert(qmsTimelines).values({
         applicationId: appIdNum,
         point: nextStep.currentPoint,
@@ -81,7 +96,25 @@ export async function POST(req: Request) {
         startTime: new Date(),
         details: { action, remarks },
       });
+
+      return appRecord;
     });
+
+    // 🚀 Context-Aware Email Dispatch Post-Transaction
+    if (result) {
+      const details = (result.details as Record<string, any>) || {};
+      const notificationEmail = details.notificationEmail;
+      const actionTitle = action === "ENDORSE" ? "Categorization Endorsed" : "Categorization Returned for Review";
+
+      await sendOversightEmail({
+        appNumber: result.applicationNumber,
+        type: result.type || 'Pre-Registration',
+        companyName: result.companyName || 'Registered Establishment',
+        facilityName: details.facilityName || `${result.companyName} Facility`,
+        lodRemarks: `${actionTitle}: "${remarks || 'No specific remarks provided.'}"`,
+        customRecipient: notificationEmail || undefined,
+      });
+    }
 
     return NextResponse.json({ success: true, message: `Application successfully processed as ${action}.` });
   } catch (error: any) {

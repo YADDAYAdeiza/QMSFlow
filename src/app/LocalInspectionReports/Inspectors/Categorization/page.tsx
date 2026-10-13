@@ -73,9 +73,10 @@ function CategorizationContent() {
   const [complexityScore, setComplexityScore] = useState<1 | 2 | 3>(3);
   const [criticalityScore, setCriticalityScore] = useState<1 | 2 | 3>(2);
 
-  // PIC/S Part C: Compliance Risk Inputs
+  // PIC/S Part C: Compliance Risk Inputs (With Others Slot)
   const [criticalDeficiencies, setCriticalDeficiencies] = useState<number>(0);
-  const [majorDeficiencies, setMajorDeficiencies] = useState<number>(2);
+  const [majorDeficiencies, setMajorDeficiencies] = useState<number>(0);
+  const [otherDeficiencies, setOtherDeficiencies] = useState<number>(0);
 
   // PIC/S Part F: Recommended Scope
   const [inspectionScopeNotes, setInspectionScopeNotes] = useState<string>(
@@ -98,7 +99,7 @@ function CategorizationContent() {
     return () => clearInterval(interval);
   }, [isTimerRunning]);
 
-  // Single Data Fetching Effect
+  // Single Data Fetching Effect (Including Facility-Specific Historical Analytics)
   useEffect(() => {
     async function fetchFacilityData() {
       if (!facilityIdParam) return;
@@ -115,7 +116,6 @@ function CategorizationContent() {
         } else if (isNumeric) {
           const numericId = parseInt(facilityIdParam, 10);
 
-          // 1. Resolve application -> facility_id
           const { data: appData, error: appError } = await supabase
             .from("applications")
             .select("facility_id")
@@ -129,7 +129,6 @@ function CategorizationContent() {
           if (appData?.facility_id) {
             resolvedFacilityId = appData.facility_id;
           } else {
-            // 2. Fallback: Search facilities by application_id reference if present
             const { data: compFacility, error: compError } = await supabase
               .from("facilities")
               .select("id")
@@ -167,16 +166,57 @@ function CategorizationContent() {
           .eq("id", resolvedFacilityId)
           .maybeSingle();
 
-        if (facilityError) {
+        if (facilityError || !facilityData) {
           console.error("Facility Query Error:", facilityError);
           setIsLoading(false);
           return;
         }
 
-        if (!facilityData) {
-          console.warn(`No facility record found for ID: ${resolvedFacilityId}`);
-          setIsLoading(false);
-          return;
+        // Fetch historical risk assessment / compliance record for auto-population
+        const { data: historicalRisk } = await supabase
+          .from("risk_assessments")
+          .select("critical_deficiencies, major_deficiencies, other_deficiencies")
+          .eq("facility_id", facilityData.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (historicalRisk) {
+          setCriticalDeficiencies(historicalRisk.critical_deficiencies ?? 0);
+          setMajorDeficiencies(historicalRisk.major_deficiencies ?? 0);
+          setOtherDeficiencies(historicalRisk.other_deficiencies ?? 0);
+        }
+
+        // Fetch facility-specific historical analytical observations
+        const { data: pastObservations } = await supabase
+          .from("inspection_observations_analytics")
+          .select("quality_system, severity, observation_text")
+          .eq("facility_id", facilityData.id);
+
+        if (pastObservations && pastObservations.length > 0) {
+          const systemCounts: Record<string, number> = {};
+          pastObservations.forEach(obs => {
+            if (obs.severity === "Critical" || obs.severity === "Major") {
+              systemCounts[obs.quality_system] = (systemCounts[obs.quality_system] || 0) + 1;
+            }
+          });
+
+          const topSystem = Object.entries(systemCounts).sort((a, b) => b[1] - a[1])[0];
+          
+          if (topSystem) {
+            setInspectionScopeNotes(
+              `Automated Scope Recommendation: Historical trends indicate recurrent deficiencies in "${topSystem[0]}". Prioritize deep-dive verification during next audit cycle.`
+            );
+          } else {
+            setInspectionScopeNotes(
+              "Initial Assessment Scope: Standard comprehensive cGMP review and facility infrastructure validation."
+            );
+          }
+        } else {
+          // Built-in Fallback for Brand New Facilities
+          setInspectionScopeNotes(
+            "Baseline Inspection Scope: First-time facility verification. Focus on general quality systems, HVAC validation, and production line compliance."
+          );
         }
 
         // Fetch child product lines
@@ -242,13 +282,14 @@ function CategorizationContent() {
 
   const intrinsicRisk = getIntrinsicRisk(complexityScore, criticalityScore);
 
-  const getComplianceRisk = (criticals: number, majors: number): ComplianceLevel => {
-    if (criticals >= 1 || majors > 5) return "High";
-    if (majors >= 1 && majors <= 5) return "Medium";
+  const getComplianceRisk = (criticals: number, majors: number, others: number): ComplianceLevel => {
+    const adjustedMajors = majors + Math.floor(others / 5);
+    if (criticals >= 1 || adjustedMajors > 5) return "High";
+    if (adjustedMajors >= 1 && adjustedMajors <= 5) return "Medium";
     return "Low";
   };
 
-  const complianceRisk = getComplianceRisk(criticalDeficiencies, majorDeficiencies);
+  const complianceRisk = getComplianceRisk(criticalDeficiencies, majorDeficiencies, otherDeficiencies);
 
   const getOverallRiskRating = (intrinsic: IntrinsicLevel, compliance: ComplianceLevel): RiskRating => {
     if (intrinsic === "High" && compliance === "High") return "C";
@@ -283,119 +324,55 @@ function CategorizationContent() {
     return date.toISOString();
   };
 
+  const handleSaveCategorization = async () => {
+    if (!facility) return;
+    setIsSaving(true);
+    setIsTimerRunning(false);
 
-const handleSaveCategorization = async () => {
-  if (!facility) return;
-  setIsSaving(true);
-  setIsTimerRunning(false);
+    const targetDate = calculateNextInspectionDate(overallRiskRating);
+    const numericAppId = /^\d+$/.test(facilityIdParam) ? parseInt(facilityIdParam, 10) : null;
 
-  const targetDate = calculateNextInspectionDate(overallRiskRating);
-  const numericAppId = /^\d+$/.test(facilityIdParam) ? parseInt(facilityIdParam, 10) : null;
-  const now = new Date().toISOString();
+    try {
+      // 🚀 Dispatch everything through your secure server API route
+      const response = await fetch("/api/LocalInspectionReports/inspectors/categorization", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          facilityId: facility.id,
+          applicationId: numericAppId,
+          complexityScore,
+          criticalityScore,
+          intrinsicLevel: intrinsicRisk,
+          criticalDeficiencies,
+          majorDeficiencies,
+          otherDeficiencies,
+          complianceLevel: complianceRisk,
+          overallRiskRating,
+          nextInspectionDate: targetDate,
+          timerSeconds,
+          reviewerTitle,
+        }),
+      });
 
-  // Target step definitions from config
-  const currentStep = facilityCategorizationWorkflow.steps.UNDER_CATEGORIZATION;
-  const nextStep = facilityCategorizationWorkflow.steps.DDD_CATEGORIZATION_ENDORSEMENT;
-
-  try {
-    // 1. Record detailed risk assessment evaluation
-    const { error: riskError } = await supabase
-      .from("risk_assessments")
-      .upsert({
-        facility_id: facility.id,
-        application_id: numericAppId,
-        complexity_score: complexityScore,
-        criticality_score: criticalityScore,
-        intrinsic_level: intrinsicRisk,
-        critical_deficiencies: criticalDeficiencies,
-        major_deficiencies: majorDeficiencies,
-        compliance_level: complianceRisk,
-        overall_risk_rating: overallRiskRating,
-        next_inspection_date: targetDate,
-        status: "COMPLETED",
-        updated_at: now
-      }, { onConflict: "application_id" });
-
-    if (riskError) throw riskError;
-
-    // 2. Update facilities table status
-    const { error: facilityError } = await supabase
-      .from("facilities")
-      .update({
-        is_categorized: true,
-        current_risk_rating: overallRiskRating,
-        next_inspection_date: targetDate,
-      })
-      .eq("id", facility.id);
-
-    if (facilityError) throw facilityError;
-
-    if (numericAppId) {
-      // 3. Close the active QMS timeline record for UNDER_CATEGORIZATION
-      const { error: closeTimelineError } = await supabase
-        .from("qms_timelines")
-        .update({
-          end_time: now,
-          details: {
-            time_spent_seconds: timerSeconds,
-            action: "FORWARD_TO_ENDORSEMENT",
-            categorized_by_title: reviewerTitle,
-          }
-        })
-        .eq("application_id", numericAppId)
-        .is("end_time", null);
-
-      if (closeTimelineError) {
-        console.error("QMS Timeline Close Error:", closeTimelineError.message);
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Failed to save categorization.");
       }
 
-      // 4. Open NEW QMS timeline record using exact currentPoint title string from workflow config
-      const { error: openTimelineError } = await supabase
-        .from("qms_timelines")
-        .insert({
-          application_id: numericAppId,
-          point: nextStep.currentPoint, // Uses full title: "Divisional Deputy Director Categorization Endorsement"
-          division: nextStep.division,
-          start_time: now,
-          end_time: null,
-          details: {
-            routed_from: currentStep.key,
-            assigned_role: nextStep.role,
-          }
-        });
+      setSaveSuccess(true);
 
-      if (openTimelineError) {
-        console.error("QMS Timeline Create Error:", openTimelineError.message);
-      }
+      setTimeout(() => {
+        router.push("/LocalInspectionReports/Inspectors/Inbox?tab=unassigned");
+      }, 1200);
 
-      // 5. Update applications table current_point and status using workflow config title and statusLabel
-      const { error: appUpdateError } = await supabase
-        .from("applications")
-        .update({
-          current_point: nextStep.currentPoint, // Matches full title string
-          status: nextStep.statusLabel,         // "PENDING_CATEGORIZATION_ENDORSEMENT"
-          updated_at: now,
-        })
-        .eq("id", numericAppId);
-
-      if (appUpdateError) {
-        console.error("Application Point Update Error:", appUpdateError.message);
-      }
+    } catch (err: any) {
+      console.error("Save error:", err?.message || err);
+      alert(err.message || "An error occurred while saving.");
+      setIsTimerRunning(true); // Resume timer if save fails
+    } finally {
+      setIsSaving(false);
     }
-
-    setSaveSuccess(true);
-
-    // 6. Route back to Inbox
-    setTimeout(() => {
-      router.push("/LocalInspectionReports/Inspectors/Inbox?tab=unassigned");
-    }, 1200);
-
-  } catch (err: any) {
-    console.error("Save error:", err?.message || err);
-  } finally {
-    setIsSaving(false);
-  }
-};
+  };
 
   if (isLoading) {
     return (
@@ -433,7 +410,6 @@ const handleSaveCategorization = async () => {
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Navigation & QMS Header */}
         <div className="flex items-center justify-between">
           <Link
             href="/LocalInspectionReports/Inspectors/Inbox"
@@ -450,7 +426,6 @@ const handleSaveCategorization = async () => {
           </div>
         </div>
 
-        {/* Facility Overview Card */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center space-x-3">
@@ -467,7 +442,6 @@ const handleSaveCategorization = async () => {
             </div>
           </div>
 
-          {/* PIC/S Rating Output Badge */}
           <div className="flex items-center space-x-4">
             <div className={`px-5 py-3 rounded-xl border flex items-center space-x-3 ${
               overallRiskRating === "C"
@@ -497,11 +471,10 @@ const handleSaveCategorization = async () => {
           </div>
         )}
 
-        {/* Product Lines & Local Products Context Panel */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
             <Layers className="w-5 h-5 text-blue-600" />
-            Registered Product Lines (`product_lines_local` & `products_local`)
+            Registered Product Lines
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {facility.product_lines?.map((line) => (
@@ -523,7 +496,7 @@ const handleSaveCategorization = async () => {
                   <ul className="mt-1 space-y-1">
                     {(line.products ?? []).map((p) => (
                       <li key={p.id} className="text-xs text-slate-700 flex justify-between">
-                        <span>• {p.name} ({p.target_species})</span>
+                        <span>{p.name} ({p.target_species})</span>
                         {p.vmd_approved && <span className="text-emerald-600 font-medium">VMD Approved</span>}
                       </li>
                     ))}
@@ -534,10 +507,8 @@ const handleSaveCategorization = async () => {
           </div>
         </div>
 
-        {/* PIC/S PI 037-1 Worksheets */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
-          {/* PART B: Intrinsic Risk Evaluation */}
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
             <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
               <Award className="w-5 h-5 text-blue-600" />
@@ -580,17 +551,16 @@ const handleSaveCategorization = async () => {
             </div>
           </div>
 
-          {/* PART C: Compliance Risk Evaluation */}
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
             <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-amber-600" />
               PIC/S Part C: Compliance Risk Score
             </h2>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Critical Deficiencies
+                  Critical
                 </label>
                 <input
                   type="number"
@@ -602,13 +572,25 @@ const handleSaveCategorization = async () => {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Major Deficiencies
+                  Major
                 </label>
                 <input
                   type="number"
                   min="0"
                   value={majorDeficiencies}
                   onChange={(e) => setMajorDeficiencies(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                  Other <span className="text-[9px] text-slate-400 lowercase">(5=1 Maj)</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={otherDeficiencies}
+                  onChange={(e) => setOtherDeficiencies(Number(e.target.value))}
                   className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -622,7 +604,6 @@ const handleSaveCategorization = async () => {
 
         </div>
 
-        {/* PART E & F: Inspection Frequency & Scope Plan */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
             <Calendar className="w-5 h-5 text-blue-600" />
@@ -667,7 +648,6 @@ const handleSaveCategorization = async () => {
           </div>
         </div>
 
-        {/* Bottom Submission Action */}
         <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center space-x-2 text-xs text-slate-500">
             <UserCheck className="w-4 h-4 text-slate-400" />
