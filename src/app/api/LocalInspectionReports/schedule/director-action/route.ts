@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { scheduleBatches, inspectionSchedules, applications, qmsTimelines } from "@/db/schema";
+import { scheduleBatches, inspectionSchedules, applications, qmsTimelines, companies, facilities } from "@/db/schema";
 import { eq, inArray, notInArray, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
+import { sendOversightEmail } from "@/lib/utils/mail";
 
 export async function POST(request: Request) {
   try {
@@ -48,6 +49,15 @@ export async function POST(request: Request) {
     };
 
     const now = new Date();
+    let emailDispatchQueue: Array<{
+      appNumber: string;
+      type: string;
+      companyName: string;
+      facilityName: string;
+      notificationEmail?: string;
+      emailTitle: string;
+      remarks: string;
+    }> = [];
 
     // --- ACTION HANDLER 1: Endorsements & Resubmissions (DDD -> Director) ---
     if (action === "RECOMMEND" || action === "RESUBMIT" || action === "RECOMMEND_RESUBMIT") {
@@ -151,8 +161,40 @@ export async function POST(request: Request) {
               updatedAt: now,
             })
             .where(inArray(applications.id, applicationIds));
+
+          // Fetch details for email queue
+          for (const appId of applicationIds) {
+            const [appData] = await tx.select().from(applications).where(eq(applications.id, appId));
+            if (appData) {
+              const [comp] = await tx.select({ name: companies.name }).from(companies).where(eq(companies.id, appData.companyId));
+              const [fac] = await tx.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, appData.facilityId));
+
+              emailDispatchQueue.push({
+                appNumber: appData.applicationNumber,
+                type: appData.type,
+                companyName: comp?.name || "Registered Establishment",
+                facilityName: fac?.name || "Manufacturing Facility",
+                notificationEmail: (appData.details as any)?.notificationEmail,
+                emailTitle: "Schedule Batch Recommended for Approval",
+                remarks: comments || "Batch submitted to Director for final review.",
+              });
+            }
+          }
         }
       });
+
+      // Dispatch Emails Post-Transaction
+      for (const item of emailDispatchQueue) {
+        await sendOversightEmail({
+          appNumber: item.appNumber,
+          type: item.type || 'Pre-Registration',
+          companyName: item.companyName,
+          facilityName: item.facilityName,
+          lodRemarks: item.remarks,
+          customRecipient: item.notificationEmail || undefined,
+          emailTitle: item.emailTitle,
+        });
+      }
 
       return NextResponse.json({
         success: true,
@@ -231,8 +273,38 @@ export async function POST(request: Request) {
               updatedAt: now,
             })
             .where(inArray(applications.id, applicationIds));
+
+          for (const appId of applicationIds) {
+            const [appData] = await tx.select().from(applications).where(eq(applications.id, appId));
+            if (appData) {
+              const [comp] = await tx.select({ name: companies.name }).from(companies).where(eq(companies.id, appData.companyId));
+              const [fac] = await tx.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, appData.facilityId));
+
+              emailDispatchQueue.push({
+                appNumber: appData.applicationNumber,
+                type: appData.type,
+                companyName: comp?.name || "Registered Establishment",
+                facilityName: fac?.name || "Manufacturing Facility",
+                notificationEmail: (appData.details as any)?.notificationEmail,
+                emailTitle: "Inspection Batch Approved & Dispatched",
+                remarks: comments || "Batch approved by Director and dispatched to inspection team.",
+              });
+            }
+          }
         }
       });
+
+      for (const item of emailDispatchQueue) {
+        await sendOversightEmail({
+          appNumber: item.appNumber,
+          type: item.type || 'Pre-Registration',
+          companyName: item.companyName,
+          facilityName: item.facilityName,
+          lodRemarks: item.remarks,
+          customRecipient: item.notificationEmail || undefined,
+          emailTitle: item.emailTitle,
+        });
+      }
 
       return NextResponse.json({
         success: true,
@@ -307,8 +379,38 @@ export async function POST(request: Request) {
               updatedAt: now,
             })
             .where(inArray(applications.id, applicationIds));
+
+          for (const appId of applicationIds) {
+            const [appData] = await tx.select().from(applications).where(eq(applications.id, appId));
+            if (appData) {
+              const [comp] = await tx.select({ name: companies.name }).from(companies).where(eq(companies.id, appData.companyId));
+              const [fac] = await tx.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, appData.facilityId));
+
+              emailDispatchQueue.push({
+                appNumber: appData.applicationNumber,
+                type: appData.type,
+                companyName: comp?.name || "Registered Establishment",
+                facilityName: fac?.name || "Manufacturing Facility",
+                notificationEmail: (appData.details as any)?.notificationEmail,
+                emailTitle: "Schedule Batch Returned for Rework",
+                remarks: comments || "Revision required by Director.",
+              });
+            }
+          }
         }
       });
+
+      for (const item of emailDispatchQueue) {
+        await sendOversightEmail({
+          appNumber: item.appNumber,
+          type: item.type || 'Pre-Registration',
+          companyName: item.companyName,
+          facilityName: item.facilityName,
+          lodRemarks: item.remarks,
+          customRecipient: item.notificationEmail || undefined,
+          emailTitle: item.emailTitle,
+        });
+      }
 
       return NextResponse.json({
         success: true,

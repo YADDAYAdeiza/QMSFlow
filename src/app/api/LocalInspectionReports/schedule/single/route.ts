@@ -5,11 +5,14 @@ import {
   inspectionTeamAssignments, 
   applications,
   qmsTimelines,
-  users 
+  users,
+  companies,
+  facilities
 } from "@/db/schema";
 import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
+import { sendOversightEmail } from "@/lib/actions/email"; // 👈 Import email dispatch utility
 
 export async function POST(request: Request) {
   try {
@@ -53,11 +56,11 @@ export async function POST(request: Request) {
     }
 
     const currentStep = inspectionScheduleBatchWorkflow.steps.INSPECTION_PENDING;
-    const nextStep = inspectionScheduleBatchWorkflow.steps.DDD_SCHEDULE_ROUTING; // Updated to intermediate routing step
+    const nextStep = inspectionScheduleBatchWorkflow.steps.DDD_SCHEDULE_ROUTING;
     const now = new Date();
     let targetScheduleId = scheduleId;
 
-    await db.transaction(async (tx) => {
+    const emailMetadata = await db.transaction(async (tx) => {
       // 1. Create or Update the single Inspection Schedule record
       if (targetScheduleId) {
         await tx
@@ -120,7 +123,7 @@ export async function POST(request: Request) {
       });
 
       // 5. Sync Application Status and Point to DDD_SCHEDULE_ROUTING
-      await tx
+      const [updatedApp] = await tx
         .update(applications)
         .set({
           currentPoint: nextStep.currentPoint,
@@ -132,8 +135,41 @@ export async function POST(request: Request) {
           )`,
           updatedAt: now,
         })
-        .where(eq(applications.id, applicationId));
+        .where(eq(applications.id, applicationId))
+        .returning();
+
+      // 6. Fetch Company and Facility details for email context
+      const [comp] = await tx
+        .select({ name: companies.name })
+        .from(companies)
+        .where(eq(companies.id, updatedApp.companyId));
+
+      const [fac] = await tx
+        .select({ name: facilities.name })
+        .from(facilities)
+        .where(eq(facilities.id, updatedApp.facilityId));
+
+      return {
+        appNumber: updatedApp.applicationNumber,
+        type: updatedApp.type,
+        companyName: comp?.name || "Registered Establishment",
+        facilityName: fac?.name || "Manufacturing Facility",
+        notificationEmail: (updatedApp.details as any)?.notificationEmail,
+      };
     });
+
+    // 🚀 Trigger Context-Aware Email Dispatch (Explicitly communicating "Scheduled")
+    if (emailMetadata) {
+      await sendOversightEmail({
+        appNumber: emailMetadata.appNumber,
+        type: emailMetadata.type || 'Pre-Registration',
+        companyName: emailMetadata.companyName,
+        facilityName: emailMetadata.facilityName,
+        lodRemarks: `Inspection successfully Scheduled for ${scheduledDate}. Team assigned and routed to Divisional Deputy Director Schedule Preparation.`,
+        customRecipient: emailMetadata.notificationEmail || undefined,
+        emailTitle: "Inspection Scheduled & Routed", // 👈 Clearly communicates scheduled status
+      });
+    }
 
     return NextResponse.json({
       success: true,

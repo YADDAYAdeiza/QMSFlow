@@ -441,8 +441,8 @@ export default function BatchScheduleEditor({
               )}
             </div>
             <div className="border-b border-black w-52 mx-auto mb-1"></div>
-            <p className="uppercase">MUDASHIRU, I. A.</p>
-            <p className="text-[11px] font-normal">DDi/c</p>
+            <p className="uppercase">Waheed Agboola</p>
+            <p className="text-[11px] font-normal">Director (VMAP)</p>
           </div>
         </div>
 
