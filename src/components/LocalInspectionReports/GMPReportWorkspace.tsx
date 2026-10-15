@@ -242,7 +242,6 @@ export default function GMPReportWorkspace({
 
   const isAuthorizedToForward = !!activeUserId && !!activeUserRole;
 
-  // Permissive check so IRSD staff, reviewers, DDDs, and technical staff can all dispatch forward
   const isAuthorizedRole =
     activeUserRole === "TEAM_LEADER" ||
     activeUserRole === "DDD" ||
@@ -301,6 +300,65 @@ export default function GMPReportWorkspace({
     }
   };
 
+const handleClientSignDocument = () => {
+    if (!reportHtml) {
+      alert("No report HTML available to sign.");
+      return;
+    }
+
+    const currentUserName = expectedUserRaw.trim().toLowerCase();
+    console.log("Toggling signature for user:", currentUserName);
+
+    const editorContainer = document.querySelector('.ProseMirror');
+    if (!editorContainer) {
+      alert("Editor container not found.");
+      return;
+    }
+
+    const cells = editorContainer.querySelectorAll('td');
+    let toggled = false;
+
+    for (const td of Array.from(cells)) {
+      // Check if this specific cell contains the user's name text
+      if (td.textContent && td.textContent.toLowerCase().includes(currentUserName)) {
+        const img = td.querySelector('img');
+        if (img) {
+          const isSigned = img.getAttribute('data-signed') === 'true';
+
+          if (isSigned) {
+            img.style.visibility = 'hidden';
+            img.setAttribute('data-signed', 'false');
+            console.log("Signature toggled to HIDDEN for:", currentUserName);
+          } else {
+            img.style.visibility = 'visible';
+            img.style.display = 'block';
+            img.setAttribute('data-signed', 'true');
+            console.log("Signature toggled to VISIBLE for:", currentUserName);
+          }
+          
+          toggled = true;
+          break; // STOP searching immediately after updating the user's unique signature block!
+        }
+      }
+    }
+
+    if (toggled) {
+      const freshHtml = editorContainer.innerHTML;
+      setReportHtml(freshHtml);
+
+      const updatedSnapshot = {
+        ...checklistSnapshot,
+        compiledReportHtml: freshHtml
+      };
+      setChecklistSnapshot(updatedSnapshot);
+      handleSaveDraft(updatedSnapshot, true);
+
+      alert(`Signature visibility successfully toggled for ${expectedUserRaw}!`);
+    } else {
+      alert("Could not locate your signature block in the document.");
+    }
+  };
+
   const handleAICorrelationCompile = async (completedFormPayload: any) => {
     if (!completedFormPayload) return;
     try {
@@ -324,8 +382,7 @@ export default function GMPReportWorkspace({
         ...(checklistSnapshot?.signatures || {}),
         ...(completedFormPayload.signatures || {})
       };
-      console.log('mergedSignatures: ', mergedSignatures);
-console.log('resolvedProductLines: ', resolvedProductLines);
+
       const res = await fetch("/api/LocalInspectionReports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -544,13 +601,9 @@ console.log('resolvedProductLines: ', resolvedProductLines);
         setRemarks("");
         setSelectedStaff("");
 
-        // Invalidate current route cache
         router.refresh();
 
-        // 🎯 Direct push using authentic logged-in user profile role (globalStructuralRole)
         const loggedInRole = globalStructuralRole || "";
-
-        console.log('loggedInRole: ', loggedInRole);
 
         if (
           loggedInRole.includes("Director") && 
@@ -937,6 +990,18 @@ console.log('resolvedProductLines: ', resolvedProductLines);
                         })}
                     </select>
                   </div>
+                </div>
+              )}
+
+              {reportHtml && (
+                <div className="mb-4">
+                  <button
+                    type="button"
+                    onClick={handleClientSignDocument}
+                    className="w-full inline-flex justify-center items-center px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center cursor-pointer"
+                  >
+                    ✍️ Apply Official Electronic Signature
+                  </button>
                 </div>
               )}
 

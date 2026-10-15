@@ -91,13 +91,13 @@ export async function POST(request: Request) {
       : "General Finished Product Manufacturing Line";
 
     // Reusable signature card generator with 12px max-height constraint
-    const renderSignatureCard = (name: string, role: string, sigUrl?: string) => {
+    const renderSignatureCard = (name: string, role: string, sigUrl?: string, isSigned: boolean = false) => {
       const sigGraphic = sigUrl
-        ? `<img src="${sigUrl}" alt="${name} Signature" style="max-height:4px; width:auto; margin:0 auto; display:block;" />`
-        : `<span style="font-size:10px; color:#94a3b8; font-style:italic;">[Signed Electronically]</span>`;
-
+  ? `<img src="${sigUrl}" alt="${name} Signature" class="signature-img" data-signed="true" style="max-height:45px; width:auto; margin:0 auto; display:block; visibility:visible;" />`
+  : `<span style="font-size:10px; color:#94a3b8; font-style:italic;">[Not Signed]</span>`;
+  
       return `
-        <td style="width:48%; vertical-align:bottom; border:none; padding:12px; box-sizing:border-box;">
+        <td data-card-name="${name.trim().toLowerCase()}" style="width:48%; vertical-align:bottom; border:none; padding:12px; box-sizing:border-box;">
           <div style="border-bottom:1px solid #0f172a; min-height:36px; margin-bottom:4px; text-align:center; display:flex; align-items:flex-end; justify-content:center;">
             ${sigGraphic}
           </div>
@@ -127,35 +127,35 @@ export async function POST(request: Request) {
     };
 
     // 1. Lead Inspector
-    const resolvedLeadSig = lead_inspector_signature_url || lead_signature_url || findSignatureForPerson(leadName, signatures);
-    if (leadName && leadName !== "Unassigned") {
-      allSignCards.push(
-        renderSignatureCard(leadName, "Lead Inspector, Regulatory Inspection Directorate", resolvedLeadSig)
-      );
-      processedNames.add(leadName);
-    }
+const resolvedLeadSig = lead_inspector_signature_url || lead_signature_url || findSignatureForPerson(leadName, signatures);
+if (leadName && leadName !== "Unassigned") {
+  allSignCards.push(
+    renderSignatureCard(leadName, "Lead Inspector, Regulatory Inspection Directorate", resolvedLeadSig, false)
+  );
+  processedNames.add(leadName);
+}
 
-    // 2. Co-Inspectors
-    coInspectorsList.forEach((inspectorName) => {
-      if (!processedNames.has(inspectorName)) {
-        const sigUrl = findSignatureForPerson(inspectorName, signatures);
-        allSignCards.push(
-          renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", sigUrl)
-        );
-        processedNames.add(inspectorName);
-      }
-    });
+// 2. Co-Inspectors
+coInspectorsList.forEach((inspectorName) => {
+  if (!processedNames.has(inspectorName)) {
+    const sigUrl = findSignatureForPerson(inspectorName, signatures);
+    allSignCards.push(
+      renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", sigUrl, false)
+    );
+    processedNames.add(inspectorName);
+  }
+});
 
-    // 3. Trainee Inspectors
-    traineesList.forEach((traineeName) => {
-      if (!processedNames.has(traineeName)) {
-        const sigUrl = findSignatureForPerson(traineeName, signatures);
-        allSignCards.push(
-          renderSignatureCard(traineeName, "Trainee Inspector / Observer", sigUrl)
-        );
-        processedNames.add(traineeName);
-      }
-    });
+// 3. Trainee Inspectors
+traineesList.forEach((traineeName) => {
+  if (!processedNames.has(traineeName)) {
+    const sigUrl = findSignatureForPerson(traineeName, signatures);
+    allSignCards.push(
+      renderSignatureCard(traineeName, "Trainee Inspector / Observer", sigUrl, false)
+    );
+    processedNames.add(traineeName);
+  }
+});
 
     // Group signature cards into 2-column HTML rows
     let dynamicSignoffTableRows = "";
