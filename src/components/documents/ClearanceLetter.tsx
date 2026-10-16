@@ -198,7 +198,7 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
               <Image src="/WaheedSign.png" style={styles.signatureImage} />
             )}
             <Text style={styles.signatureName}>
-              {isDirector ? "Agboola Waheed" : "[Signature Pending Executive Sign-Off]"}
+              {isDirector ? "Waheed Agboola" : "[Signature Pending Executive Sign-Off]"}
             </Text>
             <Text>Director, Veterinary Medicine & Allied Products</Text>
             <Text>For: Director-General (NAFDAC)</Text>
