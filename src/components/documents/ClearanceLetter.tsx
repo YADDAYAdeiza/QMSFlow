@@ -195,7 +195,7 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
           <Text>Thank you.</Text>
           <View style={styles.signatureBlock}>
             {isDirector && (
-              <Image src="/MudSig-removebg-preview.png" style={styles.signatureImage} />
+              <Image src="/WaheedSign.png" style={styles.signatureImage} />
             )}
             <Text style={styles.signatureName}>
               {isDirector ? "Agboola Waheed" : "[Signature Pending Executive Sign-Off]"}
