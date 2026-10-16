@@ -12,7 +12,7 @@ import {
 import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 import { createClient } from "@/utils/supabase/server";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
-import { sendOversightEmail } from "@/lib/actions/email"; // 👈 Import email dispatch utility
+import { sendOversightEmail } from "@/lib/utils/mail";
 
 export async function POST(request: Request) {
   try {
@@ -176,7 +176,7 @@ export async function POST(request: Request) {
       scheduleId: targetScheduleId,
       message: "Single inspection scheduled and routed to DDD Schedule Preparation successfully.",
     });
-  } catch (error: any) {
+  } catch (error: any) {  
     console.error("Error scheduling inspection:", error);
     return NextResponse.json(
       { success: false, error: error.message || "Internal Server Error" },
