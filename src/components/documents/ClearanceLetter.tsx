@@ -16,7 +16,7 @@ interface ClearanceLetterProps {
 
 const styles = StyleSheet.create({
   page: { 
-    paddingTop: 35,       
+    paddingTop: 35,        
     paddingBottom: 35,    
     paddingHorizontal: 55, 
     fontSize: 11, 
@@ -28,7 +28,13 @@ const styles = StyleSheet.create({
   
   logo: { width: 84, height: 84, marginRight: 15 },
   
-  signatureImage: { width: 70, height: 70, marginBottom: 2 },
+  signatureImage: { 
+    width: 140, 
+    height: 140, // Restored to 140
+    marginBottom: -90, // Pulls the name text closer up to eliminate whitespace box
+    marginLeft: -32,    // Shifts the image 45pts to the left
+    alignSelf: 'flex-start' 
+  },
   
   header: { 
     marginBottom: 15, 
@@ -79,8 +85,8 @@ const styles = StyleSheet.create({
   signatureBlockWrapper: { 
     marginTop: 12 
   },
-  signatureBlock: { marginTop: 5 },
-  signatureName: { fontWeight: 'bold', fontSize: 12, marginTop: 5 },
+  signatureBlock: { marginTop: 2 }, 
+  signatureName: { fontWeight: 'bold', fontSize: 12, marginTop: 2 },
 
   footerWrapper: {
     position: 'absolute',
