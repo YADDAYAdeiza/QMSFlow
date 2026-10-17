@@ -69,7 +69,7 @@ export default async function DirectorReviewPage({
     details: appDetails,
     commentsTrail: Array.isArray(appDetails.comments) ? appDetails.comments : [],
     dddInstruction: [...(appDetails.comments || [])].reverse().find((c: any) => 
-        c.role === "Divisional Deputy Director" || c.role === "Divisional Deputy Director"
+        c.role === "Divisional Deputy Director"
     )?.text || `Recommended for ${isInspection ? 'certification' : 'clearance'} based on technical compliance.`,
     complianceRisk 
   };

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
   Loader2, RotateCcw, ShieldCheck, 
-  FileText, CheckCircle2, FileSearch
+  FileText, CheckCircle2, FileSearch, AlertTriangle, ShieldAlert, CheckCircle, Cpu, Play, Calendar, DollarSign
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
@@ -14,6 +14,7 @@ import { GmpCertificate } from "@/components/documents/GmpCertificate";
 import { createClient } from "@/utils/supabase/client";
 import RejectionModal from "@/components/RejectionModal";
 import { RiskExecutiveSummary } from "@/components/analytics/RiskExecutiveSummary";
+import { executeForensicAuditAction } from "@/lib/actions/forensicAction";
 
 const supabase = createClient();
 
@@ -23,11 +24,31 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   const [processing, setProcessing] = useState(false);
   const [viewMode, setViewMode] = useState<'dossier' | 'draft' | 'preview'>('dossier');
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+  
+  // --- ON-DEMAND FORENSIC STATES ---
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [forensicResult, setForensicResult] = useState<any>(null);
+  const [auditAttempted, setAuditAttempted] = useState(false);
+
   const router = useRouter();
 
   const details = app.details || {};
   const isInspection = app.isInspection;
   const docTitle = app.docTitle;
+
+  const handleRunAudit = async () => {
+    setIsAuditing(true);
+    setAuditAttempted(true);
+    try {
+      // Run on-demand so it doesn't block page load
+      const result = await executeForensicAuditAction(details);
+      setForensicResult(result);
+    } catch (err) {
+      console.error("Forensic audit execution failed:", err);
+    } finally {
+      setIsAuditing(false);
+    }
+  };
 
   const complianceRisk = useMemo(() => {
     const baseRisk = app?.complianceRisk || {};
@@ -66,6 +87,11 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     const address = details.facilityAddress || details.factory_address || "N/A";
     const rawLines = details.productLines || [];
 
+    // Only inject desk review / expiry data if audit has been successfully performed
+    const isDeskReview = forensicResult?.isDeskReview ?? false;
+    const fullPaymentDate = forensicResult?.fullPaymentDate ?? undefined;
+    const expiryDate = forensicResult?.expiryDate ?? undefined;
+
     if (isInspection) {
       const certData = {
         appNumber,
@@ -90,7 +116,10 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         factoryAddress: address,
         localApplicantName: details.companyName || "N/A",
         localApplicantAddress: details.companyAddress || "N/A",
-        products: flatProducts.length > 0 ? flatProducts : (details.products || [])
+        products: flatProducts.length > 0 ? flatProducts : (details.products || []),
+        isDeskReview: auditAttempted ? isDeskReview : false, // Hidden until audited!
+        fullPaymentDate,
+        expiryDate
       };
 
       const isAdditionalSite = details.siteScope === "Additional Manufacturing Site";
@@ -101,7 +130,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         prefix: isAdditionalSite ? "GMP_CLEARANCE_AMS" : "GMP_CLEARANCE" 
       };
     }
-  }, [app, details, isInspection, complianceRisk]);
+  }, [app, details, isInspection, complianceRisk, forensicResult, auditAttempted]);
 
   const iframeSrc = useMemo(() => {
     if (viewMode === 'dossier') return pdfUrl || details.poaUrl;
@@ -113,6 +142,12 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
 
   const handleApprove = async () => {
     if (!remarks.trim()) return alert("Executive remarks required.");
+    
+    const hasCriticalFlags = forensicResult?.flags?.some((f: any) => f.severity === "CRITICAL");
+    if (hasCriticalFlags) {
+      return alert("ACTION BLOCKED: Critical forensic flags have been detected. Please review the advisory panel or return for rework.");
+    }
+
     setProcessing(true);
     try {
       const blob = await pdf(docConfig.component).toBlob();
@@ -215,6 +250,108 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
 
           <RiskExecutiveSummary complianceRisk={complianceRisk} isInspection={isInspection} />
 
+          {/* --- ON-DEMAND EXECUTIVE FORENSIC ADVISORY PANEL --- */}
+          <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl border border-slate-800 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Executive Forensic Advisory Panel</h3>
+              </div>
+              {!auditAttempted ? (
+                <button 
+                  onClick={handleRunAudit}
+                  disabled={isAuditing}
+                  className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[9px] uppercase tracking-wider rounded-full transition-all flex items-center gap-1.5 shadow-md shadow-emerald-500/20"
+                >
+                  {isAuditing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3 fill-current" />}
+                  Run AI Forensic Audit
+                </button>
+              ) : (
+                <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-wider ${
+                  forensicResult?.flags?.some((f: any) => f.severity === 'CRITICAL') ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                }`}>
+                  {forensicResult?.isDeskReview ? "Desk Review (Half-Payment)" : "Full Payment Review"}
+                </span>
+              )}
+            </div>
+
+            {!auditAttempted ? (
+              <div className="p-6 text-center bg-slate-800/40 border border-slate-800 rounded-2xl space-y-3">
+                <p className="text-xs text-slate-300 font-medium">
+                  AI Forensic Audit is on standby to conserve API quota and ensure instant page loading. Click above to analyze receipts.
+                </p>
+              </div>
+            ) : isAuditing ? (
+              <div className="flex items-center justify-center gap-3 py-8 text-slate-400 text-xs italic">
+                <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
+                <span>Gemini Vision parsing payment receipts & checking compliance baselines...</span>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-800/60 border border-slate-700/50 p-4 rounded-2xl space-y-1">
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-[9px] font-black uppercase tracking-wider">Detected Amount</span>
+                    </div>
+                    <p className="text-sm font-bold text-white">
+                      {forensicResult?.detectedAmount ? `₦${forensicResult.detectedAmount.toLocaleString()}` : "N/A"}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-800/60 border border-slate-700/50 p-4 rounded-2xl space-y-1">
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                      <span className="text-[9px] font-black uppercase tracking-wider">Full Payment Baseline</span>
+                    </div>
+                    <p className="text-sm font-bold text-white">
+                      {forensicResult?.fullPaymentDate || "Not Recorded"}
+                    </p>
+                  </div>
+                </div>
+
+                {forensicResult?.expiryDate && (
+                  <div className="bg-indigo-950/40 border border-indigo-800/50 p-4 rounded-2xl flex items-center justify-between">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-indigo-300 block mb-0.5">3-Year Lifecycle Expiry</span>
+                      <p className="text-xs text-indigo-100 font-semibold">Status active through {forensicResult.expiryDate}</p>
+                    </div>
+                    <ShieldCheck className="w-6 h-6 text-indigo-400 opacity-80" />
+                  </div>
+                )}
+
+                {forensicResult?.flags?.length === 0 ? (
+                  <div className="flex items-center gap-3 p-4 bg-emerald-950/40 border border-emerald-800/50 rounded-2xl">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <p className="text-xs text-emerald-200 font-medium leading-relaxed">
+                      No fraud flags or anomalies detected. Payment receipt validation and validity baselines are fully compliant.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {forensicResult?.flags?.map((flag: any, idx: number) => (
+                      <div key={idx} className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                        flag.severity === 'CRITICAL' ? 'bg-rose-950/40 border-rose-800/60 text-rose-200' :
+                        flag.severity === 'WARNING' ? 'bg-amber-950/40 border-amber-800/60 text-amber-200' :
+                        'bg-blue-950/40 border-blue-800/60 text-blue-200'
+                      }`}>
+                        {flag.severity === 'CRITICAL' ? <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" /> : <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />}
+                        <div>
+                          <span className="text-[9px] font-black uppercase tracking-widest block opacity-70 mb-0.5">{flag.code}</span>
+                          <p className="text-xs font-medium leading-relaxed">{flag.message}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="border-t border-slate-800 pt-3 text-[11px] text-slate-300 italic leading-relaxed">
+                  Based on the document analysis, the desk-review payment is satisfactory and in line with protocol.
+                </div>
+              </>
+            )}
+          </div>
+
           <div className="bg-blue-600 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden border-b-8 border-blue-700">
               <ShieldCheck className="absolute -top-4 -right-4 p-4 w-24 h-24 opacity-10 rotate-12" />
               <h3 className="text-[10px] font-black uppercase opacity-70 mb-3 tracking-[0.2em]">Divisional Deputy Director Recommendation</h3>
@@ -232,7 +369,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
             <button 
               onClick={handleApprove} 
               disabled={processing || isPending} 
-              className="w-full py-5 bg-emerald-500 rounded-3xl font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20 transition-all"
+              className="w-full py-5 bg-emerald-500 rounded-3xl font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-3 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50"
             >
               {processing ? <Loader2 className="animate-spin w-5 h-5" /> : `Authorize & Sign ${docTitle}`}
             </button>

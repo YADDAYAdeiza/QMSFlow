@@ -10,13 +10,16 @@ interface ClearanceLetterProps {
     factoryName?: string;
     factoryAddress?: string;
     products?: string[];
+    isDeskReview?: boolean;
+    fullPaymentDate?: string;
+    expiryDate?: string;
   };
   userRole?: string;
 }
 
 const styles = StyleSheet.create({
   page: { 
-    paddingTop: 35,        
+    paddingTop: 35,         
     paddingBottom: 35,    
     paddingHorizontal: 55, 
     fontSize: 11, 
@@ -25,17 +28,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FCFBF4', 
     position: 'relative'
   },
-  
   logo: { width: 84, height: 84, marginRight: 15 },
-  
   signatureImage: { 
     width: 140, 
-    height: 140, // Restored to 140
-    marginBottom: -90, // Pulls the name text closer up to eliminate whitespace box
-    marginLeft: -32,    // Shifts the image 45pts to the left
+    height: 140, 
+    marginBottom: -90, 
+    marginLeft: -32,    
     alignSelf: 'flex-start' 
   },
-  
   header: { 
     marginBottom: 15, 
     display: 'flex', 
@@ -43,14 +43,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     justifyContent: 'center' 
   },
-  
   titleContainer: {
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'center',
     alignItems: 'center'
   },
-  
   nafdacTitle: { 
     fontSize: 17, 
     fontWeight: 900, 
@@ -60,34 +58,37 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 1.4 
   },
-  
   headerLine: {
     width: '100%',
     borderBottomWidth: 2,
     borderBottomColor: '#006600',
     marginTop: 8
   },
-  
   refDateRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 15 },
-  
-  addressBlock: { 
-    width: '35%', 
-    marginBottom: 15, 
-    lineHeight: 0.85 
-  },
-  
+  addressBlock: { width: '35%', marginBottom: 15, lineHeight: 0.85 },
   companyName: { fontWeight: 'bold', textTransform: 'uppercase' },
   subject: { fontWeight: 'bold', textDecoration: 'underline', marginBottom: 15, marginTop: 10, textAlign: 'center' },
   body: { marginBottom: 10, textAlign: 'justify' },
+  warningBox: {
+    marginTop: 8,
+    marginBottom: 10,
+    padding: 8,
+    backgroundColor: '#FFF3CD',
+    borderWidth: 1,
+    borderColor: '#FFEEBA',
+    borderRadius: 4
+  },
+  warningText: {
+    fontSize: 10,
+    color: '#856404',
+    fontWeight: 'bold',
+    textAlign: 'justify'
+  },
   productList: { marginLeft: 30, marginBottom: 12 },
   productItem: { marginBottom: 3 },
-  
-  signatureBlockWrapper: { 
-    marginTop: 12 
-  },
+  signatureBlockWrapper: { marginTop: 12 },
   signatureBlock: { marginTop: 2 }, 
   signatureName: { fontWeight: 'bold', fontSize: 12, marginTop: 2 },
-
   footerWrapper: {
     position: 'absolute',
     bottom: 25, 
@@ -96,69 +97,28 @@ const styles = StyleSheet.create({
     display: 'flex',
     flexDirection: 'column'
   },
-  footerLine: {
-    width: '100%',
-    borderBottomWidth: 2,
-    borderBottomColor: '#006600',
-    marginBottom: 6
-  },
-  footerContainer: {
-    display: 'flex',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'stretch'
-  },
-  footerColumn: {
-    width: '46%',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center', 
-    justifyContent: 'center'
-  },
-  footerPartition: {
-    borderRightWidth: 1,
-    borderRightColor: '#333333',
-    marginHorizontal: 5
-  },
-  hqTextContainer: {
-    lineHeight: 0.45, 
-    textAlign: 'left' 
-  },
-  officeTextContainer: {
-    lineHeight: 0.45, 
-    textAlign: 'left' 
-  },
-  hqLabel: {
-    color: '#CC0000', 
-    fontWeight: 'bold',
-    fontSize: 8
-  },
-  officeLabel: {
-    color: '#CC0000', 
-    fontWeight: 'bold',
-    fontSize: 8
-  },
-  standardFooterText: {
-    fontSize: 7.5,
-    color: '#111111'
-  },
-  smallFooterText: {
-    fontSize: 6.5, 
-    color: '#333333'
-  }
+  footerLine: { width: '100%', borderBottomWidth: 2, borderBottomColor: '#006600', marginBottom: 6 },
+  footerContainer: { display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'stretch' },
+  footerColumn: { width: '46%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
+  footerPartition: { borderRightWidth: 1, borderRightColor: '#333333', marginHorizontal: 5 },
+  hqTextContainer: { lineHeight: 0.45, textAlign: 'left' },
+  officeTextContainer: { lineHeight: 0.45, textAlign: 'left' },
+  hqLabel: { color: '#CC0000', fontWeight: 'bold', fontSize: 8 },
+  officeLabel: { color: '#CC0000', fontWeight: 'bold', fontSize: 8 },
+  standardFooterText: { fontSize: 7.5, color: '#111111' },
+  smallFooterText: { fontSize: 6.5, color: '#333333' }
 });
 
 export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
   const isDirector = userRole?.toLowerCase() === 'director';
+  const hasExactDates = data.expiryDate && !data.expiryDate.includes("Pending") && !data.expiryDate.includes("Calculated");
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
         
-        {/* Official Header Flex-Row Layout */}
         <View style={styles.header}>
           <Image src="/nafdac_logo2-removebg-preview.png" style={styles.logo} />
-          
           <View style={styles.titleContainer}>
             <Text style={styles.nafdacTitle}>NATIONAL AGENCY FOR FOOD AND DRUG</Text>
             <Text style={styles.nafdacTitle}>ADMINISTRATION AND CONTROL</Text>
@@ -196,7 +156,18 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
           You shall be communicated in due course by the Agency for the physical inspection of the facility.
         </Text>
 
-        {/* Dynamic Sign-off Authorization Block */}
+        {/* ONLY DISPLAY WARNING BLOCK IF AUDIT CONFIRMS DESK REVIEW */}
+        {data.isDeskReview && (
+          <View style={styles.warningBox}>
+            <Text style={styles.warningText}>
+              NOTICE OF VALIDITY: Please note that this approval is processed via Desk Review based on a prior facility payment. 
+              In accordance with Agency guidelines, the 3-year validity lifecycle of this GMP status counts strictly from the date of the original 
+              Full Payment {hasExactDates ? `(Recorded: ${data.fullPaymentDate}) and expires precisely on ${data.expiryDate}` : 'and maintains a strict 3-year validity window from the original payment baseline'}. 
+              This review does not extend an independent 3-year window from the current review date.
+            </Text>
+          </View>
+        )}
+
         <View style={styles.signatureBlockWrapper}>
           <Text>Thank you.</Text>
           <View style={styles.signatureBlock}>
@@ -213,7 +184,6 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
 
         <View style={styles.footerWrapper}>
           <View style={styles.footerLine} />
-          
           <View style={styles.footerContainer}>
             <View style={styles.footerColumn}>
               <Text style={styles.hqTextContainer}>
@@ -224,9 +194,7 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
                 <Text style={styles.smallFooterText}>Website: www.nafdac.gov.ng</Text>
               </Text>
             </View>
-
             <View style={styles.footerPartition} />
-
             <View style={styles.footerColumn}>
               <Text style={styles.officeTextContainer}>
                 <Text style={styles.officeLabel}>LAGOS LIAISON OFFICE:{"\n"}</Text>
