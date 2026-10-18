@@ -15,12 +15,15 @@ import RejectionModal from '@/components/RejectionModal';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
 import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS"; 
 import { GmpCertificate } from "@/components/documents/GmpCertificate";
+import { createClient } from "@/utils/supabase/client";
+
+const supabase = createClient();
 
 function SafeTimestamp({ timestamp }: { timestamp?: string }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   if (!mounted || !timestamp) return <span>--:--</span>;
-  return <span>{new Date(timestamp).toLocaleTimeString()}</span>;
+  return <span>new Date(timestamp).toLocaleTimeString()</span>;
 }
 
 export default function DeputyDirectorReviewClient({ app, staffList = [], loggedInUserId }: any) {
@@ -68,7 +71,16 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     hasStaffSubmission ? 'report' : 'dossier'
   );
 
-  const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
+  // Safe storage path resolver for iframe preview
+  const rawIframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
+  const iframeSrc = useMemo(() => {
+    if (!rawIframeSrc) return '';
+    if (!rawIframeSrc.startsWith('http')) {
+      const { data } = supabase.storage.from('documents').getPublicUrl(rawIframeSrc);
+      return data.publicUrl;
+    }
+    return rawIframeSrc;
+  }, [rawIframeSrc]);
 
   const currentPoint = app?.currentPoint || '';
   const currentStatus = app?.status || '';
@@ -147,6 +159,24 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     const rawLines = appDetails.productLines || [];
     const siteScope = appDetails.siteScope || "New Manufacturing Site";
 
+    // --- INTEGRATED HUMAN-AGENCY PAYMENT DATE & 3-YEAR EXPIRY CALCULATION ---
+    const manualPaymentDate = appDetails.fullPaymentDate;
+    const isDeskReview = Boolean(manualPaymentDate);
+
+    let formattedPaymentDate = undefined;
+    let calculatedExpiryDate = undefined;
+
+    if (manualPaymentDate) {
+      const parsedDate = new Date(manualPaymentDate);
+      formattedPaymentDate = !isNaN(parsedDate.getTime()) 
+        ? parsedDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) 
+        : manualPaymentDate;
+
+      const expiryObj = new Date(manualPaymentDate);
+      expiryObj.setFullYear(expiryObj.getFullYear() + 3);
+      calculatedExpiryDate = expiryObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
     if (isInspection) {
       const certData = {
         appNumber,
@@ -171,7 +201,10 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
         factoryAddress: address,
         localApplicantName: appDetails.companyName || "N/A",
         localApplicantAddress: appDetails.companyAddress || "N/A",
-        products: flatProducts.length > 0 ? flatProducts : (appDetails.products || [])
+        products: flatProducts.length > 0 ? flatProducts : (appDetails.products || []),
+        isDeskReview,
+        fullPaymentDate: formattedPaymentDate,
+        expiryDate: calculatedExpiryDate
       };
 
       if (siteScope === "Additional Manufacturing Site") {

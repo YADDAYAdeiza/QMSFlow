@@ -4,7 +4,7 @@ import React, { useState, useRef } from "react";
 import { 
   ShieldAlert, CheckCircle2, FileText, 
   Loader2, Plus, Trash2, Upload, FileCheck, ChevronDown, ChevronUp,
-  Info, Activity, History, Mail, Eye 
+  Info, Activity, History, Mail, Eye, Calendar
 } from "lucide-react";
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
@@ -50,6 +50,8 @@ export default function ReviewSubmissionForm({
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [fullPaymentDate, setFullPaymentDate] = useState(""); // <-- New state for IRSD payment date input
+
   const [findings, setFindings] = useState<Array<{ id: string; system: string; severity: string; text: string }>>(
     previousFindings.length > 0 ? previousFindings.map(f => ({ ...f, id: Math.random().toString(36).substr(2, 9) })) : []
   );
@@ -112,6 +114,7 @@ export default function ReviewSubmissionForm({
         riskId,
         isSra,
         isComplianceReview,
+        fullPaymentDate: isIrsdStaff ? fullPaymentDate : undefined, // <-- Pass date if IRSD staff
         summary: { 
           criticalCount: counts.critical, 
           majorCount: counts.major, 
@@ -306,12 +309,12 @@ export default function ReviewSubmissionForm({
         </div>
       )}
 
-      {/* VERIFICATION REPORT SECTION WITH LIVE PREVIEW */}
+      {/* VERIFICATION REPORT SECTION WITH LIVE PREVIEW & IRSD PAYMENT DATE INPUT */}
       {!isComplianceReview && isIrsdStaff && (
         <div className="space-y-6">
           <div className="flex items-center gap-4 px-6 text-slate-900 border-l-4 border-blue-600">
             <Upload className="w-6 h-6 text-blue-600" />
-            <h4 className="text-sm font-black uppercase tracking-[0.25em]">Verification Report (Optional)</h4>
+            <h4 className="text-sm font-black uppercase tracking-[0.25em]">Verification Report & Payment Baseline</h4>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -365,6 +368,22 @@ export default function ReviewSubmissionForm({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* IRSD Exclusive: Payment Date Input Field */}
+          <div className="p-8 bg-blue-50/50 border border-blue-200 rounded-[2.5rem] space-y-3">
+            <label className="text-[10px] font-black uppercase text-blue-900 tracking-wider flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-600" /> Verified Full Payment Date (IRSD Baseline)
+            </label>
+            <input 
+              type="date"
+              value={fullPaymentDate}
+              onChange={(e) => setFullPaymentDate(e.target.value)}
+              className="w-full p-4 bg-white border border-blue-200 rounded-2xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+            <p className="text-[10px] text-slate-500 italic">
+              Input the confirmed payment date to auto-inject into clearance document lifecycle validations downstream.
+            </p>
           </div>
         </div>
       )}

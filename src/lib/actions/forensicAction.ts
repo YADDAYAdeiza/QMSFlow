@@ -91,7 +91,7 @@ export async function executeForensicAuditAction(details: any) {
         result.flags.push({
           severity: "CRITICAL",
           code: "MISSING_FULL_PAYMENT_PROOF",
-          message: "FRAUD ALERT: Application is classified as a Desk Review (Half Payment), but the required evidence of prior Full Payment is completely missing."
+          message: "INCONSISTENCY ALERT: Application is classified as a Desk Review (Half Payment), but the required evidence of prior Full Payment is completely missing."
         });
       } else {
         // 2. Extract Full Payment Receipt Data

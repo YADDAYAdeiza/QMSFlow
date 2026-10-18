@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
   Loader2, RotateCcw, ShieldCheck, 
-  FileText, CheckCircle2, FileSearch, AlertTriangle, ShieldAlert, CheckCircle, Cpu, Play, Calendar, DollarSign
+  FileText, CheckCircle2, FileSearch, AlertTriangle, ShieldAlert, CheckCircle, Cpu, Play, Calendar, DollarSign, Sparkles
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
@@ -30,6 +30,9 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   const [forensicResult, setForensicResult] = useState<any>(null);
   const [auditAttempted, setAuditAttempted] = useState(false);
 
+  // --- TOGGLE INJECTION STATE (Defaults to false, using human date) ---
+  const [isInjected, setIsInjected] = useState(false);
+
   const router = useRouter();
 
   const details = app.details || {};
@@ -40,7 +43,6 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     setIsAuditing(true);
     setAuditAttempted(true);
     try {
-      // Run on-demand so it doesn't block page load
       const result = await executeForensicAuditAction(details);
       setForensicResult(result);
     } catch (err) {
@@ -87,10 +89,30 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     const address = details.facilityAddress || details.factory_address || "N/A";
     const rawLines = details.productLines || [];
 
-    // Only inject desk review / expiry data if audit has been successfully performed
-    const isDeskReview = forensicResult?.isDeskReview ?? false;
-    const fullPaymentDate = forensicResult?.fullPaymentDate ?? undefined;
-    const expiryDate = forensicResult?.expiryDate ?? undefined;
+    const manualPaymentDate = details.fullPaymentDate;
+    const aiPaymentDate = forensicResult?.fullPaymentDate;
+    const aiExpiryDate = forensicResult?.expiryDate;
+
+    let fullPaymentDate = undefined;
+    let expiryDate = undefined;
+    let isDeskReview = false;
+
+    // OVERRIDE LOGIC: If toggle is ON and AI result exists, AI overrides. Otherwise, defaults to human input.
+    if (isInjected && aiPaymentDate) {
+      fullPaymentDate = aiPaymentDate;
+      expiryDate = aiExpiryDate;
+      isDeskReview = true;
+    } else if (manualPaymentDate) {
+      const parsedDate = new Date(manualPaymentDate);
+      fullPaymentDate = !isNaN(parsedDate.getTime()) 
+        ? parsedDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) 
+        : manualPaymentDate;
+
+      const expiryObj = new Date(manualPaymentDate);
+      expiryObj.setFullYear(expiryObj.getFullYear() + 3);
+      expiryDate = expiryObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      isDeskReview = true;
+    }
 
     if (isInspection) {
       const certData = {
@@ -117,7 +139,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         localApplicantName: details.companyName || "N/A",
         localApplicantAddress: details.companyAddress || "N/A",
         products: flatProducts.length > 0 ? flatProducts : (details.products || []),
-        isDeskReview: auditAttempted ? isDeskReview : false, // Hidden until audited!
+        isDeskReview,
         fullPaymentDate,
         expiryDate
       };
@@ -130,14 +152,21 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
         prefix: isAdditionalSite ? "GMP_CLEARANCE_AMS" : "GMP_CLEARANCE" 
       };
     }
-  }, [app, details, isInspection, complianceRisk, forensicResult, auditAttempted]);
+  }, [app, details, isInspection, complianceRisk, forensicResult, isInjected]);
 
   const iframeSrc = useMemo(() => {
-    if (viewMode === 'dossier') return pdfUrl || details.poaUrl;
-    if (viewMode === 'preview') {
-      return details.verificationReportUrl || details.finalRecommendationReport || details.technicalAssessmentUrl || null;
+    let rawUrl = '';
+    if (viewMode === 'dossier') {
+      rawUrl = pdfUrl || details.poaUrl || '';
+    } else if (viewMode === 'preview') {
+      rawUrl = details.verificationReportUrl || details.finalRecommendationReport || details.technicalAssessmentUrl || '';
     }
-    return null;
+
+    if (rawUrl && !rawUrl.startsWith('http')) {
+      const { data } = supabase.storage.from('documents').getPublicUrl(rawUrl);
+      return data.publicUrl;
+    }
+    return rawUrl;
   }, [viewMode, pdfUrl, details]);
 
   const handleApprove = async () => {
@@ -151,7 +180,13 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     setProcessing(true);
     try {
       const blob = await pdf(docConfig.component).toBlob();
-      const path = `Final_Outputs/${app.applicationNumber}/${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
+      
+      const fileName = `${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
+      const targetFolder = isInspection ? '03_Certificates' : '06_Facility_Verification';
+      
+      const sanitize = (val: string) => val.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+      const cleanCompanyId = app.companyId ? sanitize(String(app.companyId)) : 'unassigned';
+      const path = `companies/${cleanCompanyId}/${app.applicationNumber}/${targetFolder}/${fileName}`;
       
       const { error: uploadError } = await supabase.storage.from('documents').upload(path, blob);
       if (uploadError) throw uploadError;
@@ -275,6 +310,17 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
               )}
             </div>
 
+            {/* Display Human-Inputted IRSD Payment Date If Available */}
+            {details.fullPaymentDate && (
+              <div className="p-4 bg-blue-950/40 border border-blue-800/50 rounded-2xl flex items-center justify-between">
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-blue-300 block mb-0.5">IRSD Staff Logged Payment Date (Default)</span>
+                  <p className="text-xs text-blue-100 font-semibold">{details.fullPaymentDate}</p>
+                </div>
+                <Calendar className="w-5 h-5 text-blue-400 opacity-80" />
+              </div>
+            )}
+
             {!auditAttempted ? (
               <div className="p-6 text-center bg-slate-800/40 border border-slate-800 rounded-2xl space-y-3">
                 <p className="text-xs text-slate-300 font-medium">
@@ -302,10 +348,10 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
                   <div className="bg-slate-800/60 border border-slate-700/50 p-4 rounded-2xl space-y-1">
                     <div className="flex items-center gap-1.5 text-slate-400">
                       <Calendar className="w-3.5 h-3.5 text-blue-400" />
-                      <span className="text-[9px] font-black uppercase tracking-wider">Full Payment Baseline</span>
+                      <span className="text-[9px] font-black uppercase tracking-wider">AI Parsed Date</span>
                     </div>
                     <p className="text-sm font-bold text-white">
-                      {forensicResult?.fullPaymentDate || "Not Recorded"}
+                      {forensicResult?.fullPaymentDate || "Not Extracted"}
                     </p>
                   </div>
                 </div>
@@ -313,7 +359,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
                 {forensicResult?.expiryDate && (
                   <div className="bg-indigo-950/40 border border-indigo-800/50 p-4 rounded-2xl flex items-center justify-between">
                     <div>
-                      <span className="text-[9px] font-black uppercase tracking-widest text-indigo-300 block mb-0.5">3-Year Lifecycle Expiry</span>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-indigo-300 block mb-0.5">3-Year Lifecycle Expiry (AI)</span>
                       <p className="text-xs text-indigo-100 font-semibold">Status active through {forensicResult.expiryDate}</p>
                     </div>
                     <ShieldCheck className="w-6 h-6 text-indigo-400 opacity-80" />
@@ -344,12 +390,38 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
                     ))}
                   </div>
                 )}
-
-                <div className="border-t border-slate-800 pt-3 text-[11px] text-slate-300 italic leading-relaxed">
-                  Based on the document analysis, the desk-review payment is satisfactory and in line with protocol.
-                </div>
               </>
             )}
+
+            {/* --- TOGGLE INJECTION CONTROL --- */}
+            <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block">
+                  {isInjected ? "AI Forensic Override: Active" : "Human Input Date: Default Active"}
+                </span>
+                <span className="text-[9px] text-slate-500 block">
+                  Toggle ON to override human date with AI parsed date
+                </span>
+              </div>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  const nextState = !isInjected;
+                  setIsInjected(nextState);
+                  if (nextState) setViewMode('draft');
+                }}
+                className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none ring-4 ring-emerald-500/5 ${
+                  isInjected ? 'bg-emerald-600' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
+                    isInjected ? 'translate-x-7' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           <div className="bg-blue-600 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden border-b-8 border-blue-700">

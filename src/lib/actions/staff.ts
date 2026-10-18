@@ -54,10 +54,15 @@ export async function submitToDDD(
         timestamp: dbTimestamp.toISOString(),
       };
 
-      // 3. Update Application Details with Elevated URLs
+      // 3. Update Application Details with Elevated URLs & IRSD Payment Date Property
       const updatedDetails = { 
         ...oldDetails, 
         comments: [...(oldDetails.comments || []), newComment],
+        
+        // Inject human-inputted payment date if provided by IRSD staff
+        ...(complianceData.fullPaymentDate && {
+          fullPaymentDate: complianceData.fullPaymentDate
+        }),
         
         ...(isHubVetting 
             ? { verificationReportUrl: reportUrl || oldDetails.verificationReportUrl || null } 
@@ -72,7 +77,6 @@ export async function submitToDDD(
       };
 
       // Define Workflow Routing via Centralized Configuration Helpers
-      // Hub vetting goes to DDD_IRSD_REVIEW; standard technical review goes to DDD_TECHNICAL_REVIEW
       const stepKey = isHubVetting ? "DDD_IRSD_REVIEW" : "DDD_TECHNICAL_REVIEW";
       const workflowStep = getWorkflowStep("VMAP", stepKey);
 
