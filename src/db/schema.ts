@@ -201,6 +201,7 @@ export const applications = pgTable("applications", {
   status: text("status").default("PENDING"),
   foreignFactoryId: integer("foreign_factory_id").references(() => companies.id),
   facilityId: uuid("facility_id").references(() => facilities.id, { onDelete: "set null" }),
+  isDeskReview: boolean("is_desk_review").default(false),
 });
 
 // 6. QMS Timelines
