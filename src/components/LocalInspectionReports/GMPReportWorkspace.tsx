@@ -256,15 +256,18 @@ export default function GMPReportWorkspace({
 
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
-  const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
-    if (!draftPayload) return;
+const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
+    // Ensure we are using the most current payload from the checklist form or fallback to state
+    const payloadToSave = draftPayload || checklistSnapshot;
+    if (!payloadToSave) return;
+
     setIsSavingDraft(true);
     try {
-      setChecklistSnapshot(draftPayload);
+      setChecklistSnapshot(payloadToSave);
 
       const currentReportHtml =
-        draftPayload?.compiledReportHtml ||
         reportHtml ||
+        payloadToSave?.compiledReportHtml ||
         "";
 
       const res = await fetch(`/api/LocalInspectionReports/generate/Reports/Drafts`, {
@@ -273,7 +276,10 @@ export default function GMPReportWorkspace({
         body: JSON.stringify({
           applicationId,
           compiledReportHtml: currentReportHtml,
-          checklistSnapshot: draftPayload,
+          checklistSnapshot: {
+            ...payloadToSave,
+            compiledReportHtml: currentReportHtml
+          },
           savedBy: expectedUserRaw,
           savedById: activeUserId,
           savedByRole: activeUserRole,

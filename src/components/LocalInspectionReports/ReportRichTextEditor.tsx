@@ -27,7 +27,9 @@ import {
   Rows,
   Columns,
   Plus,
-  Minus
+  Minus,
+  Merge,
+  Split
 } from "lucide-react";
 
 interface ReportRichTextEditorProps {
@@ -86,7 +88,6 @@ export default function ReportRichTextEditor({
     },
   });
 
-  // Sync editor content when parent prop changes (e.g. after AI compilation)
   useEffect(() => {
     if (editor && contentHtml !== editor.getHTML()) {
       editor.commands.setContent(contentHtml);
@@ -94,8 +95,6 @@ export default function ReportRichTextEditor({
   }, [contentHtml, editor]);
 
   if (!editor) return null;
-
-  const isTableActive = editor.isActive("table");
 
   return (
     <div className="border border-emerald-200 rounded-lg overflow-visible bg-white shadow-sm relative">
@@ -179,63 +178,80 @@ export default function ReportRichTextEditor({
           >
             <TableIcon size={14} /> Insert Table
           </button>
-          
-          {/* Extended Table & Cell Controls (Appears automatically when cursor is inside a table) */}
-          {isTableActive && (
-            <div className="flex flex-wrap items-center gap-1 bg-emerald-50/90 px-2 py-1 rounded border border-emerald-300 ml-2 animate-fadeIn">
-              <span className="text-[10px] font-bold text-emerald-800 uppercase mr-1">Table Tools:</span>
-              
-              {/* Row Controls */}
-              <button
-                type="button"
-                onClick={() => editor.chain().focus().addRowBefore().run()}
-                className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-medium cursor-pointer"
-                title="Add Row Above"
-              >
-                <Plus size={12} /><Rows size={12} /> Row (+)
-              </button>
-              <button
-                type="button"
-                onClick={() => editor.chain().focus().deleteRow().run()}
-                className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded font-medium cursor-pointer"
-                title="Delete Row"
-              >
-                <Minus size={12} /><Rows size={12} /> Row (-)
-              </button>
 
-              <div className="h-3 w-[1px] bg-emerald-300 mx-0.5" />
+          <div className="h-4 w-[1px] bg-slate-300 mx-1" />
 
-              {/* Column Controls */}
-              <button
-                type="button"
-                onClick={() => editor.chain().focus().addColumnBefore().run()}
-                className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-medium cursor-pointer"
-                title="Add Column Left"
-              >
-                <Plus size={12} /><Columns size={12} /> Col (+)
-              </button>
-              <button
-                type="button"
-                onClick={() => editor.chain().focus().deleteColumn().run()}
-                className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded font-medium cursor-pointer"
-                title="Delete Column"
-              >
-                <Minus size={12} /><Columns size={12} /> Col (-)
-              </button>
+          {/* ALWAYS VISIBLE Table & Cell Controls */}
+          <div className="flex flex-wrap items-center gap-1 bg-emerald-50/90 px-2 py-1 rounded border border-emerald-300">
+            <span className="text-[10px] font-bold text-emerald-800 uppercase mr-1">Table Tools:</span>
+            
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().addRowBefore().run()}
+              className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-medium cursor-pointer"
+              title="Add Row Above"
+            >
+              <Plus size={12} /><Rows size={12} /> Row (+)
+            </button>
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().deleteRow().run()}
+              className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded font-medium cursor-pointer"
+              title="Delete Row"
+            >
+              <Minus size={12} /><Rows size={12} /> Row (-)
+            </button>
 
-              <div className="h-3 w-[1px] bg-emerald-300 mx-0.5" />
+            <div className="h-3 w-[1px] bg-emerald-300 mx-0.5" />
 
-              {/* Delete Entire Table */}
-              <button
-                type="button"
-                onClick={() => editor.chain().focus().deleteTable().run()}
-                className="p-1 text-red-600 hover:bg-red-200 rounded flex items-center gap-1 text-[11px] font-semibold px-1.5 cursor-pointer"
-                title="Delete Entire Table"
-              >
-                <Trash2 size={13} /> Drop Table
-              </button>
-            </div>
-          )}
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().addColumnBefore().run()}
+              className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-medium cursor-pointer"
+              title="Add Column Left"
+            >
+              <Plus size={12} /><Columns size={12} /> Col (+)
+            </button>
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().deleteColumn().run()}
+              className="px-1.5 py-1 hover:bg-rose-100 text-rose-700 text-[11px] flex items-center gap-0.5 rounded font-medium cursor-pointer"
+              title="Delete Column"
+            >
+              <Minus size={12} /><Columns size={12} /> Col (-)
+            </button>
+
+            <div className="h-3 w-[1px] bg-emerald-300 mx-0.5" />
+
+            {/* Merge / Split Cells */}
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().mergeCells().run()}
+              className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-bold cursor-pointer"
+              title="Merge Selected Cells"
+            >
+              <Merge size={12} /> Merge
+            </button>
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().splitCell().run()}
+              className="px-1.5 py-1 hover:bg-emerald-200 text-[11px] flex items-center gap-0.5 rounded text-emerald-900 font-medium cursor-pointer"
+              title="Split Cell"
+            >
+              <Split size={12} /> Split
+            </button>
+
+            <div className="h-3 w-[1px] bg-emerald-300 mx-0.5" />
+
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().deleteTable().run()}
+              className="p-1 text-red-600 hover:bg-red-200 rounded flex items-center gap-1 text-[11px] font-semibold px-1.5 cursor-pointer"
+              title="Delete Entire Table"
+            >
+              <Trash2 size={13} /> Drop
+            </button>
+          </div>
 
           <div className="h-4 w-[1px] bg-slate-300 mx-1 ml-auto" />
 

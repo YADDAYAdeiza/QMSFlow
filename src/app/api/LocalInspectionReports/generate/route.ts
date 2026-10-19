@@ -91,11 +91,13 @@ export async function POST(request: Request) {
       : "General Finished Product Manufacturing Line";
 
     // Reusable signature card generator with 12px max-height constraint
+  // Reusable signature card generator with 12px max-height constraint
     const renderSignatureCard = (name: string, role: string, sigUrl?: string, isSigned: boolean = false) => {
+      // Set visibility to hidden by default upon initial AI generation
       const sigGraphic = sigUrl
-  ? `<img src="${sigUrl}" alt="${name} Signature" class="signature-img" data-signed="true" style="max-height:45px; width:auto; margin:0 auto; display:block; visibility:visible;" />`
-  : `<span style="font-size:10px; color:#94a3b8; font-style:italic;">[Not Signed]</span>`;
-  
+        ? `<img src="${sigUrl}" alt="${name} Signature" class="signature-img" data-signed="false" style="max-height:45px; width:auto; margin:0 auto; display:block; visibility:hidden;" />`
+        : `<span style="font-size:10px; color:#94a3b8; font-style:italic;">[Not Signed]</span>`;
+      
       return `
         <td data-card-name="${name.trim().toLowerCase()}" style="width:48%; vertical-align:bottom; border:none; padding:12px; box-sizing:border-box;">
           <div style="border-bottom:1px solid #0f172a; min-height:36px; margin-bottom:4px; text-align:center; display:flex; align-items:flex-end; justify-content:center;">
