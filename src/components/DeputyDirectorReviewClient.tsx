@@ -15,15 +15,12 @@ import RejectionModal from '@/components/RejectionModal';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
 import { ClearanceLetterAMS } from "@/components/documents/ClearanceLetter-AMS"; 
 import { GmpCertificate } from "@/components/documents/GmpCertificate";
-import { createClient } from "@/utils/supabase/client";
-
-const supabase = createClient();
 
 function SafeTimestamp({ timestamp }: { timestamp?: string }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   if (!mounted || !timestamp) return <span>--:--</span>;
-  return <span>new Date(timestamp).toLocaleTimeString()</span>;
+  return <span>{new Date(timestamp).toLocaleTimeString()}</span>;
 }
 
 export default function DeputyDirectorReviewClient({ app, staffList = [], loggedInUserId }: any) {
@@ -71,16 +68,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
     hasStaffSubmission ? 'report' : 'dossier'
   );
 
-  // Safe storage path resolver for iframe preview
-  const rawIframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
-  const iframeSrc = useMemo(() => {
-    if (!rawIframeSrc) return '';
-    if (!rawIframeSrc.startsWith('http')) {
-      const { data } = supabase.storage.from('documents').getPublicUrl(rawIframeSrc);
-      return data.publicUrl;
-    }
-    return rawIframeSrc;
-  }, [rawIframeSrc]);
+  const iframeSrc = viewMode === 'report' ? staffReportUrl : poaUrl;
 
   const currentPoint = app?.currentPoint || '';
   const currentStatus = app?.status || '';
@@ -161,7 +149,7 @@ export default function DeputyDirectorReviewClient({ app, staffList = [], logged
 
     // --- INTEGRATED HUMAN-AGENCY PAYMENT DATE & 3-YEAR EXPIRY CALCULATION ---
     const manualPaymentDate = appDetails.fullPaymentDate;
-    const isDeskReview = Boolean(manualPaymentDate);
+    const isDeskReview = appDetails.isDeskReview ?? Boolean(manualPaymentDate);
 
     let formattedPaymentDate = undefined;
     let calculatedExpiryDate = undefined;

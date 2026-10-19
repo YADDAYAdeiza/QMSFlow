@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
 import { 
   Loader2, RotateCcw, ShieldCheck, 
-  FileText, CheckCircle2, FileSearch, AlertTriangle, ShieldAlert, CheckCircle, Cpu, Play, Calendar, DollarSign, Sparkles
+  FileText, CheckCircle2, FileSearch, AlertTriangle, ShieldAlert, CheckCircle, Cpu, Play, Calendar, DollarSign
 } from 'lucide-react';
 import { issueFinalClearance } from '@/lib/actions/director';
 import { ClearanceLetter } from "@/components/documents/ClearanceLetter";
@@ -92,16 +92,17 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     const manualPaymentDate = details.fullPaymentDate;
     const aiPaymentDate = forensicResult?.fullPaymentDate;
     const aiExpiryDate = forensicResult?.expiryDate;
+    const aiIsDeskReview = forensicResult?.isDeskReview ?? false;
 
     let fullPaymentDate = undefined;
     let expiryDate = undefined;
     let isDeskReview = false;
 
-    // OVERRIDE LOGIC: If toggle is ON and AI result exists, AI overrides. Otherwise, defaults to human input.
+    // OVERRIDE LOGIC: If toggle is ON and AI result exists, AI overrides. Otherwise, defaults to human input / standard rules.
     if (isInjected && aiPaymentDate) {
       fullPaymentDate = aiPaymentDate;
       expiryDate = aiExpiryDate;
-      isDeskReview = true;
+      isDeskReview = aiIsDeskReview;
     } else if (manualPaymentDate) {
       const parsedDate = new Date(manualPaymentDate);
       fullPaymentDate = !isNaN(parsedDate.getTime()) 
@@ -155,18 +156,11 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
   }, [app, details, isInspection, complianceRisk, forensicResult, isInjected]);
 
   const iframeSrc = useMemo(() => {
-    let rawUrl = '';
-    if (viewMode === 'dossier') {
-      rawUrl = pdfUrl || details.poaUrl || '';
-    } else if (viewMode === 'preview') {
-      rawUrl = details.verificationReportUrl || details.finalRecommendationReport || details.technicalAssessmentUrl || '';
+    if (viewMode === 'dossier') return pdfUrl || details.poaUrl;
+    if (viewMode === 'preview') {
+      return details.verificationReportUrl || details.finalRecommendationReport || details.technicalAssessmentUrl || null;
     }
-
-    if (rawUrl && !rawUrl.startsWith('http')) {
-      const { data } = supabase.storage.from('documents').getPublicUrl(rawUrl);
-      return data.publicUrl;
-    }
-    return rawUrl;
+    return null;
   }, [viewMode, pdfUrl, details]);
 
   const handleApprove = async () => {
@@ -180,13 +174,7 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     setProcessing(true);
     try {
       const blob = await pdf(docConfig.component).toBlob();
-      
-      const fileName = `${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
-      const targetFolder = isInspection ? '03_Certificates' : '06_Facility_Verification';
-      
-      const sanitize = (val: string) => val.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-      const cleanCompanyId = app.companyId ? sanitize(String(app.companyId)) : 'unassigned';
-      const path = `companies/${cleanCompanyId}/${app.applicationNumber}/${targetFolder}/${fileName}`;
+      const path = `Final_Outputs/${app.applicationNumber}/${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
       
       const { error: uploadError } = await supabase.storage.from('documents').upload(path, blob);
       if (uploadError) throw uploadError;

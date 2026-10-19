@@ -53,6 +53,18 @@ export async function POST(request: Request) {
       throw new Error("Missing mandatory application_id parameter.");
     }
 
+    // 1. FETCH DATABASE RECORD IMMEDIATELY (Before AI generation to avoid pooler timeout)
+    const numericId = Number(application_id);
+    const appRecord = await db.query.applications.findFirst({
+      where: eq(applications.id, numericId)
+    });
+
+    if (!appRecord) {
+      throw new Error(`Application record with ID ${application_id} could not be resolved.`);
+    }
+
+    const currentDetails = (appRecord.details as any) || {};
+
     // Site metadata fallbacks
     const effectiveCompanyName = inspected_site_name || company_name || payload?.inspected_site_details?.name || "Registered Establishment";
     const effectiveAddress = facility_address || inspected_site_address || payload?.facilityAddress || payload?.inspected_site_details?.address || "Registered Facility Address";
@@ -73,11 +85,10 @@ export async function POST(request: Request) {
     const formattedCoInspectors = coInspectorsList.length > 0 ? coInspectorsList.join(", ") : "None";
     const formattedTrainees = traineesList.length > 0 ? traineesList.join(", ") : "None";
 
-    const docNo = report_doc_number || "NAFDAC/VMD/GMP/873821/2026";
-    const auditDate = inspection_dates || "2026-08-10";
+    const docNo = report_doc_number || `TWL-LAG-RI-01-${new Date().getFullYear()}`;
+    const auditDate = inspection_dates || "3rd March, 2026";
 
     // Format Product Lines into readable text for AI context
- // Format Product Lines into readable text for AI context
     const formattedProductLines = Array.isArray(effectiveProductLines) && effectiveProductLines.length > 0
       ? effectiveProductLines.map((line: any, idx: number) => {
           if (typeof line === "string") return line;
@@ -90,14 +101,12 @@ export async function POST(request: Request) {
         }).join(" | ")
       : "General Finished Product Manufacturing Line";
 
-    // Reusable signature card generator with 12px max-height constraint
-  // Reusable signature card generator with 12px max-height constraint
-    const renderSignatureCard = (name: string, role: string, sigUrl?: string, isSigned: boolean = false) => {
-      // Set visibility to hidden by default upon initial AI generation
+    // Reusable signature card generator adhering to Turner Wright layout structure
+    const renderSignatureCard = (name: string, role: string, sigUrl?: string) => {
       const sigGraphic = sigUrl
         ? `<img src="${sigUrl}" alt="${name} Signature" class="signature-img" data-signed="false" style="max-height:45px; width:auto; margin:0 auto; display:block; visibility:hidden;" />`
-        : `<span style="font-size:10px; color:#94a3b8; font-style:italic;">[Not Signed]</span>`;
-      
+        : `<span style="font-size:10px; color:#94a3b8; font-style:italic;">[Signature Pending]</span>`;
+  
       return `
         <td data-card-name="${name.trim().toLowerCase()}" style="width:48%; vertical-align:bottom; border:none; padding:12px; box-sizing:border-box;">
           <div style="border-bottom:1px solid #0f172a; min-height:36px; margin-bottom:4px; text-align:center; display:flex; align-items:flex-end; justify-content:center;">
@@ -110,15 +119,12 @@ export async function POST(request: Request) {
       `;
     };
 
- // Track populated names to avoid duplicates in sign-off table
+    // Track populated names to avoid duplicates in sign-off table
     const processedNames = new Set<string>();
     const allSignCards: string[] = [];
 
-    // Helper to perform a robust case-insensitive, whitespace-trimmed lookup in the signatures map
     const findSignatureForPerson = (name: string, sigs: Record<string, string>) => {
       if (!name) return "";
-      console.log('Name: ', name);
-      console.log('Name: ', 'Ali');
       const cleanName = name.trim().toLowerCase();
       for (const [key, val] of Object.entries(sigs)) {
         if (key.trim().toLowerCase() === cleanName) {
@@ -129,37 +135,30 @@ export async function POST(request: Request) {
     };
 
     // 1. Lead Inspector
-const resolvedLeadSig = lead_inspector_signature_url || lead_signature_url || findSignatureForPerson(leadName, signatures);
-if (leadName && leadName !== "Unassigned") {
-  allSignCards.push(
-    renderSignatureCard(leadName, "Lead Inspector, Regulatory Inspection Directorate", resolvedLeadSig, false)
-  );
-  processedNames.add(leadName);
-}
+    const resolvedLeadSig = lead_inspector_signature_url || lead_signature_url || findSignatureForPerson(leadName, signatures);
+    if (leadName && leadName !== "Unassigned") {
+      allSignCards.push(renderSignatureCard(leadName, "Lead Inspector, VMAP/IRSD", resolvedLeadSig));
+      processedNames.add(leadName);
+    }
 
-// 2. Co-Inspectors
-coInspectorsList.forEach((inspectorName) => {
-  if (!processedNames.has(inspectorName)) {
-    const sigUrl = findSignatureForPerson(inspectorName, signatures);
-    allSignCards.push(
-      renderSignatureCard(inspectorName, "Co-Inspector, Regulatory Inspection Directorate", sigUrl, false)
-    );
-    processedNames.add(inspectorName);
-  }
-});
+    // 2. Co-Inspectors
+    coInspectorsList.forEach((inspectorName) => {
+      if (!processedNames.has(inspectorName)) {
+        const sigUrl = findSignatureForPerson(inspectorName, signatures);
+        allSignCards.push(renderSignatureCard(inspectorName, "Co-Inspector, VMAP", sigUrl));
+        processedNames.add(inspectorName);
+      }
+    });
 
-// 3. Trainee Inspectors
-traineesList.forEach((traineeName) => {
-  if (!processedNames.has(traineeName)) {
-    const sigUrl = findSignatureForPerson(traineeName, signatures);
-    allSignCards.push(
-      renderSignatureCard(traineeName, "Trainee Inspector / Observer", sigUrl, false)
-    );
-    processedNames.add(traineeName);
-  }
-});
+    // 3. Trainee Inspectors
+    traineesList.forEach((traineeName) => {
+      if (!processedNames.has(traineeName)) {
+        const sigUrl = findSignatureForPerson(traineeName, signatures);
+        allSignCards.push(renderSignatureCard(traineeName, "Trainee Inspector / Observer", sigUrl));
+        processedNames.add(traineeName);
+      }
+    });
 
-    // Group signature cards into 2-column HTML rows
     let dynamicSignoffTableRows = "";
     for (let i = 0; i < allSignCards.length; i += 2) {
       const card1 = allSignCards[i];
@@ -176,8 +175,8 @@ traineesList.forEach((traineeName) => {
 
     const dynamicSignoffBlockHtml = `
       <tr>
-        <td style="border:1px solid #1e293b; padding:24px 16px; page-break-inside:avoid;">
-          <p style="font-weight:bold; font-size:12px; margin-bottom:16px; color:#0f172a; text-transform:uppercase;">REPORT SIGN-OFF & APPROVAL</p>
+        <td style="border:1px solid #1e293b; padding:24px 16px; page-break-inside:avoid; background-color:#ffffff;">
+          <p style="font-weight:bold; font-size:12px; margin-bottom:16px; color:#0f172a; text-transform:uppercase;">SIGNATURES AND DATE</p>
           <table style="width:100%; border-collapse:collapse; border:none;">
             ${dynamicSignoffTableRows}
           </table>
@@ -187,119 +186,83 @@ traineesList.forEach((traineeName) => {
 
     const systemPrompt = `
 You are an expert NAFDAC Veterinary Medicine and Allied Products (VMAP) / Drug Evaluation and Research (DER) Directorate AI Assistant.
-Your task is to process raw field inspection logs and synthesize them into HTML table rows conforming strictly to SOP Ref. No. VMAP-800-03 / DER-800-06.
+Your task is to synthesize raw inspection checklist inputs into clean HTML table rows that conform precisely to the official NAFDAC GMP Inspection Report format (Annexure-2, SOP Ref. No. DER-800-03 / VMAP-800-03), mirroring the layout structure of the Turner Wright official audit report.
 
 OUTPUT FORMAT INSTRUCTIONS:
-- Do NOT output <html>, <head>, <body>, or the wrapper <table> tags.
-- Output ONLY the <tr> table rows for Sections 1 through 5 listed below.
-- Do NOT include Section 6 (Sign-Off Block) as it will be appended programmatically.
+- Do NOT output <html>, <head>, <body>, or top-level wrapper <table> tags.
+- Output ONLY valid <tr> table rows representing the report sections specified below.
+- Do NOT include the Sign-Off block row as it will be appended programmatically.
+- Use clean inline CSS styling (font-family: Arial, sans-serif; font-size: 11px; line-height: 1.4; color: #111;) to match standard NAFDAC official document aesthetics.
 
-ROW LAYOUT REQUIREMENTS:
+REQUIRED SECTIONS AS TR ROWS:
 
-1. COVER PAGE ROW (SINGLE CELL - PAGE BREAK AFTER):
-Generate a <tr> containing a single cell (\`<td style="border:1px solid #1e293b; padding:40px 24px; min-height:1050px; height:1050px; vertical-align:space-between; page-break-after:always; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">\`) formatted as:
-   A. UPPER THIRD:
-      - NAFDAC Logo: \`<img src="/nafdac_logo2-removebg-preview.png" alt="NAFDAC Logo" style="height:48px; width:auto; margin:0 auto 8px auto; display:block;" />\`
-      - Header block:
-        <h2 style="font-size:13px; font-weight:bold; margin:4px 0; text-transform:uppercase; text-align:center;">NATIONAL AGENCY FOR FOOD AND DRUG ADMINISTRATION AND CONTROL (NAFDAC)</h2>
-        <h3 style="font-size:12px; font-weight:bold; margin:2px 0; text-transform:uppercase; text-align:center; color:#334155;">VETERINARY MEDICINE AND ALLIED PRODUCTS (VMAP) / DRUG EVALUATION AND RESEARCH (DER) DIRECTORATE</h3>
-        <h1 style="font-size:15px; font-weight:bold; margin:16px 0 0 0; text-transform:uppercase; text-align:center; text-decoration:underline;">GOOD MANUFACTURING PRACTICE (GMP) INSPECTION REPORT</h1>
-        <h2 style="font-size:14px; font-weight:bold; margin:8px 0; text-transform:uppercase; text-align:center; color:#0f766e;">${effectiveCompanyName}</h2>
-   B. MIDDLE THIRD:
-      <div style="text-align:center; margin:120px 0;">
-        <p style="font-size:13px; font-weight:bold; margin:4px 0;">ANNEXURE IV: GMP INSPECTION REPORT</p>
-        <p style="font-size:12px; font-weight:bold; color:#475569; margin:2px 0;">SOP Ref. No. VMAP-800-03 / DER-800-06</p>
-      </div>
-   C. BOTTOM THIRD:
-      <div style="width:100%; text-align:center; font-size:11px; line-height:1.6; border-top:1px solid #cbd5e1; padding-top:16px; margin-top:auto;">
-        <p style="margin:2px 0;"><strong>Doc No:</strong> ${docNo}</p>
-        <p style="margin:2px 0;"><strong>Inspection Date:</strong> ${auditDate}</p>
-        <p style="margin:2px 0;"><strong>Distribution List:</strong> NAFDAC DG, Director VMAP/DER, Director NDD, Director Enforcement, Inspectorate, Head of Establishment.</p>
-      </div>
+1. COVER PAGE / HEADER BLOCK ROW:
+   - Top banner: <div style="font-size: 10px; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 12px;">Annexure - 2 | SOP Ref. No. DER-800-03 &nbsp;|&nbsp; Title: VMAP Pharmaceutical GMP Inspection Report Format</div>
+   - NAFDAC Header block:
+     * Logo image: <img src="/nafdac_logo2-removebg-preview.png" alt="NAFDAC Logo" style="height: 50px; width: auto; margin: 0 auto 8px auto; display: block;" />
+     * <h2 style="font-size: 12px; font-weight: bold; text-align: center; margin: 2px 0; text-transform: uppercase;">NATIONAL AGENCY FOR FOOD AND DRUG ADMINISTRATION AND CONTROL (NAFDAC)</h2>
+     * <h3 style="font-size: 11px; font-weight: bold; text-align: center; margin: 2px 0; text-transform: uppercase; color: #334155;">DRUG EVALUATION AND RESEARCH (DER) / VMAP DIRECTORATE</h3>
+     * <h1 style="font-size: 14px; font-weight: bold; text-align: center; margin: 12px 0 4px 0; text-transform: uppercase; text-decoration: underline;">GOOD MANUFACTURING PRACTICE (GMP) INSPECTION REPORT</h1>
+     * <h2 style="font-size: 13px; font-weight: bold; text-align: center; margin: 4px 0 16px 0; color: #0f766e;">${effectiveCompanyName}</h2>
+   - Metadata Block Table (Audited Establishment, Audit Date, Report Doc No, Distribution List).
 
-2. GENERAL INFORMATION ROW:
-   - Internal nested table summarizing Establishment details, Physical Address, Inspection Type, Product Lines evaluated.
-   - Include full Inspection Team:
-     * Lead Inspector: ${formattedLead}
-     * Co-Inspectors: ${formattedCoInspectors}
-     * Trainee Inspectors / Observers: ${formattedTrainees}
+2. GENERAL INFORMATION & INSPECTION SCOPE ROW:
+   - Inspected site details (Factory Site, Corporate Head Office, Contact phone, E-mail, Website).
+   - Activities carried out by company (Checklist items evaluated).
+   - Inspection details table (Date of Inspection, Type of Inspection, Inspection Team members: Lead, Co-Inspectors, Trainees, References).
 
-3. QUALITY SYSTEMS NARRATIVE ROW:
-   - Expand each quality system into full, multi-paragraph objective technical narratives:
-     * 1. Pharmaceutical Quality System (PQS)
-     * 2. Personnel & Training
-     * 3. Premises & Equipment
-     * 4. Qualification & Validation
-     * 5. Material Management & Production
-     * 6. Laboratory Control / Quality Control
+3. INTRODUCTION & NARRATIVE EVALUATION ROW:
+   - Detailed professional introduction of the establishment, marketing authorizations, and scope of inspection using the 6 Quality System Inspection Technique (QSIT).
 
-4. DEFICIENCIES MATRIX ROW:
-   - Nested table detailing non-conformances split into Critical, Major, and Other categories.
+4. INSPECTED AREAS & QUALITY SYSTEMS OBSERVATIONS ROW (SECTIONS 1 TO 8):
+   - Detailed breakdown of inspected areas (Warehouses, Production lines, QC Laboratory, Utilities).
+   - Structured observations and findings for all 6 core quality systems:
+     1. Pharmaceutical Quality System (PQS) [Score: ${pqs_score}%]
+     2. Personnel & Training [Score: ${personnel_score}%]
+     3. Premises & Equipment [Score: ${premises_equipment_score}%]
+     4. Qualification & Validation [Score: ${qualification_validation_score}%]
+     5. Material Management [Score: ${material_management_score}%]
+     6. Laboratory Control / QC [Score: ${laboratory_control_score}%]
 
-5. RECOMMENDATION & CONCLUSION ROW:
-   - Table row detailing the adjudication stance, CAPA timeline requirement (14 working days), root cause mandate, and renewal terms.
+5. DEFICIENCIES MATRIX ROW:
+   - A structured HTML table listing non-conformances classified into Critical, Major, and Other categories, referencing relevant NAFDAC/cGMP regulations.
+
+6. RECOMMENDATIONS, SUMMARY & CONCLUSION ROW:
+   - Final adjudication recommendation, CAPA timelines (14 working days), and summary statement on manufacturing capacity.
 `;
 
     const userInstructions = `
-Generate the detailed expanded tabular HTML report rows using this raw snapshot:
+Generate the complete official tabular HTML report rows using this live inspection snapshot:
 
-[DOCUMENT & SITE METADATA]
-- Report Doc Number: 
-${docNo}
-- Inspection Dates: 
-${auditDate}
-- Inspection Type: 
-${type_of_inspection || "Routine GMP Inspection"}
-- Establishment / Site Name: 
-${effectiveCompanyName}
-- Facility Physical Address: 
-${effectiveAddress}
-- Evaluated Scope & Product Lines: 
-${formattedProductLines}
-- Scope of Activities: 
-${Array.isArray(activities_carried_out) ? activities_carried_out.join(", ") : activities_carried_out || "Manufacturing operations as declared"}
-- Vicinity/Environmental Assessment: 
-${vicinity_assessment || "No environmental anomalies flagged."}
+[ESTABLISHMENT & METADATA]
+- Report Doc Number: ${docNo}
+- Audit Date: ${auditDate}
+- Type of Inspection: ${type_of_inspection || "Routine Inspection"}
+- Establishment Name: ${effectiveCompanyName}
+- Facility Address: ${effectiveAddress}
+- Evaluated Product Lines: ${formattedProductLines}
+- Activities Carried Out: ${Array.isArray(activities_carried_out) ? activities_carried_out.join(", ") : activities_carried_out || "Finished Product Manufacturing"}
+- Vicinity Assessment: ${vicinity_assessment || "No environmental anomalies noted."}
 
 [INSPECTION TEAM]
-- Lead Inspector: 
-${formattedLead}
-- Co-Inspectors: 
-${formattedCoInspectors}
-- Trainee Inspectors: 
-${formattedTrainees}
+- Lead Inspector: ${formattedLead}
+- Co-Inspectors: ${formattedCoInspectors}
+- Trainee Inspectors: ${formattedTrainees}
 
-[6 QUALITY SYSTEMS OBSERVATIONS TO EXPAND IN DETAIL]
-1. Pharmaceutical Quality System (Score: 
-${pqs_score ?? "N/A"}%):
-   - Notes/Observations: ${pqs_notes || "Compliant baseline parameters."}
+[QUALITY SYSTEMS SCORES & NOTES]
+1. Pharmaceutical Quality System (Score: ${pqs_score ?? 100}%): ${pqs_notes || "Compliant baseline parameters observed."}
+2. Personnel & Training (Score: ${personnel_score ?? 100}%): ${personnel_notes || "Staff qualifications verified."}
+3. Premises & Equipment (Score: ${premises_equipment_score ?? 100}%): ${premises_equipment_notes || "Facility layouts and HVAC systems checked."}
+4. Qualification & Validation (Score: ${qualification_validation_score ?? 100}%): ${qualification_validation_notes || "Protocols and validation status reviewed."}
+5. Material Management (Score: ${material_management_score ?? 100}%): ${material_management_notes || "Warehouse and storage controls satisfactory."}
+6. Laboratory Control (Score: ${laboratory_control_score ?? 100}%): ${laboratory_control_notes || "QC instrumentation and testing records verified."}
 
-2. Personnel & Training (Score: ${personnel_score ?? "N/A"}%):
-   - Notes/Observations: ${personnel_notes || "Staff layout compliant."}
-
-3. Premises & Equipment (Score: ${premises_equipment_score ?? "N/A"}%):
-   - Notes/Observations: ${premises_equipment_notes || "Flow structures acceptable."}
-
-4. Qualification & Validation (Score: ${qualification_validation_score ?? "N/A"}%):
-   - Notes/Observations: ${qualification_validation_notes || "Protocols verified."}
-
-5. Material Management (Score: ${material_management_score ?? "N/A"}%):
-   - Notes/Observations: ${material_management_notes || "Warehouse criteria satisfied."}
-
-6. Laboratory Control / QC (Score: ${laboratory_control_score ?? "N/A"}%):
-   - Notes/Observations: ${laboratory_control_notes || "Screening thresholds checked."}
-
-[SYNTHESIS AGGREGATES]
-- Critical Deficiencies: 
-${critical_count ?? 0}
-- Major Deficiencies: 
-${major_count ?? 0}
-- Other Deficiencies: 
-${other_count ?? 0}
-- Logged Non-Conformances: 
-${JSON.stringify(observations || [])}
-- Final Adjudication Stance: 
-${final_recommendation || "CAPA PENDING"}
+[DEFICIENCIES & ADJUDICATION]
+- Critical Deficiencies Count: ${critical_count ?? 0}
+- Major Deficiencies Count: ${major_count ?? 0}
+- Other Deficiencies Count: ${other_count ?? 0}
+- Logged Observations: ${JSON.stringify(observations || [])}
+- Final Recommendation Stance: ${final_recommendation || "APPROVED"}
 `;
 
     const response = await ai.models.generateContent({
@@ -311,26 +274,14 @@ ${final_recommendation || "CAPA PENDING"}
 
     const aiGeneratedRows = response.text || "<tr><td>Error generating narrative report rows.</td></tr>";
 
-    // Combine AI-generated rows and Programmatic Sign-Off Block inside Master Table
     const finalMasterTableHtml = `
-      <table style="width:100%; border-collapse:collapse; border:1px solid #1e293b; font-family: Arial, sans-serif;">
+      <table style="width:100%; border-collapse:collapse; border:1px solid #1e293b; font-family: Arial, sans-serif; background-color: #ffffff;">
         ${aiGeneratedRows}
         ${dynamicSignoffBlockHtml}
       </table>
     `;
 
-    const numericId = Number(application_id);
-    const appRecord = await db.query.applications.findFirst({
-      where: eq(applications.id, numericId)
-    });
-
-    if (!appRecord) {
-      throw new Error(`Application record with ID ${application_id} could not be resolved.`);
-    }
-
-    const currentDetails = (appRecord.details as any) || {};
-
-    // Save compiled HTML directly to application details so reloads pick up fresh content
+    // 2. SAVE BACK TO DATABASE (Fresh transaction/write call after AI generation)
     await db.update(applications)
       .set({
         updatedAt: new Date(),

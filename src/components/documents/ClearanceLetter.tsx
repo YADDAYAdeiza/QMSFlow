@@ -156,7 +156,7 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
           You shall be communicated in due course by the Agency for the physical inspection of the facility.
         </Text>
 
-        {/* ONLY DISPLAY WARNING BLOCK IF AUDIT CONFIRMS DESK REVIEW */}
+        {/* ONLY DISPLAY WARNING BLOCK IF AUDIT CONFIRMS DESK REVIEW
         {data.isDeskReview && (
           <View style={styles.warningBox}>
             <Text style={styles.warningText}>
@@ -166,7 +166,19 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
               This review does not extend an independent 3-year window from the current review date.
             </Text>
           </View>
-        )}
+        )} */}
+
+        {/* DUAL-VARIANT VALIDITY NOTICE BOX */}
+        <View style={styles.warningBox}>
+          <Text style={styles.warningText}>
+            {data.isDeskReview ? (
+              `NOTICE OF VALIDITY: Please note that this approval is processed via Desk Review based on a prior facility payment. In accordance with Agency guidelines, the 3-year validity lifecycle of this GMP status counts strictly from the date of the original Full Payment ${hasExactDates ? `(Recorded: ${data.fullPaymentDate}) and expires precisely on${data.expiryDate}` : 'and maintains a strict 3-year validity window from the original payment baseline'}. This review does not extend an independent 3-year window from the current review date.`
+            ) : (
+              `NOTICE OF VALIDITY: Please note that this approval is granted following full payment verification. In accordance with Agency guidelines, the GMP status maintains a strict 3-year validity window starting from the issuance date of this clearance letter.`
+            )}
+          </Text>
+        </View>
+
 
         <View style={styles.signatureBlockWrapper}>
           <Text>Thank you.</Text>
