@@ -1,7 +1,7 @@
 // @/app/dashboard/local-reports/[id]/page.tsx
 import { db } from "@/db";
-import { applications, companies, qmsTimelines, inspectionSchedules, inspectionTeamAssignments, users as dbUsers } from "@/db/schema";
-import { eq, desc, and, or, inArray } from "drizzle-orm";
+import { applications, companies, qmsTimelines, inspectionSchedules, inspectionTeamAssignments } from "@/db/schema";
+import { eq, desc } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import GMPReportWorkspace from "@/components/LocalInspectionReports/GMPReportWorkspace";
@@ -12,7 +12,6 @@ export type StepKey =
   | "DDD_TECHNICAL_ASSIGNMENT"
   | "LOD"
   | "DIRECTOR_INTAKE"
-  | "DDD_TECHNICAL_REVIEW"
   | "DDD_IRSD_INTAKE"
   | "IRSD_STAFF_VETTING"
   | "DDD_IRSD_REVIEW"
@@ -24,7 +23,6 @@ const VALID_STEP_KEYS: StepKey[] = [
   "DDD_TECHNICAL_ASSIGNMENT",
   "LOD",
   "DIRECTOR_INTAKE",
-  "DDD_TECHNICAL_REVIEW",
   "DDD_IRSD_INTAKE",
   "IRSD_STAFF_VETTING",
   "DDD_IRSD_REVIEW",
@@ -199,15 +197,21 @@ export default async function LocalReportPage({ params, searchParams }: PageProp
   const coInspectorsFormatted = coInspectorNames.join(", ");
   const traineeInspectorsFormatted = traineeInspectorNames.join(", ");
 
-  // 3. Fetch public global user configuration for current active user
-  const userData = await supabase
+  // 3. Fetch public global user configuration for current active user safely
+  const { data: userData } = await supabase
     .from("users")
     .select("name, role, signature_url")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
-  const authenticatedUserSessionName = userData.data?.name || user.email || "Authenticated User";
-  const rawBaseRole = userData.data?.role || "Staff";
+  // Ensure authenticatedUserSessionName matches what is stored in teamUsersData/teamAssignments
+  const authenticatedUserSessionName = 
+    userProfilesMap[user.id] || 
+    userData?.name || 
+    user.email || 
+    "Authenticated User";
+
+  const rawBaseRole = userData?.role || "Staff";
   
   // Normalize role string to handle "DDD" -> "Divisional Deputy Director" formatting
   const structuralBaseRole = rawBaseRole.includes("DDD") 
@@ -356,7 +360,7 @@ export default async function LocalReportPage({ params, searchParams }: PageProp
         report_doc_number: application.applicationNumber || `NAFDAC/VMD/GMP/${application.id}/2026`,
         final_recommendation: "PENDING"
       };
-console.log('traineeInspectorsFormatted: ', traineeInspectorsFormatted);
+
   return (
     <div className="bg-slate-50 min-h-screen py-6">
       <GMPReportWorkspace 

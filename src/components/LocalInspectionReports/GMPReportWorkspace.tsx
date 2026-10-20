@@ -313,7 +313,7 @@ const handleClientSignDocument = () => {
     }
 
     const currentUserName = expectedUserRaw.trim().toLowerCase();
-    console.log("Toggling signature for user:", currentUserName);
+    console.log("Attempting electronic signature for authenticated user:", currentUserName);
 
     const editorContainer = document.querySelector('.ProseMirror');
     if (!editorContainer) {
@@ -325,25 +325,19 @@ const handleClientSignDocument = () => {
     let toggled = false;
 
     for (const td of Array.from(cells)) {
-      // Check if this specific cell contains the user's name text
-      if (td.textContent && td.textContent.toLowerCase().includes(currentUserName)) {
+      // Ensure we match the exact card name attribute or text content
+      const cardName = td.getAttribute('data-card-name');
+      if (cardName && cardName.includes(currentUserName)) {
         const img = td.querySelector('img');
         if (img) {
           const isSigned = img.getAttribute('data-signed') === 'true';
 
-          if (isSigned) {
-            img.style.visibility = 'hidden';
-            img.setAttribute('data-signed', 'false');
-            console.log("Signature toggled to HIDDEN for:", currentUserName);
-          } else {
-            img.style.visibility = 'visible';
-            img.style.display = 'block';
-            img.setAttribute('data-signed', 'true');
-            console.log("Signature toggled to VISIBLE for:", currentUserName);
-          }
+          img.style.visibility = isSigned ? 'hidden' : 'visible';
+          img.style.display = isSigned ? 'none' : 'block';
+          img.setAttribute('data-signed', isSigned ? 'false' : 'true');
           
           toggled = true;
-          break; // STOP searching immediately after updating the user's unique signature block!
+          break; 
         }
       }
     }
@@ -351,17 +345,12 @@ const handleClientSignDocument = () => {
     if (toggled) {
       const freshHtml = editorContainer.innerHTML;
       setReportHtml(freshHtml);
-
-      const updatedSnapshot = {
-        ...checklistSnapshot,
-        compiledReportHtml: freshHtml
-      };
+      const updatedSnapshot = { ...checklistSnapshot, compiledReportHtml: freshHtml };
       setChecklistSnapshot(updatedSnapshot);
       handleSaveDraft(updatedSnapshot, true);
-
-      alert(`Signature visibility successfully toggled for ${expectedUserRaw}!`);
+      alert(`Signature successfully toggled for ${expectedUserRaw}!`);
     } else {
-      alert("Could not locate your signature block in the document.");
+      alert(`Could not locate a signature block matching user "${expectedUserRaw}" in the document.`);
     }
   };
 
