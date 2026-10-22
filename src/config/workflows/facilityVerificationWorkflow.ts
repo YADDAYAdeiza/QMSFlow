@@ -1,5 +1,3 @@
-// @/config/workflows/facilityVerificationWorkflow.ts
-
 export type Directorate = "VMAP" | "FSAN";
 
 export interface WorkflowStep {
@@ -144,20 +142,23 @@ export const inspectionReportWorkflows: Record<Directorate, DirectorateWorkflow>
 };
 
 /**
- * Safely resolves the workflow object with fallback to VMAP
+ * Safely resolves the workflow object with fallback to VMAP if FSAN steps are empty
  */
 export function getWorkflowByDirectorate(directorate?: string | null): DirectorateWorkflow {
-  if (directorate === "FSAN") return inspectionReportWorkflows.FSAN;
+  if (directorate === "FSAN" && inspectionReportWorkflows.FSAN?.steps && Object.keys(inspectionReportWorkflows.FSAN.steps).length > 0) {
+    return inspectionReportWorkflows.FSAN;
+  }
   return inspectionReportWorkflows.VMAP;
 }
 
 /**
- * Resolves a specific step given a directorate and current step key
+ * Resolves a specific step safely given a directorate and current step key
  */
 export function getWorkflowStep(
   directorate: string | null | undefined,
   stepKey: string
 ): WorkflowStep | null {
   const workflow = getWorkflowByDirectorate(directorate);
-  return workflow.steps[stepKey] ?? null;
+  const steps = workflow?.steps || {};
+  return steps[stepKey] ?? null;
 }

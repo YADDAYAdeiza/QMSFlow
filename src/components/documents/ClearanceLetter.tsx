@@ -174,7 +174,7 @@ export const ClearanceLetter = ({ data, userRole }: ClearanceLetterProps) => {
             {data.isDeskReview ? (
               `NOTICE OF VALIDITY: Please note that this approval is processed via Desk Review based on a prior facility payment. In accordance with Agency guidelines, the 3-year validity lifecycle of this GMP status counts strictly from the date of the original Full Payment ${hasExactDates ? `(Recorded: ${data.fullPaymentDate}) and expires precisely on${data.expiryDate}` : 'and maintains a strict 3-year validity window from the original payment baseline'}. This review does not extend an independent 3-year window from the current review date.`
             ) : (
-              `NOTICE OF VALIDITY: Please note that this approval is granted following full payment verification. In accordance with Agency guidelines, the GMP status maintains a strict 3-year validity window starting from the issuance date of this clearance letter.`
+              `NOTICE OF VALIDITY: Please note that this approval is granted following full payment verification. In accordance with Agency guidelines, the GMP status maintains a strict 3-year validity window starting from the date of payment, as reflected on the payment receipt.`
             )}
           </Text>
         </View>

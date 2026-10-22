@@ -45,8 +45,8 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
         ),
         // Pending Director Review
         eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL),
-        // Approved Logs (using INSPECTION_SCHEDULED to align with workflow config)
-        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED)
+        // Approved Logs
+        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
       )
     )
     .orderBy(desc(scheduleBatches.createdAt));
@@ -58,7 +58,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL
   );
   const approvedBatches = rawBatches.filter(
-    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED
+    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.APPROVED
   );
 
   let currentList = reworkBatches;
@@ -181,7 +181,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
                       <td className="p-4">
                         <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                            batch.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED
+                            batch.status === inspectionScheduleBatchWorkflow.statuses.APPROVED
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                               : batch.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
                               ? "bg-amber-50 text-amber-700 border-amber-200"
