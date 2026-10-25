@@ -188,6 +188,7 @@ const [currentUser, setCurrentUser] = useState({
     facilityName: initialData?.facilityName || "", 
     facilityAddress: initialData?.facilityAddress || "", 
     facilityType: initialData?.facilityType || "Pharma",
+    country: initialData?.country || "", // <-- Added country default value
     latitude: initialData?.latitude || "",
     longitude: initialData?.longitude || "",
     siteScope: initialData?.siteScope || "New Manufacturing Site",
@@ -550,6 +551,56 @@ const [currentUser, setCurrentUser] = useState({
           isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
         )} 
       />
+      {/* --- Country and Optional Coordinates --- */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[9px] font-black uppercase text-blue-400 ml-1">Country</label>
+        <select 
+          {...register("country")} 
+          disabled={isForeignAutofilled}
+          className={cn(
+            "w-full bg-white p-4 rounded-xl text-xs font-bold uppercase outline-none shadow-sm cursor-pointer border border-transparent focus:border-blue-200 transition-all",
+            isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+          )}
+        >
+          <option value="">Select Country...</option>
+          <option value="Germany">Germany</option>
+          <option value="China">China</option>
+          <option value="Denmark">Denmark</option>
+          <option value="India">India</option>
+          <option value="Switzerland">Switzerland</option>
+          <option value="United Kingdom">United Kingdom</option>
+          <option value="United States">United States</option>
+          <option value="France">France</option>
+          <option value="Italy">Italy</option>
+          <option value="Belgium">Belgium</option>
+          <option value="Egypt">Egypt</option>
+          <option value="Pakistan">Singapore</option>
+          <option value="Pakistan">Pakistan</option>
+          <option value="Malaysia">Malaysia</option>
+          <option value="Israel">Israel</option>
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <input 
+          {...register("latitude")} 
+          placeholder="Latitude (Optional)" 
+          readOnly={isForeignAutofilled}
+          className={cn(
+            "w-full p-4 rounded-xl text-xs font-mono shadow-sm border-none transition-all",
+            isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+          )} 
+        />
+        <input 
+          {...register("longitude")} 
+          placeholder="Longitude (Optional)" 
+          readOnly={isForeignAutofilled}
+          className={cn(
+            "w-full p-4 rounded-xl text-xs font-mono shadow-sm border-none transition-all",
+            isForeignAutofilled ? "bg-slate-200/40 text-slate-500 cursor-not-allowed select-none" : "bg-white"
+          )} 
+        />
+      </div>
       <FileUpload 
         label={watchType === "Facility Verification" ? "Power of Attorney (POA)" : "Inspection Report (PDF)"} 
         onUploadComplete={(url) => setValue(watchType === "Facility Verification" ? "poaUrl" : "inspectionReportUrl", url, { shouldDirty: true, shouldValidate: true })} 

@@ -172,10 +172,15 @@ export async function submitLODApplication(
         foreignFactoryId: foreignCompany!.id 
       }).onConflictDoNothing();
 
-      // 3. Upsert Physical Facility under Foreign Company
+// // 3. Upsert Physical Facility under Foreign Company with Country & Optional Coordinates
+      const latVal = (data as any).latitude ? parseFloat(String((data as any).latitude)) : null;
+      const lngVal = (data as any).longitude ? parseFloat(String((data as any).longitude)) : null;
+      const facilityCountry = (data as any).country ? String((data as any).country).trim() : "Unknown";
+
+      // Fixed type casting for companyId comparison
       let facility = await tx.query.facilities.findFirst({
         where: and(
-          eq(facilities.companyId, foreignCompany!.id),
+          eq(facilities.companyId, String(foreignCompany!.id) as any),
           eq(facilities.name, foreignCompName)
         ),
       });
@@ -186,21 +191,26 @@ export async function submitLODApplication(
           .values({
             name: foreignCompName,
             address: foreignCompAddress,
-            companyId: foreignCompany!.id,
-            latitude: (data as any).latitude ? parseFloat(String((data as any).latitude)) : null,
-            longitude: (data as any).longitude ? parseFloat(String((data as any).longitude)) : null,
+            companyId: String(foreignCompany!.id) as any, // Fixed type mismatch
+            latitude: Number.isNaN(latVal) ? null : latVal,
+            longitude: Number.isNaN(lngVal) ? null : lngVal,
+            country: facilityCountry,
           })
           .returning();
         facility = insertedFacility;
       } else {
-        // Update coordinates or details if provided fresh
-        await tx
+        // Update coordinates, country, or details if provided fresh
+        const [updatedFacility] = await tx
           .update(facilities)
           .set({
-            latitude: Number.isNaN(latVal) ? facility.latitude : (latVal ?? facility.latitude),
-            longitude: Number.isNaN(lngVal) ? facility.longitude : (lngVal ?? facility.longitude),
+            latitude: latVal !== null && !Number.isNaN(latVal) ? latVal : facility.latitude,
+            longitude: lngVal !== null && !Number.isNaN(lngVal) ? lngVal : facility.longitude,
+            country: facilityCountry && facilityCountry !== "Unknown" ? facilityCountry : facility.country,
+            updatedAt: sql`now()`,
           })
-          .where(eq(facilities.id, facility.id));
+          .where(eq(facilities.id, facility.id))
+          .returning();
+        facility = updatedFacility;
       }
 
       // 4. Products & Intrinsic Risk Calculation using local schema tables

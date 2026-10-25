@@ -3,7 +3,7 @@ import { z } from "zod";
 export const lodFormSchema = z.object({
   appNumber: z.string().min(1, "App number is required"),
   
-  // ADDED: Directorate validation
+  // Directorate validation
   directorate: z.string().min(1, "Directorate selection is required"),
 
   type: z.enum(["Facility Verification", "Inspection Report Review (Foreign)"], {
@@ -19,11 +19,14 @@ export const lodFormSchema = z.object({
     .optional()
     .or(z.string().email("Please enter a valid email address").or(z.literal(""))),
 
-  // Foreign Factory
+  // Foreign Factory & Location Details
   facilityName: z.string().min(1, "Foreign factory name is required"),
   facilityAddress: z.string().min(1, "Foreign physical address is required"),
+  country: z.string().optional().default(""),
+  latitude: z.union([z.string(), z.number()]).optional().nullable(),
+  longitude: z.union([z.string(), z.number()]).optional().nullable(),
   
-  // ADDED: Site Scope validation
+  // Site Scope validation
   siteScope: z.enum(["New Manufacturing Site", "Additional Manufacturing Site"], {
     error: () => ({ message: "Please select a valid site scope configuration" }),
   }).default("New Manufacturing Site"),
