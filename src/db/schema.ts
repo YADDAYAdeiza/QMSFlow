@@ -50,15 +50,14 @@ export const facilities = pgTable("facilities", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   address: text("address"),
+  country: varchar("country", { length: 100 }), // <-- Added missing country column
   companyId: uuid("company_id").references(() => companies.id, {
     onDelete: "cascade",
   }),
-  // --- NEW FIELDS ADDED ---
   facilityType: varchar("facility_type", { length: 100 }).notNull().default("Veterinary Pharmaceuticals"),
   latitude: doublePrecision("latitude"),
   longitude: doublePrecision("longitude"),
-  geom: geographyPoint("geom"), // PostGIS column handled automatically by the database trigger
-  // ------------------------
+  geom: geographyPoint("geom"), 
   isCategorized: boolean("is_categorized").default(false).notNull(),
   categorizedBy: uuid("categorized_by").references(() => users.id, { onDelete: "set null" }),
   categorizedAt: timestamp("categorized_at", { withTimezone: true }),
@@ -224,10 +223,13 @@ export const users = pgTable("users", {
   name: varchar("name", { length: 255 }).notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   role: varchar("role", { length: 50 }).default("Staff"),
-  directorate: varchar("directorate", { length: 100 }),
   division: varchar("division", { length: 100 }),
-  linkedAt: timestamp("linked_at"),
   createdAt: timestamp("created_at").defaultNow(),
+  linkedAt: timestamp("linked_at"),
+  directorate: varchar("directorate", { length: 100 }),
+  signatureUrl: text("signature_url"),
+  signatureUpdatedAt: timestamp("signature_updated_at"),
+  rank: varchar("rank", { length: 50 }).default("ACRO"),
 });
 
 // 8. Product Line Risks

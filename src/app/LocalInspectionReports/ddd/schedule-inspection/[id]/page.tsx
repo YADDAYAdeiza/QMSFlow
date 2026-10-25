@@ -1,6 +1,7 @@
+// @/app/LocalInspectionReports/ddd/schedule-inspection/[id]/page.tsx
 import { db } from "@/db";
-import { applications, companies, users, facilities } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { applications, companies, users } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import ScheduleConsoleClient from "@/components/LocalInspectionReports/ScheduleConsoleClient";
 
@@ -10,7 +11,7 @@ interface PageProps {
 
 export default async function ScheduleInspectionPage({ params }: PageProps) {
   const resolvedParams = await params;
-  const numericId = Number(resolvedParams.id);
+  const numericId = Number(resolvedParams?.id);
   
   if (isNaN(numericId)) {
     notFound();
@@ -52,28 +53,53 @@ export default async function ScheduleInspectionPage({ params }: PageProps) {
     directorate: u.directorate || "VMAP",
   }));
 
-  // 3. Fetch all facilities safely
-  const rawFacilities = await db
-    .select({
-      id: facilities.id,
-      name: facilities.name,
-      address: facilities.address,
-      country: facilities.country,
-      latitude: facilities.latitude,
-      longitude: facilities.longitude,
-      facility_type: facilities.facility_type,
-    })
-    .from(facilities);
+  // 3. Fetch qualified applications with nested facility, product lines, and products
+  const qualifiedApps = await db.query.applications.findMany({
+    where: and(
+      eq(applications.isDeskReview, false),
+      eq(applications.currentPoint, "Report Approved and Archived"),
+      eq(applications.status, "APPROVED_AND_ARCHIVED")
+    ),
+    with: {
+      facility: {
+        with: {
+          productLines: {
+            with: {
+              products: true,
+            },
+          },
+        },
+      },
+    },
+  });
 
-  const initialFacilities = (rawFacilities || []).filter(Boolean).map(f => ({
-    id: f.id,
-    name: f.name || "Unknown Facility",
-    address: f.address || "",
-    country: f.country || "Unknown",
-    latitude: f.latitude ?? null,
-    longitude: f.longitude ?? null,
-    facility_type: f.facility_type || "Veterinary Pharmaceuticals",
-  }));
+  // Extract and sanitize facilities with their complete product line structures
+  const initialFacilities = qualifiedApps
+    .map(app => app.facility)
+    .filter(Boolean)
+    .map(f => ({
+      id: f!.id,
+      name: f!.name || "Unknown Facility",
+      address: f!.address || "",
+      country: f!.country || "Unknown",
+      latitude: f!.latitude ?? null,
+      longitude: f!.longitude ?? null,
+      facility_type: f!.facilityType || "Veterinary Pharmaceuticals",
+      product_lines: (f!.productLines || []).map(line => ({
+        id: line.id,
+        name: line.name,
+        sterility_level: line.sterilityLevel,
+        containment_category: line.containmentCategory,
+        is_dedicated_line: line.isDedicatedLine,
+        products: (line.products || []).map(p => ({
+          id: p.id,
+          name: p.name,
+          classification: p.classification,
+          target_species: p.targetSpecies,
+          vmd_approved: p.vmdApproved,
+        })),
+      })),
+    }));
 
   return (
     <div className="min-h-screen bg-slate-50 py-8">

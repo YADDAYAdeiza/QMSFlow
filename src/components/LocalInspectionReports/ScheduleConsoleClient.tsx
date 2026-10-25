@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
+import "leaflet/dist/leaflet.css";
 
 const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
@@ -16,6 +17,23 @@ interface UserOption {
   directorate: string;
 }
 
+interface ProductOption {
+  id: string;
+  name: string;
+  classification: string | null;
+  target_species: string | null;
+  vmd_approved: boolean;
+}
+
+interface ProductLineOption {
+  id: string;
+  name: string;
+  sterility_level: string;
+  containment_category: string;
+  is_dedicated_line: boolean;
+  products: ProductOption[];
+}
+
 interface FacilityOption {
   id: string;
   name: string;
@@ -24,6 +42,7 @@ interface FacilityOption {
   latitude: number | null;
   longitude: number | null;
   facility_type: string;
+  product_lines: ProductLineOption[];
 }
 
 interface Props {
@@ -36,8 +55,12 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   const [selectedRank, setSelectedRank] = useState<string>("ALL");
   const [selectedUserDirectorate, setSelectedUserDirectorate] = useState<string>("ALL");
   
+  // Facility & Product Line Filters
   const [selectedFacilityCountry, setSelectedFacilityCountry] = useState<string>("ALL");
   const [selectedFacilityDirectorate, setSelectedFacilityDirectorate] = useState<string>("ALL");
+  const [selectedSterility, setSelectedSterility] = useState<string>("ALL");
+  const [selectedContainment, setSelectedContainment] = useState<string>("ALL");
+  const [selectedClassification, setSelectedClassification] = useState<string>("ALL");
 
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>("");
@@ -45,9 +68,15 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   const [assignedTeam, setAssignedTeam] = useState<UserOption[]>([]);
   const [assignedFacilities, setAssignedFacilities] = useState<FacilityOption[]>([]);
 
+  const [dynamicCoords, setDynamicCoords] = useState<{ lat: number; lng: number } | null>(null);
+
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
     setIsMounted(true);
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event("resize"));
+    }, 250);
+    return () => clearTimeout(timer);
   }, []);
 
   const filteredUsers = useMemo(() => {
@@ -60,23 +89,90 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
     });
   }, [initialUsers, selectedRank, selectedUserDirectorate]);
 
+  // Dynamically extract unique countries across all facilities
+  const availableCountries = useMemo(() => {
+    const countries = new Set<string>();
+    initialFacilities.forEach(f => {
+      if (f.country) countries.add(f.country.trim());
+    });
+    return Array.from(countries);
+  }, [initialFacilities]);
+
+  console.log('availableCountries:',availableCountries)
+
+  // Dynamically extract unique product classifications across all facilities for the dropdown
+  const availableClassifications = useMemo(() => {
+    const classifications = new Set<string>();
+    initialFacilities.forEach(f => {
+      f.product_lines?.forEach(l => {
+        l.products?.forEach(p => {
+          if (p.classification) classifications.add(p.classification);
+        });
+      });
+    });
+    return Array.from(classifications);
+  }, [initialFacilities]);
+
   const filteredFacilities = useMemo(() => {
     if (!Array.isArray(initialFacilities)) return [];
     return initialFacilities.filter(facility => {
       if (!facility) return false;
-      const matchCountry = selectedFacilityCountry === "ALL" || facility.country === selectedFacilityCountry;
+      
+      const matchCountry = 
+        selectedFacilityCountry === "ALL" || 
+        (facility.country && facility.country.trim().toLowerCase() === selectedFacilityCountry.trim().toLowerCase());
+        
       const matchDir = selectedFacilityDirectorate === "ALL" || (facility.facility_type && facility.facility_type.includes(selectedFacilityDirectorate));
-      return matchCountry && matchDir;
+      
+      const matchSterility = selectedSterility === "ALL" || facility.product_lines?.some(l => l.sterility_level === selectedSterility);
+      const matchContainment = selectedContainment === "ALL" || facility.product_lines?.some(l => l.containment_category === selectedContainment);
+      const matchClassification = selectedClassification === "ALL" || facility.product_lines?.some(l => l.products?.some(p => p.classification === selectedClassification));
+
+      return matchCountry && matchDir && matchSterility && matchContainment && matchClassification;
     });
-  }, [initialFacilities, selectedFacilityCountry, selectedFacilityDirectorate]);
+  }, [initialFacilities, selectedFacilityCountry, selectedFacilityDirectorate, selectedSterility, selectedContainment, selectedClassification]);
 
   const activeFacility = useMemo(() => {
     if (!Array.isArray(initialFacilities)) return null;
     return initialFacilities.find(f => f?.id === selectedFacilityId) || assignedFacilities[0] || initialFacilities[0] || null;
   }, [selectedFacilityId, assignedFacilities, initialFacilities]);
 
-  const centerLat = activeFacility?.latitude ?? 6.5244; 
-  const centerLng = activeFacility?.longitude ?? 3.3792;
+  useEffect(() => {
+    let isMounted = true;
+    
+    if (activeFacility && (activeFacility.latitude == null || activeFacility.longitude == null) && activeFacility.address) {
+      const addressQuery = encodeURIComponent(`${activeFacility.address}, ${activeFacility.country || ""}`);
+      
+      fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${addressQuery}&limit=1`, {
+        headers: {
+          'User-Agent': 'VMAP-Regulatory-Inspection-Console'
+        }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (isMounted && data && data.length > 0) {
+            setDynamicCoords({
+              lat: parseFloat(data[0].lat),
+              lng: parseFloat(data[0].lon)
+            });
+          } else {
+            setDynamicCoords(null);
+          }
+        })
+        .catch(() => {
+          if (isMounted) setDynamicCoords(null);
+        });
+    } else {
+      setDynamicCoords(null);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeFacility]);
+
+  const centerLat = activeFacility?.latitude ?? dynamicCoords?.lat ?? 6.5244; 
+  const centerLng = activeFacility?.longitude ?? dynamicCoords?.lng ?? 3.3792;
 
   const adjacentFacilities = useMemo(() => {
     if (!activeFacility || activeFacility.latitude == null || activeFacility.longitude == null || !Array.isArray(initialFacilities)) return [];
@@ -164,7 +260,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
               <option value="">-- Select Staff Member --</option>
               {filteredUsers.map(u => (
                 <option key={u.id} value={u.id}>
-                  {u.name} ({u.rank} - {u.directorate})
+                  {u.name} ({u.rank} / {u.directorate})
                 </option>
               ))}
             </select>
@@ -202,9 +298,10 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
           </div>
         </div>
 
+        {/* Granular Facility & Product Line Filters */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800">
-            🏭 Target Foreign Facilities & Clustering
+            🏭 Target Foreign Facilities & Product Line Filters
           </h3>
 
           <div className="grid grid-cols-2 gap-2">
@@ -216,14 +313,13 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                 className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white"
               >
                 <option value="ALL">All Countries</option>
-                <option value="India">India</option>
-                <option value="China">China</option>
-                <option value="Germany">Germany</option>
-                <option value="Denmark">Denmark</option>
+                {availableCountries.map(country => (
+                  <option key={country} value={country}>{country}</option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Filter by Type</label>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Filter by Facility Type</label>
               <select
                 value={selectedFacilityDirectorate}
                 onChange={(e) => setSelectedFacilityDirectorate(e.target.value)}
@@ -235,13 +331,56 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Sterility Level</label>
+              <select
+                value={selectedSterility}
+                onChange={(e) => setSelectedSterility(e.target.value)}
+                className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white"
+              >
+                <option value="ALL">All Sterility Levels</option>
+                <option value="Sterile">Sterile</option>
+                <option value="Non-Sterile">Non-Sterile</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Containment Category</label>
+              <select
+                value={selectedContainment}
+                onChange={(e) => setSelectedContainment(e.target.value)}
+                className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white"
+              >
+                <option value="ALL">All Categories</option>
+                <option value="Standard General Facility">Standard General Facility</option>
+                <option value="High Containment">High Containment</option>
+                <option value="Beta-Lactams">Beta-Lactams</option>
+                <option value="Hormones/Cytotoxics">Hormones/Cytotoxics</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Product Classification</label>
+            <select
+              value={selectedClassification}
+              onChange={(e) => setSelectedClassification(e.target.value)}
+              className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white"
+            >
+              <option value="ALL">All Product Classifications</option>
+              {availableClassifications.map(cls => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex gap-2 pt-2">
             <select
               value={selectedFacilityId}
               onChange={(e) => setSelectedFacilityId(e.target.value)}
               className="flex-1 text-xs border border-slate-300 rounded-lg p-2 bg-white"
             >
-              <option value="">-- Select Facility --</option>
+              <option value="">-- Select Filtered Facility --</option>
               {filteredFacilities.map(f => (
                 <option key={f.id} value={f.id}>{f.name} ({f.country})</option>
               ))}
@@ -281,26 +420,27 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
         </div>
       </div>
 
-      <div className="lg:col-span-7 bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+     <div className="lg:col-span-7 bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col">
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 mb-3">
           🗺️ Geographic Cluster & Proximity Radar
         </h3>
 
-        <div className="flex-1 min-h-[450px] w-full rounded-lg overflow-hidden border border-slate-300 relative">
+        <div className="h-[480px] w-full rounded-lg overflow-hidden border border-slate-300 relative z-0">
           {isMounted ? (
             <MapContainer
               key={`${centerLat}-${centerLng}`}
               center={[centerLat, centerLng]}
               zoom={6}
               style={{ height: "100%", width: "100%" }}
+              className="w-full h-full"
             >
               <TileLayer
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
 
-              {activeFacility && activeFacility.latitude != null && activeFacility.longitude != null && (
-                <Marker position={[activeFacility.latitude, activeFacility.longitude]}>
+              {activeFacility && (activeFacility.latitude != null || dynamicCoords) && activeFacility.longitude != null && (
+                <Marker position={[centerLat, centerLng]}>
                   <Popup>
                     <div className="text-xs">
                       <strong>{activeFacility.name}</strong><br />
@@ -311,9 +451,9 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                 </Marker>
               )}
 
-              {activeFacility && activeFacility.latitude != null && activeFacility.longitude != null && (
+              {activeFacility && (activeFacility.latitude != null || dynamicCoords) && activeFacility.longitude != null && (
                 <Circle
-                  center={[activeFacility.latitude, activeFacility.longitude]}
+                  center={[centerLat, centerLng]}
                   radius={50000} 
                   pathOptions={{ color: 'emerald', fillColor: 'emerald', fillOpacity: 0.1 }}
                 />
