@@ -9,11 +9,9 @@ const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), 
 const Marker = dynamic(() => import("react-leaflet").then(m => m.Marker), { ssr: false });
 const Popup = dynamic(() => import("react-leaflet").then(m => m.Popup), { ssr: false });
 
-// NAFDAC HQ Reference Hub (Abuja, Nigeria) for international travel distance calculations
 const NAFDAC_HQ_LAT = 9.05785;
 const NAFDAC_HQ_LNG = 7.49508;
 
-// Haversine formula for great-circle distance in kilometers
 const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -25,7 +23,6 @@ const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: num
   return Math.round(R * c);
 };
 
-// Travel logistics advisory engine
 const getTravelLogistics = (distanceKm: number, country: string) => {
   if (distanceKm > 500) {
     return {
@@ -48,7 +45,6 @@ const getTravelLogistics = (distanceKm: number, country: string) => {
   }
 };
 
-// Leaflet custom colored marker generator
 const createColoredIcon = (colorHex: string) => {
   if (typeof window === "undefined") return undefined;
   const L = require("leaflet");
@@ -76,8 +72,8 @@ interface Inspector {
   division?: string;
   directorate?: string;
   is_available: boolean;
-  travel_history?: string[]; // e.g., ["Germany", "China", "India"]
-  last_traveled_date?: string; // e.g., "14 Jan 2026"
+  travel_history?: string[];
+  last_traveled_date?: string;
   pending_assignments?: PendingAssignment[];
   locked_workflows?: PendingAssignment[];
 }
@@ -117,7 +113,6 @@ interface Props {
 }
 
 export default function ScheduleConsoleClient({ applicationId, initialUsers = [], initialFacilities = [] }: Props) {
-  // Facility & Product Line Filter States
   const [selectedFacilityCountry, setSelectedFacilityCountry] = useState<string>("ALL");
   const [selectedFacilityDirectorate, setSelectedFacilityDirectorate] = useState<string>("ALL");
   const [selectedSterility, setSelectedSterility] = useState<string>("ALL");
@@ -127,13 +122,11 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>("");
   const [assignedFacilities, setAssignedFacilities] = useState<FacilityOption[]>([]);
 
-  // Team Builder Form States (Strict Role Separation & High-Performer Friendly)
   const [inspectionDate, setInspectionDate] = useState("");
   const [teamLeader, setTeamLeader] = useState("");
   const [coInspectors, setCoInspectors] = useState<string[]>([]);
   const [traineeInspectors, setTraineeInspectors] = useState<string[]>([]);
 
-  // QMS Audit Sidebar State
   const [focusedInspector, setFocusedInspector] = useState<Inspector | null>(null);
 
   const [dynamicCoords, setDynamicCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -150,27 +143,16 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
     return (initialUsers || []).map(u => ({
       ...u,
       full_name: u.full_name || u.name || "Unnamed Officer",
-      travel_history: u.travel_history || ["United Kingdom", "Switzerland"], // Mock/Fallback sample history if unprovided
+      travel_history: u.travel_history || ["United Kingdom", "Switzerland"],
       last_traveled_date: u.last_traveled_date || "Nov 2025",
       pending_assignments: u.pending_assignments || u.locked_workflows || [],
     }));
   }, [initialUsers]);
 
-  // Unique metadata extractors for filters
   const availableCountries = useMemo(() => {
     const countries = new Set<string>();
     initialFacilities.forEach(f => { if (f.country) countries.add(f.country.trim()); });
     return Array.from(countries);
-  }, [initialFacilities]);
-
-  const availableClassifications = useMemo(() => {
-    const classifications = new Set<string>();
-    initialFacilities.forEach(f => {
-      f.product_lines?.forEach(l => {
-        l.products?.forEach(p => { if (p.classification) classifications.add(p.classification); });
-      });
-    });
-    return Array.from(classifications);
   }, [initialFacilities]);
 
   const filteredFacilities = useMemo(() => {
@@ -191,7 +173,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
     return filteredFacilities.find(f => f?.id === selectedFacilityId) || assignedFacilities[0] || filteredFacilities[0] || initialFacilities[0] || null;
   }, [selectedFacilityId, assignedFacilities, filteredFacilities, initialFacilities]);
 
-  // Dynamic geocoding fallback for un-pinned facilities
   useEffect(() => {
     let isMounted = true;
     if (activeFacility && (activeFacility.latitude == null || activeFacility.longitude == null) && activeFacility.address) {
@@ -217,7 +198,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   const centerLat = activeFacility?.latitude ?? dynamicCoords?.lat ?? 6.5244; 
   const centerLng = activeFacility?.longitude ?? dynamicCoords?.lng ?? 3.3792;
 
-  // 2 closest neighboring facilities calculation
   const closestTwoFacilities = useMemo(() => {
     if (!activeFacility || !Array.isArray(filteredFacilities)) return [];
     const activeLat = activeFacility.latitude ?? dynamicCoords?.lat;
@@ -242,7 +222,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
     return { dist, ...logistics };
   }, [centerLat, centerLng, activeFacility]);
 
-  // Check if selected staff has active assignments to show advisory warnings
   const selectedLeaderObj = normalizedInspectors.find(i => i.id === teamLeader);
   const hasLeaderPending = (selectedLeaderObj?.pending_assignments?.length ?? 0) > 0;
 
@@ -264,7 +243,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
         ...traineeInspectors.map((id) => ({ inspectorId: id, role: "TRAINEE_INSPECTOR" as const })),
       ];
 
-      const response = await fetch('/api/LocalInspectionReports/schedule/single', {
+      const response = await fetch('/api/LocalInspectionReports/schedule-inspection/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -288,9 +267,9 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   };
 
   return (
-    <div className="max-w-[95rem] mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6 p-4">
+    <div className="max-w-[98rem] mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6 p-4">
       
-      {/* COLUMN 1: Inspection Team Builder & Facility Filters (4 Cols) */}
+      {/* COLUMN 1: Inspection Team Matrix & Facility Itinerary Builder (4 Cols) */}
       <div className="xl:col-span-4 space-y-6">
         
         {/* Team Builder Panel */}
@@ -325,17 +304,16 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
               }}
             >
               <option value="">-- Select Team Leader --</option>
-              {normalizedInspectors.map(ins => {
+              {normalizedInspectors.map((ins, index) => {
                 const activeCount = ins.pending_assignments?.length || 0;
                 return (
-                  <option key={ins.id} value={ins.id}>
+                  <option key={`${ins.id}-${index}`} value={ins.id}>
                     ⭐ {ins.full_name} ({ins.rank || ins.division?.toUpperCase() || 'STAFF'}) {activeCount > 0 ? `[${activeCount} active tasks]` : ''}
                   </option>
                 );
               })}
             </select>
 
-            {/* High Performer Advisory Warning */}
             {hasLeaderPending && (
               <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 flex items-start gap-2">
                 <span>⚠️</span>
@@ -346,16 +324,15 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             )}
           </div>
 
-          {/* Co-Inspectors Checkbox Matrix (All open for high performers) */}
           <div>
             <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Co-Inspectors Pool</label>
             <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-xl p-2.5 space-y-1 bg-slate-50/50">
               {normalizedInspectors
                 .filter(ins => ins.id !== teamLeader && !traineeInspectors.includes(ins.id))
-                .map(ins => {
+                .map((ins, index) => {
                   const activeCount = ins.pending_assignments?.length || 0;
                   return (
-                    <label key={ins.id} className="flex items-center text-xs space-x-2 p-1.5 hover:bg-white rounded-lg cursor-pointer justify-between transition-colors">
+                    <label key={`${ins.id}-${index}`} className="flex items-center text-xs space-x-2 p-1.5 hover:bg-white rounded-lg cursor-pointer justify-between transition-colors">
                       <div className="flex items-center space-x-2">
                         <input 
                           type="checkbox" 
@@ -376,14 +353,13 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             </div>
           </div>
 
-          {/* Trainee Inspectors Checkbox Matrix */}
           <div>
             <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Trainee Inspectors (Max 2)</label>
             <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-xl p-2.5 space-y-1 bg-slate-50/50">
               {normalizedInspectors
                 .filter(ins => ins.id !== teamLeader && !coInspectors.includes(ins.id))
-                .map(ins => (
-                  <label key={ins.id} className="flex items-center text-xs space-x-2 p-1.5 hover:bg-white rounded-lg cursor-pointer justify-between transition-colors">
+                .map((ins, index) => (
+                  <label key={`${ins.id}-${index}`} className="flex items-center text-xs space-x-2 p-1.5 hover:bg-white rounded-lg cursor-pointer justify-between transition-colors">
                     <div className="flex items-center space-x-2">
                       <input 
                         type="checkbox" 
@@ -412,10 +388,10 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
           </div>
         </div>
 
-        {/* Facility Filters & Itinerary Selector Panel */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        {/* Facility Filters & Batch Itinerary Queue */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 overflow-hidden">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b border-slate-100 pb-3">
-            🏭 Facility Filters & Itinerary
+            🏭 Facility Filters & Batch Itinerary
           </h3>
 
           <div className="grid grid-cols-2 gap-2">
@@ -427,7 +403,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                 className="w-full text-xs font-bold border border-slate-300 rounded-xl p-2.5 bg-slate-50/50 cursor-pointer"
               >
                 <option value="ALL">All Countries</option>
-                {availableCountries.map(c => <option key={c} value={c}>{c}</option>)}
+                {availableCountries.map((c, index) => <option key={`${c}-${index}`} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
@@ -445,16 +421,16 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
           </div>
 
           <div>
-            <label className="block text-[9px] font-black uppercase text-slate-400 mb-1">Select Filtered Facility</label>
-            <div className="flex gap-2">
+            <label className="block text-[9px] font-black uppercase text-slate-400 mb-1">Select Facility to Add</label>
+            <div className="w-full min-w-0 space-y-2">
               <select
                 value={selectedFacilityId}
                 onChange={(e) => setSelectedFacilityId(e.target.value)}
-                className="flex-1 text-xs font-semibold border border-slate-300 rounded-xl p-2.5 bg-slate-50/50 cursor-pointer"
+                className="w-full min-w-0 text-xs font-semibold border border-slate-300 rounded-xl p-2.5 bg-slate-50/50 cursor-pointer truncate"
               >
-                <option value="">-- Choose Facility --</option>
-                {filteredFacilities.map(f => (
-                  <option key={f.id} value={f.id}>{f.name} ({f.country})</option>
+                <option value="">-- Choose Filtered Facility --</option>
+                {filteredFacilities.map((f, index) => (
+                  <option key={`${f.id}-${index}`} value={f.id}>{f.name} ({f.country})</option>
                 ))}
               </select>
               <button
@@ -466,21 +442,20 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                     setAssignedFacilities([...assignedFacilities, fac]);
                   }
                 }}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
               >
-                Add
+                + Add Facility to Itinerary
               </button>
             </div>
           </div>
 
-          {/* Assigned Itinerary List */}
           <div className="space-y-1.5 pt-2 border-t border-slate-100">
             <p className="text-[10px] font-black uppercase text-slate-500">Batch Itinerary Queue ({assignedFacilities.length}):</p>
             {assignedFacilities.length === 0 ? (
               <p className="text-xs text-slate-400 italic p-2 bg-slate-50 rounded-xl text-center">No facilities added to batch itinerary yet.</p>
             ) : (
-              assignedFacilities.map(fac => (
-                <div key={fac.id} className="flex justify-between items-center bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200 text-xs">
+              assignedFacilities.map((fac, index) => (
+                <div key={`${fac.id}-${index}`} className="flex justify-between items-center bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200 text-xs">
                   <div>
                     <span className="font-bold text-emerald-900 block">{fac.name}</span>
                     <span className="text-[10px] text-slate-600">{fac.address}, {fac.country}</span>
@@ -489,6 +464,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                     type="button"
                     onClick={() => setAssignedFacilities(assignedFacilities.filter(f => f?.id !== fac.id))}
                     className="text-rose-600 hover:text-rose-800 font-bold px-2 py-1 text-sm cursor-pointer"
+                    title="Deassign Facility"
                   >
                     ✕
                   </button>
@@ -525,7 +501,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 />
 
-                {/* Primary Green Marker */}
                 {activeFacility && (
                   <Marker position={[centerLat, centerLng]} icon={createColoredIcon("#10b981")}>
                     <Popup>
@@ -540,12 +515,11 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                   </Marker>
                 )}
 
-                {/* 2 Closest Red Neighbors */}
-                {closestTwoFacilities.map(neigh => {
+                {closestTwoFacilities.map((neigh, index) => {
                   const neighDist = neigh.latitude != null && neigh.longitude != null ? calculateDistanceKm(centerLat, centerLng, neigh.latitude, neigh.longitude) : null;
                   return (
                     neigh && neigh.latitude != null && neigh.longitude != null && (
-                      <Marker key={neigh.id} position={[neigh.latitude, neigh.longitude]} icon={createColoredIcon("#f43f5e")}>
+                      <Marker key={`${neigh.id}-${index}`} position={[neigh.latitude, neigh.longitude]} icon={createColoredIcon("#f43f5e")}>
                         <Popup>
                           <div className="text-xs space-y-1">
                             <strong>{neigh.name}</strong> (Closest Neighbor)<br />
@@ -576,7 +550,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             )}
           </div>
 
-          {/* Travel Intelligence Advisory Box */}
           {activeFacility && (
             <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1 text-xs">
               <p className="font-bold text-blue-900 uppercase tracking-wide text-[10px]">✈️ Mission Logistics & Travel Advisory</p>
@@ -602,7 +575,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
         </div>
       </div>
 
-      {/* COLUMN 3: QMS Workforce Audit Sidebar (3 Cols) - Enhanced with Travel History & Pending Tasks */}
+      {/* COLUMN 3: QMS Workforce Audit Sidebar (3 Cols) */}
       <div className="xl:col-span-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between shadow-sm">
         <div>
           <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 border-b border-slate-200 pb-2">
@@ -613,11 +586,11 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
           </p>
 
           <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1 mb-4">
-            {normalizedInspectors.map(ins => {
+            {normalizedInspectors.map((ins, index) => {
               const activeCount = ins.pending_assignments?.length || 0;
               return (
                 <button
-                  key={ins.id}
+                  key={`${ins.id}-${index}`}
                   onClick={() => setFocusedInspector(ins)}
                   className={`w-full text-left text-xs p-2.5 rounded-xl flex items-center justify-between border transition-all cursor-pointer ${
                     focusedInspector?.id === ins.id 
@@ -649,12 +622,10 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                 </p>
               </div>
 
-              {/* Last Time Traveled */}
               <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-[11px]">
                 <span className="font-bold text-slate-700">✈️ Last Traveled:</span> <span className="text-slate-600">{focusedInspector.last_traveled_date}</span>
               </div>
 
-              {/* Inspection / Travel History */}
               <div className="space-y-1">
                 <p className="text-[10px] font-black text-slate-500 uppercase">🌍 Travel & Facility History:</p>
                 <div className="flex flex-wrap gap-1">
@@ -670,7 +641,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                 </div>
               </div>
 
-              {/* Current Pending Assignments */}
               <div className="space-y-1 pt-1 border-t border-slate-100">
                 <p className="text-[10px] font-black text-slate-500 uppercase">📋 Pending Now ({focusedInspector.pending_assignments?.length || 0}):</p>
                 {focusedInspector.pending_assignments && focusedInspector.pending_assignments.length > 0 ? (

@@ -61,10 +61,11 @@ const createColoredIcon = (colorHex: string) => {
   });
 };
 
-interface LockedWorkflow {
-  application_id: number;
+interface PendingAssignment {
   company_name: string;
-  current_step_title: string;
+  application_id: number;
+  scheduled_date?: string;
+  current_step_title?: string;
 }
 
 interface Inspector {
@@ -75,7 +76,10 @@ interface Inspector {
   division?: string;
   directorate?: string;
   is_available: boolean;
-  locked_workflows?: LockedWorkflow[];
+  travel_history?: string[];
+  last_traveled_date?: string;
+  pending_assignments?: PendingAssignment[];
+  locked_workflows?: PendingAssignment[];
 }
 
 interface ProductOption {
@@ -123,7 +127,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>("");
   const [assignedFacilities, setAssignedFacilities] = useState<FacilityOption[]>([]);
 
-  // Team Builder Form States (Strict Role Separation)
+  // Team Builder Form States
   const [inspectionDate, setInspectionDate] = useState("");
   const [teamLeader, setTeamLeader] = useState("");
   const [coInspectors, setCoInspectors] = useState<string[]>([]);
@@ -146,15 +150,12 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
     return (initialUsers || []).map(u => ({
       ...u,
       full_name: u.full_name || u.name || "Unnamed Officer",
-      is_available: u.is_available ?? true,
+      travel_history: u.travel_history || ["United Kingdom", "Switzerland"],
+      last_traveled_date: u.last_traveled_date || "Nov 2025",
+      pending_assignments: u.pending_assignments || u.locked_workflows || [],
     }));
   }, [initialUsers]);
 
-  const availableInspectors = useMemo(() => {
-    return normalizedInspectors.filter(ins => ins.is_available);
-  }, [normalizedInspectors]);
-
-  // Unique metadata extractors for filters
   const availableCountries = useMemo(() => {
     const countries = new Set<string>();
     initialFacilities.forEach(f => { if (f.country) countries.add(f.country.trim()); });
@@ -189,7 +190,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
     return filteredFacilities.find(f => f?.id === selectedFacilityId) || assignedFacilities[0] || filteredFacilities[0] || initialFacilities[0] || null;
   }, [selectedFacilityId, assignedFacilities, filteredFacilities, initialFacilities]);
 
-  // Dynamic geocoding fallback for un-pinned facilities
   useEffect(() => {
     let isMounted = true;
     if (activeFacility && (activeFacility.latitude == null || activeFacility.longitude == null) && activeFacility.address) {
@@ -215,7 +215,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   const centerLat = activeFacility?.latitude ?? dynamicCoords?.lat ?? 6.5244; 
   const centerLng = activeFacility?.longitude ?? dynamicCoords?.lng ?? 3.3792;
 
-  // 2 closest neighboring facilities calculation
   const closestTwoFacilities = useMemo(() => {
     if (!activeFacility || !Array.isArray(filteredFacilities)) return [];
     const activeLat = activeFacility.latitude ?? dynamicCoords?.lat;
@@ -240,6 +239,9 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
     return { dist, ...logistics };
   }, [centerLat, centerLng, activeFacility]);
 
+  const selectedLeaderObj = normalizedInspectors.find(i => i.id === teamLeader);
+  const hasLeaderPending = (selectedLeaderObj?.pending_assignments?.length ?? 0) > 0;
+
   const handleSubmitSchedule = async () => {
     if (!inspectionDate || !teamLeader) {
       alert("Validation Error: Inspection target date and a designated Team Leader are mandatory parameters.");
@@ -258,7 +260,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
         ...traineeInspectors.map((id) => ({ inspectorId: id, role: "TRAINEE_INSPECTOR" as const })),
       ];
 
-      const response = await fetch('/api/LocalInspectionReports/schedule/single', {
+      const response = await fetch('/api/LocalInspectionReports/schedule/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -282,9 +284,9 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   };
 
   return (
-    <div className="max-w-[95rem] mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6 p-4">
+    <div className="max-w-[98rem] mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6 p-4">
       
-      {/* COLUMN 1: Inspection Team Builder & Facility Filters (4 Cols) */}
+      {/* COLUMN 1: Inspection Team Matrix & Facility Itinerary Builder (4 Cols) */}
       <div className="xl:col-span-4 space-y-6">
         
         {/* Team Builder Panel */}
@@ -293,7 +295,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             <h3 className="text-xs font-black uppercase tracking-wider text-slate-900">
               👥 Inspection Team Matrix
             </h3>
-            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded-full">Strict Exclusion</span>
+            <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full">High-Performer Enabled</span>
           </div>
 
           <div>
@@ -319,44 +321,59 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
               }}
             >
               <option value="">-- Select Team Leader --</option>
-              {availableInspectors.map(ins => (
-                <option key={ins.id} value={ins.id}>
-                  ⭐ {ins.full_name} ({ins.rank || ins.division?.toUpperCase() || 'STAFF'})
-                </option>
-              ))}
+              {normalizedInspectors.map(ins => {
+                const activeCount = ins.pending_assignments?.length || 0;
+                return (
+                  <option key={ins.id} value={ins.id}>
+                    ⭐ {ins.full_name} ({ins.rank || ins.division?.toUpperCase() || 'STAFF'}) {activeCount > 0 ? `[${activeCount} active tasks]` : ''}
+                  </option>
+                );
+              })}
             </select>
+
+            {hasLeaderPending && (
+              <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 flex items-start gap-2">
+                <span>⚠️</span>
+                <div>
+                  <strong className="font-bold">Scheduler Advisory:</strong> Selected Team Leader ({selectedLeaderObj?.full_name}) currently has {selectedLeaderObj?.pending_assignments?.length} pending assignment(s). High performer authorized for parallel dispatch.
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Co-Inspectors Checkbox Matrix */}
           <div>
             <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Co-Inspectors Pool</label>
             <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-xl p-2.5 space-y-1 bg-slate-50/50">
-              {availableInspectors
+              {normalizedInspectors
                 .filter(ins => ins.id !== teamLeader && !traineeInspectors.includes(ins.id))
-                .map(ins => (
-                  <label key={ins.id} className="flex items-center text-xs space-x-2 p-1.5 hover:bg-white rounded-lg cursor-pointer justify-between transition-colors">
-                    <div className="flex items-center space-x-2">
-                      <input 
-                        type="checkbox" 
-                        className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
-                        checked={coInspectors.includes(ins.id)}
-                        onChange={() => setCoInspectors(prev => prev.includes(ins.id) ? prev.filter(i => i !== ins.id) : [...prev, ins.id])}
-                      />
-                      <span className="text-slate-800 font-medium">{ins.full_name}</span>
-                    </div>
-                    <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-slate-200/70 text-slate-700">
-                      {ins.rank || ins.division || 'STAFF'}
-                    </span>
-                  </label>
-                ))}
+                .map(ins => {
+                  const activeCount = ins.pending_assignments?.length || 0;
+                  return (
+                    <label key={ins.id} className="flex items-center text-xs space-x-2 p-1.5 hover:bg-white rounded-lg cursor-pointer justify-between transition-colors">
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="checkbox" 
+                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                          checked={coInspectors.includes(ins.id)}
+                          onChange={() => setCoInspectors(prev => prev.includes(ins.id) ? prev.filter(i => i !== ins.id) : [...prev, ins.id])}
+                        />
+                        <span className="text-slate-800 font-medium">
+                          {ins.full_name} {activeCount > 0 && <span className="text-[10px] text-amber-600 font-bold">({activeCount} active)</span>}
+                        </span>
+                      </div>
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-slate-200/70 text-slate-700">
+                        {ins.rank || ins.division || 'STAFF'}
+                      </span>
+                    </label>
+                  );
+                })}
             </div>
           </div>
 
-          {/* Trainee Inspectors Checkbox Matrix */}
           <div>
             <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Trainee Inspectors (Max 2)</label>
             <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-xl p-2.5 space-y-1 bg-slate-50/50">
-              {availableInspectors
+              {normalizedInspectors
                 .filter(ins => ins.id !== teamLeader && !coInspectors.includes(ins.id))
                 .map(ins => (
                   <label key={ins.id} className="flex items-center text-xs space-x-2 p-1.5 hover:bg-white rounded-lg cursor-pointer justify-between transition-colors">
@@ -388,10 +405,10 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
           </div>
         </div>
 
-        {/* Facility Filters & Itinerary Selector Panel */}
+        {/* Facility Filters & Batch Itinerary Queue */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b border-slate-100 pb-3">
-            🏭 Facility Filters & Itinerary
+            🏭 Facility Filters & Batch Itinerary
           </h3>
 
           <div className="grid grid-cols-2 gap-2">
@@ -421,14 +438,14 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
           </div>
 
           <div>
-            <label className="block text-[9px] font-black uppercase text-slate-400 mb-1">Select Filtered Facility</label>
+            <label className="block text-[9px] font-black uppercase text-slate-400 mb-1">Select Facility to Add</label>
             <div className="flex gap-2">
               <select
                 value={selectedFacilityId}
                 onChange={(e) => setSelectedFacilityId(e.target.value)}
                 className="flex-1 text-xs font-semibold border border-slate-300 rounded-xl p-2.5 bg-slate-50/50 cursor-pointer"
               >
-                <option value="">-- Choose Facility --</option>
+                <option value="">-- Choose Filtered Facility --</option>
                 {filteredFacilities.map(f => (
                   <option key={f.id} value={f.id}>{f.name} ({f.country})</option>
                 ))}
@@ -449,7 +466,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             </div>
           </div>
 
-          {/* Assigned Itinerary List */}
           <div className="space-y-1.5 pt-2 border-t border-slate-100">
             <p className="text-[10px] font-black uppercase text-slate-500">Batch Itinerary Queue ({assignedFacilities.length}):</p>
             {assignedFacilities.length === 0 ? (
@@ -465,6 +481,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                     type="button"
                     onClick={() => setAssignedFacilities(assignedFacilities.filter(f => f?.id !== fac.id))}
                     className="text-rose-600 hover:text-rose-800 font-bold px-2 py-1 text-sm cursor-pointer"
+                    title="Deassign Facility"
                   >
                     ✕
                   </button>
@@ -501,7 +518,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 />
 
-                {/* Primary Green Marker */}
                 {activeFacility && (
                   <Marker position={[centerLat, centerLng]} icon={createColoredIcon("#10b981")}>
                     <Popup>
@@ -516,7 +532,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
                   </Marker>
                 )}
 
-                {/* 2 Closest Red Neighbors */}
                 {closestTwoFacilities.map(neigh => {
                   const neighDist = neigh.latitude != null && neigh.longitude != null ? calculateDistanceKm(centerLat, centerLng, neigh.latitude, neigh.longitude) : null;
                   return (
@@ -552,7 +567,6 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             )}
           </div>
 
-          {/* Travel Intelligence Advisory Box */}
           {activeFacility && (
             <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1 text-xs">
               <p className="font-bold text-blue-900 uppercase tracking-wide text-[10px]">✈️ Mission Logistics & Travel Advisory</p>
@@ -585,68 +599,90 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             Workforce Audit Registry
           </h3>
           <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
-            Select any inspector across the workforce pool to audit active workload files.
+            Select any inspector to inspect travel history, pending tasks, and last traveled info.
           </p>
 
-          <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1 mb-4">
-            {normalizedInspectors.map(ins => (
-              <button
-                key={ins.id}
-                onClick={() => setFocusedInspector(ins)}
-                className={`w-full text-left text-xs p-2.5 rounded-xl flex items-center justify-between border transition-all cursor-pointer ${
-                  focusedInspector?.id === ins.id 
-                    ? 'bg-slate-900 border-slate-900 text-white font-medium shadow-sm' 
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                <span className="truncate max-w-[120px] font-semibold">
-                  {ins.full_name}
-                </span>
-                <span className={`px-2 py-0.5 text-[9px] rounded-full font-bold ${
-                  ins.is_available ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {ins.is_available ? 'Ready' : 'Locked'}
-                </span>
-              </button>
-            ))}
+          <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1 mb-4">
+            {normalizedInspectors.map(ins => {
+              const activeCount = ins.pending_assignments?.length || 0;
+              return (
+                <button
+                  key={ins.id}
+                  onClick={() => setFocusedInspector(ins)}
+                  className={`w-full text-left text-xs p-2.5 rounded-xl flex items-center justify-between border transition-all cursor-pointer ${
+                    focusedInspector?.id === ins.id 
+                      ? 'bg-slate-900 border-slate-900 text-white font-medium shadow-sm' 
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="truncate max-w-[120px] font-semibold">
+                    {ins.full_name}
+                  </span>
+                  <span className={`px-2 py-0.5 text-[9px] rounded-full font-bold ${
+                    activeCount > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {activeCount > 0 ? `${activeCount} Active` : 'Available'}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {focusedInspector ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-inner min-h-[140px]">
-              <h4 className="text-xs font-black text-slate-900 truncate mb-1">
-                {focusedInspector.full_name}
-              </h4>
-              <p className="text-[10px] text-slate-400 mb-2 uppercase font-bold">
-                {focusedInspector.rank || focusedInspector.division || 'General Staff'}
-              </p>
-              
-              {!focusedInspector.is_available && focusedInspector.locked_workflows && focusedInspector.locked_workflows.length > 0 ? (
-                <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                  <p className="text-[10px] text-red-600 font-bold">Active Mission Locks:</p>
-                  {focusedInspector.locked_workflows.map((wf, idx) => (
-                    <div key={idx} className="border-l-2 border-amber-500 pl-2 py-1 bg-slate-50 rounded-r text-[10px]">
-                      <p className="font-bold text-slate-700 truncate">{wf.company_name}</p>
-                      <p className="text-amber-700 italic">{wf.current_step_title}</p>
-                    </div>
-                  ))}
+            <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-inner space-y-2.5 text-xs">
+              <div>
+                <h4 className="font-black text-slate-900 truncate">
+                  {focusedInspector.full_name}
+                </h4>
+                <p className="text-[10px] text-slate-400 uppercase font-bold">
+                  {focusedInspector.rank || focusedInspector.division || 'General Staff'}
+                </p>
+              </div>
+
+              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-[11px]">
+                <span className="font-bold text-slate-700">✈️ Last Traveled:</span> <span className="text-slate-600">{focusedInspector.last_traveled_date}</span>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[10px] font-black text-slate-500 uppercase">🌍 Travel & Facility History:</p>
+                <div className="flex flex-wrap gap-1">
+                  {focusedInspector.travel_history && focusedInspector.travel_history.length > 0 ? (
+                    focusedInspector.travel_history.map((country, idx) => (
+                      <span key={idx} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md text-[10px] font-bold">
+                        {country}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[10px] text-slate-400 italic">No previous foreign mission history recorded.</span>
+                  )}
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center pt-2 text-center">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping mb-1"></div>
-                  <p className="text-[11px] text-slate-600 font-bold">Compliance Clear</p>
-                  <p className="text-[9px] text-slate-400">No pending unsubmitted reviews.</p>
-                </div>
-              )}
+              </div>
+
+              <div className="space-y-1 pt-1 border-t border-slate-100">
+                <p className="text-[10px] font-black text-slate-500 uppercase">📋 Pending Now ({focusedInspector.pending_assignments?.length || 0}):</p>
+                {focusedInspector.pending_assignments && focusedInspector.pending_assignments.length > 0 ? (
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
+                    {focusedInspector.pending_assignments.map((task, idx) => (
+                      <div key={idx} className="bg-amber-50/60 border border-amber-200/60 p-1.5 rounded-lg text-[10px]">
+                        <p className="font-bold text-slate-800 truncate">{task.company_name || "Assigned Task"}</p>
+                        <p className="text-amber-800 italic">{task.current_step_title || `File ID: #${task.application_id}`}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-emerald-600 font-semibold italic">No pending tasks. Fully ready for new assignment.</p>
+                )}
+              </div>
             </div>
           ) : (
-            <div className="border border-dashed border-slate-300 rounded-xl p-4 text-center text-xs text-slate-400 italic bg-white/50 min-h-[140px] flex items-center justify-center">
-              Select inspector for audit verification.
+            <div className="border border-dashed border-slate-300 rounded-xl p-4 text-center text-xs text-slate-400 italic bg-white/50 min-h-[160px] flex items-center justify-center">
+              Select officer above to audit travel history and pending tasks.
             </div>
           )}
         </div>
 
         <div className="mt-4 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase text-center bg-slate-100/60 -mx-4 -mb-4 p-3 rounded-b-2xl">
-          QMS Guardrail Enforcement Point
+          High-Performer Management Protocol
         </div>
       </div>
 

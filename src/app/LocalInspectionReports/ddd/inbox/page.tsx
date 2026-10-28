@@ -1,6 +1,6 @@
 import { db } from "@/db"; 
-import { applications, companies } from "@/db/schema"; 
-import { eq, or, inArray } from "drizzle-orm";
+import { applications, companies, scheduleBatches } from "@/db/schema"; 
+import { eq, or, inArray, desc } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
 import AuditTrailButton from "@/components/LocalInspectionReports/AuditTrailButton"; 
@@ -46,6 +46,17 @@ interface ApplicationItem {
   displayFacilityName?: string; // Target Foreign Facility Name extracted from JSON
 }
 
+interface BatchItem {
+  id: string;
+  batchReference: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  currentPoint: string;
+  updatedAt: Date | string | null;
+}
+
 export default async function DivisionalDeputyDirectorDashboardPage({
   searchParams,
 }: {
@@ -64,11 +75,13 @@ export default async function DivisionalDeputyDirectorDashboardPage({
     "irsd_review", 
     "approved", 
     "capa_approved",
-    "finished_verifications"
+    "finished_verifications",
+    "inspection_batches" // Added new management tab
   ];
   const activeTab = validTabs.includes(tab || "") ? tab : "categorization";
   
   let records: ApplicationItem[] = [];
+  let batchesList: BatchItem[] = [];
   let queryError = false;
 
   const batchPendingStep = inspectionScheduleBatchWorkflow?.steps?.INSPECTION_PENDING || {
@@ -121,7 +134,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
             "Staff Technical Field Review",
             techAssignmentStep.key,   
             techAssignmentStep.title, 
-            "Divisional Deputy Director Technical Assignment",                     
+            "Divisional Deputy Director Technical Assignment",                    
             catEndorsementStep.key,   
             catEndorsementStep.title, 
             "DDD_TECHNICAL_REVIEW",
@@ -159,6 +172,24 @@ export default async function DivisionalDeputyDirectorDashboardPage({
         capaStatus: null,
       };
     });
+
+    // Fetch batches using the correct Drizzle schema export & properties
+    const rawBatches = await db
+      .select({
+        id: scheduleBatches.id,
+        batchReference: scheduleBatches.batchReference,
+        title: scheduleBatches.title,
+        startDate: scheduleBatches.startDate,
+        endDate: scheduleBatches.endDate,
+        status: scheduleBatches.status,
+        currentPoint: scheduleBatches.currentPoint,
+        updatedAt: scheduleBatches.updatedAt,
+      })
+      .from(scheduleBatches)
+      .orderBy(desc(scheduleBatches.createdAt));
+
+    batchesList = rawBatches as BatchItem[];
+
   } catch (error) {
     console.error("Direct Database Fetch Failure:", error);
     queryError = true;
@@ -384,6 +415,21 @@ export default async function DivisionalDeputyDirectorDashboardPage({
           )}
         </Link>
         <Link 
+          href="?tab=inspection_batches" 
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
+            activeTab === "inspection_batches" 
+              ? "border-indigo-600 text-indigo-600 font-semibold" 
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+          }`}
+        >
+          <span>📦 Manage Inspection Batches</span>
+          {batchesList.length > 0 && (
+            <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-100 text-indigo-800 font-bold">
+              {batchesList.length}
+            </span>
+          )}
+        </Link>
+        <Link 
           href="?tab=approved" 
           className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
             activeTab === "approved" 
@@ -405,175 +451,230 @@ export default async function DivisionalDeputyDirectorDashboardPage({
         </Link>
       </div>
 
-      {/* Grid Table Display */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-        {currentList.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-sm">
-            No applications matching this criteria were found.
+      {/* Grid Table Display or Batches Management View */}
+      {activeTab === "inspection_batches" ? (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs p-6 space-y-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Foreign Inspection Batches Registry</h2>
+              <p className="text-xs text-slate-500">Manage active mission batches, review itineraries, reassign officers, or drop obsolete schedules.</p>
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/70 border-b border-slate-200 text-xs font-semibold text-slate-500 tracking-wider">
-                  <th className="p-4">Application ID</th>
-                  <th className="p-4">{activeTab === "finished_verifications" ? "Target Facility & Local Agent" : "Company Name"}</th>
-                  <th className="p-4">Type</th>
-                  <th className="p-4">Current Location</th>
-                  {activeTab === "categorization" ? (
-                    <th className="p-4">Categorization Status</th>
-                  ) : activeTab === "endorse_categorization" ? (
-                    <th className="p-4">Endorsement Status</th>
-                  ) : activeTab === "unassigned" ? (
-                    <th className="p-4">Tentative Inspection Date</th>
-                  ) : activeTab === "finished_verifications" ? (
-                    <th className="p-4">Scheduling Status</th>
-                  ) : isIrsdTab ? (
-                    <th className="p-4">Action Target</th>
-                  ) : (
-                    <th className="p-4">System Status</th>
-                  )}
-                  <th className="p-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-sm text-slate-700">
-                {currentList.map((app) => (
-                  <tr key={app.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-4 font-mono font-medium text-slate-900">{app.applicationNumber}</td>
-                    
-                    {/* Facility vs Local Agent Column Rendering */}
-                    <td className="p-4">
-                      {activeTab === "finished_verifications" ? (
-                        <div>
-                          <div className="font-bold text-slate-900">{app.displayFacilityName}</div>
-                          <div className="text-xs text-slate-500">Agent: <span className="font-medium text-slate-700">{app.companyName}</span></div>
-                        </div>
-                      ) : (
-                        <span>{app.companyName}</span>
-                      )}
-                    </td>
 
-                    <td className="p-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800 border border-slate-200">
-                        {app.type}
-                      </span>
-                    </td>
-                    <td className="p-4 text-slate-600 max-w-xs truncate">{app.currentPoint || "N/A"}</td>
-                    
-                    {activeTab === "categorization" ? (
-                      <td className="p-4">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
-                          Pending PIC/S Categorization
-                        </span>
-                      </td>
-                    ) : activeTab === "endorse_categorization" ? (
-                      <td className="p-4">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                          Awaiting Categorization Endorsement
-                        </span>
-                      </td>
-                    ) : activeTab === "unassigned" ? (
-                      <td className="p-4">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
-                          📅 {app.nextInspectionDate ? new Date(app.nextInspectionDate).toLocaleDateString() : "Immediate / ASAP"}
-                        </span>
-                      </td>
-                    ) : activeTab === "finished_verifications" ? (
-                      <td className="p-4">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          Ready for Scheduling (Full Payment)
-                        </span>
-                      </td>
-                    ) : isIrsdTab ? (
-                      <td className="p-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                          activeTab === "irsd_in_flight"
-                            ? "bg-amber-100 text-amber-900 border-amber-300"
-                            : "bg-amber-50 text-amber-800 border-amber-200"
-                        }`}>
-                          {activeTab === "irsd_intake" 
-                            ? "Assign IRSD Staff" 
-                            : activeTab === "irsd_in_flight"
-                            ? "IRSD Staff Vetting In-Progress"
-                            : "IRSD Final Concurrence"}
-                        </span>
-                      </td>
-                    ) : (
-                      <td className="p-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                          app.status === "CAPA_APPROVED"
-                            ? "bg-purple-50 text-purple-700 border-purple-200"
-                            : app.status === "APPROVED" || app.status === "FINALIZED" || app.status === "APPROVED_AND_ARCHIVED"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : app.status === batchPendingStep?.statusLabel
-                            ? "bg-amber-50 text-amber-700 border-amber-200"
-                            : "bg-blue-50 text-blue-700 border-blue-200"
-                        }`}>
-                          {app.status}
-                        </span>
-                      </td>
-                    )}
-
-                    <td className="p-4 text-right whitespace-nowrap space-x-2">
-                      {activeTab === "categorization" && (
-                        <CategorizeButton
-                          applicationId={app.id}
-                          companyName={app.companyName}
-                          applicationNumber={app.applicationNumber}
-                        />
-                      )}
-
-                      {activeTab === "endorse_categorization" && (
-                        <CategorizeEndorsementTrigger
-                          applicationId={app.id}
-                          facilityId={app.facilityId}
-                          companyName={app.companyName}
-                          applicationNumber={app.applicationNumber}
-                        />
-                      )}
-
-                      {activeTab === "unassigned" && (
-                        <Link
-                          href={`/LocalInspectionReports/ddd/applications/${app.id}`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
-                        >
-                          <span>📝</span> Assign Task
-                        </Link>
-                      )}
-
-                      {activeTab === "finished_verifications" && (
-                        <Link
-                          href={`/LocalInspectionReports/ddd/schedule-inspection/${app.id}`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
-                        >
-                          <span>📅</span> Schedule Inspection
-                        </Link>
-                      )}
-
-                      {(activeTab === "irsd_intake" || activeTab === "irsd_review") && (
-                        <Link
-                          href={`/LocalInspectionReports/${app.id}?step=${
-                            activeTab === "irsd_intake" ? "DDD_IRSD_INTAKE" : "DDD_IRSD_REVIEW"
-                          }`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
-                        >
-                          <span>👁️</span> Review Application
-                        </Link>
-                      )}
-
-                      {activeTab === "irsd_in_flight" && (
-                        <RecallApplicationButton applicationId={app.id} />
-                      )}
-                      
-                      <AuditTrailButton id={app.id} applicationNumber={app.applicationNumber} />
-                    </td>
+          {batchesList.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl">
+              No inspection batches found. Create a batch from the scheduling queue to begin.
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 tracking-wider">
+                    <th className="p-4">Batch Reference</th>
+                    <th className="p-4">Batch Title</th>
+                    <th className="p-4">Date Window</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4">Current Routing Point</th>
+                    <th className="p-4 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-sm text-slate-700">
+                  {batchesList.map((batch) => (
+                    <tr key={batch.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-4 font-mono font-bold text-slate-900">{batch.batchReference}</td>
+                      <td className="p-4 font-semibold text-slate-800">{batch.title}</td>
+                      <td className="p-4 text-xs text-slate-600">{batch.startDate} to {batch.endDate}</td>
+                      <td className="p-4">
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          {batch.status}
+                        </span>
+                      </td>
+                      <td className="p-4 text-xs text-slate-600">{batch.currentPoint}</td>
+                      <td className="p-4 text-right space-x-2">
+                        <Link
+                          href={`/LocalInspectionReports/ddd/schedule-inspection/batch/${batch.id}`}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                        >
+                          <span>✏️ Edit Batch & Reassign</span>
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+          {currentList.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 text-sm">
+              No applications matching this criteria were found.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/70 border-b border-slate-200 text-xs font-semibold text-slate-500 tracking-wider">
+                    <th className="p-4">Application ID</th>
+                    <th className="p-4">{activeTab === "finished_verifications" ? "Target Facility & Local Agent" : "Company Name"}</th>
+                    <th className="p-4">Type</th>
+                    <th className="p-4">Current Location</th>
+                    {activeTab === "categorization" ? (
+                      <th className="p-4">Categorization Status</th>
+                    ) : activeTab === "endorse_categorization" ? (
+                      <th className="p-4">Endorsement Status</th>
+                    ) : activeTab === "unassigned" ? (
+                      <th className="p-4">Tentative Inspection Date</th>
+                    ) : activeTab === "finished_verifications" ? (
+                      <th className="p-4">Scheduling Status</th>
+                    ) : isIrsdTab ? (
+                      <th className="p-4">Action Target</th>
+                    ) : (
+                      <th className="p-4">System Status</th>
+                    )}
+                    <th className="p-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-sm text-slate-700">
+                  {currentList.map((app) => (
+                    <tr key={app.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-4 font-mono font-medium text-slate-900">{app.applicationNumber}</td>
+                      
+                      {/* Facility vs Local Agent Column Rendering */}
+                      <td className="p-4">
+                        {activeTab === "finished_verifications" ? (
+                          <div>
+                            <div className="font-bold text-slate-900">{app.displayFacilityName}</div>
+                            <div className="text-xs text-slate-500">Agent: <span className="font-medium text-slate-700">{app.companyName}</span></div>
+                          </div>
+                        ) : (
+                          <span>{app.companyName}</span>
+                        )}
+                      </td>
+
+                      <td className="p-4">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800 border border-slate-200">
+                          {app.type}
+                        </span>
+                      </td>
+                      <td className="p-4 text-slate-600 max-w-xs truncate">{app.currentPoint || "N/A"}</td>
+                      
+                      {activeTab === "categorization" ? (
+                        <td className="p-4">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                            Pending PIC/S Categorization
+                          </span>
+                        </td>
+                      ) : activeTab === "endorse_categorization" ? (
+                        <td className="p-4">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                            Awaiting Categorization Endorsement
+                          </span>
+                        </td>
+                      ) : activeTab === "unassigned" ? (
+                        <td className="p-4">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                            📅 {app.nextInspectionDate ? new Date(app.nextInspectionDate).toLocaleDateString() : "Immediate / ASAP"}
+                          </span>
+                        </td>
+                      ) : activeTab === "finished_verifications" ? (
+                        <td className="p-4">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Ready for Scheduling (Full Payment)
+                          </span>
+                        </td>
+                      ) : isIrsdTab ? (
+                        <td className="p-4">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                            activeTab === "irsd_in_flight"
+                              ? "bg-amber-100 text-amber-900 border-amber-300"
+                              : "bg-amber-50 text-amber-800 border-amber-200"
+                          }`}>
+                            {activeTab === "irsd_intake" 
+                              ? "Assign IRSD Staff" 
+                              : activeTab === "irsd_in_flight"
+                              ? "IRSD Staff Vetting In-Progress"
+                              : "IRSD Final Concurrence"}
+                          </span>
+                        </td>
+                      ) : (
+                        <td className="p-4">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                            app.status === "CAPA_APPROVED"
+                              ? "bg-purple-50 text-purple-700 border-purple-200"
+                              : app.status === "APPROVED" || app.status === "FINALIZED" || app.status === "APPROVED_AND_ARCHIVED"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : app.status === batchPendingStep?.statusLabel
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-blue-50 text-blue-700 border-blue-200"
+                          }`}>
+                            {app.status}
+                          </span>
+                        </td>
+                      )}
+
+                      <td className="p-4 text-right whitespace-nowrap space-x-2">
+                        {activeTab === "categorization" && (
+                          <CategorizeButton
+                            applicationId={app.id}
+                            companyName={app.companyName}
+                            applicationNumber={app.applicationNumber}
+                          />
+                        )}
+
+                        {activeTab === "endorse_categorization" && (
+                          <CategorizeEndorsementTrigger
+                            applicationId={app.id}
+                            facilityId={app.facilityId}
+                            companyName={app.companyName}
+                            applicationNumber={app.applicationNumber}
+                          />
+                        )}
+
+                        {activeTab === "unassigned" && (
+                          <Link
+                            href={`/LocalInspectionReports/ddd/applications/${app.id}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                          >
+                            <span>📝</span> Assign Task
+                          </Link>
+                        )}
+
+                        {activeTab === "finished_verifications" && (
+                          <Link
+                            href={`/LocalInspectionReports/ddd/schedule-inspection/${app.id}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                          >
+                            <span>📅</span> Schedule Inspection
+                          </Link>
+                        )}
+
+                        {(activeTab === "irsd_intake" || activeTab === "irsd_review") && (
+                          <Link
+                            href={`/LocalInspectionReports/${app.id}?step=${
+                              activeTab === "irsd_intake" ? "DDD_IRSD_INTAKE" : "DDD_IRSD_REVIEW"
+                            }`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                          >
+                            <span>👁️</span> Review Application
+                          </Link>
+                        )}
+
+                        {activeTab === "irsd_in_flight" && (
+                          <RecallApplicationButton applicationId={app.id} />
+                        )}
+                        
+                        <AuditTrailButton id={app.id} applicationNumber={app.applicationNumber} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
