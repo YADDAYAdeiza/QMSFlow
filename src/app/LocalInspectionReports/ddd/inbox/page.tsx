@@ -1,5 +1,5 @@
 import { db } from "@/db"; 
-import { applications, companies, scheduleBatches } from "@/db/schema"; 
+import { applications, companies, scheduleBatches, inspectionSchedules } from "@/db/schema"; 
 import { eq, or, inArray, desc } from "drizzle-orm";
 import React from "react";
 import Link from "next/link";
@@ -76,12 +76,13 @@ export default async function DivisionalDeputyDirectorDashboardPage({
     "approved", 
     "capa_approved",
     "finished_verifications",
-    "inspection_batches" // Added new management tab
+    "inspection_batches"
   ];
   const activeTab = validTabs.includes(tab || "") ? tab : "categorization";
   
   let records: ApplicationItem[] = [];
   let batchesList: BatchItem[] = [];
+  let scheduledAppIds = new Set<number>();
   let queryError = false;
 
   const batchPendingStep = inspectionScheduleBatchWorkflow?.steps?.INSPECTION_PENDING || {
@@ -173,7 +174,14 @@ export default async function DivisionalDeputyDirectorDashboardPage({
       };
     });
 
-    // Fetch batches using the correct Drizzle schema export & properties
+    // Fetch active schedule mappings to filter out scheduled items from the queue
+    const activeSchedules = await db
+      .select({ applicationId: inspectionSchedules.applicationId })
+      .from(inspectionSchedules);
+    
+    scheduledAppIds = new Set(activeSchedules.map(s => s.applicationId));
+
+    // Fetch batches registry
     const rawBatches = await db
       .select({
         id: scheduleBatches.id,
@@ -277,13 +285,15 @@ export default async function DivisionalDeputyDirectorDashboardPage({
     app => app && app.status === "CAPA_APPROVED" && hasDivisionalDeputyDirectorHistory(app)
   );
 
+  // Automatically hide items from the scheduling queue once they are scheduled in a batch
   const finishedVerifications = safeRecords.filter(
     app => 
       app &&
       app.type === "Facility Verification" &&
       app.currentPoint === "Report Approved and Archived" &&
       app.status === "APPROVED_AND_ARCHIVED" &&
-      app.isDeskReview === false
+      app.isDeskReview === false &&
+      !scheduledAppIds.has(app.id)
   );
   
   let currentList: ApplicationItem[] = [];
@@ -459,6 +469,13 @@ export default async function DivisionalDeputyDirectorDashboardPage({
               <h2 className="text-lg font-bold text-slate-900">Foreign Inspection Batches Registry</h2>
               <p className="text-xs text-slate-500">Manage active mission batches, review itineraries, reassign officers, or drop obsolete schedules.</p>
             </div>
+            {/* Printable Schedule Link */}
+            <Link
+              href="/LocalInspectionReports/ddd/schedule-inspection/print"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+            >
+              <span>🖨️ Generate Annexure 08 Schedule</span>
+            </Link>
           </div>
 
           {batchesList.length === 0 ? (

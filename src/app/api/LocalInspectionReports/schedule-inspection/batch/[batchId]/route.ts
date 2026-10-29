@@ -1,3 +1,4 @@
+// @/app/api/LocalInspectionReports/schedule-inspection/batch/[batchId]/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { scheduleBatches, inspectionSchedules, inspectionTeamAssignments, applications } from "@/db/schema";
@@ -10,77 +11,74 @@ interface RouteParams {
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const resolvedParams = await params;
-    const batchId = resolvedParams.batchId;
+    const batchId = resolvedParams?.batchId;
     const body = await request.json();
     const { title, startDate, endDate, inspectors, facilities } = body;
 
+    if (!batchId) {
+      return NextResponse.json({ success: false, error: "Batch ID is required." }, { status: 400 });
+    }
+
     await db.transaction(async (tx) => {
-      // 1. Update batch core metadata
-      await tx.update(scheduleBatches)
+      // 1. Update batch main details
+      await tx
+        .update(scheduleBatches)
         .set({
-          title,
+          title: title || `Inspection Batch`,
           startDate,
           endDate,
           updatedAt: new Date(),
         })
         .where(eq(scheduleBatches.id, batchId));
 
-      // 2. If facilities or inspectors are changed, update schedules and team assignments
+      // 2. Clear existing schedules and team assignments for this batch to rebuild cleanly
+      const existingSchedules = await tx
+        .select({ id: inspectionSchedules.id })
+        .from(inspectionSchedules)
+        .where(eq(inspectionSchedules.batchId, batchId));
+
+      const scheduleIds = existingSchedules.map(s => s.id);
+
+      if (scheduleIds.length > 0) {
+        await tx.delete(inspectionTeamAssignments).where(inArray(inspectionTeamAssignments.scheduleId, scheduleIds));
+        await tx.delete(inspectionSchedules).where(eq(inspectionSchedules.batchId, batchId));
+      }
+
+      // 3. Resolve new facilities to application IDs
+      let targetAppIds: number[] = [];
       if (Array.isArray(facilities) && facilities.length > 0) {
-        // Find corresponding application IDs for the selected facilities
-        const matchingApps = await tx.select({ id: applications.id, facilityId: applications.facilityId })
+        const matchingApps = await tx
+          .select({ id: applications.id })
           .from(applications)
           .where(inArray(applications.facilityId, facilities));
 
-        const matchingAppIds = matchingApps.map(app => app.id);
+        targetAppIds = matchingApps.map(app => app.id);
+      }
 
-        // Delete existing team assignments linked to this batch's schedules first
-        const existingSchedules = await tx.select({ id: inspectionSchedules.id })
-          .from(inspectionSchedules)
-          .where(eq(inspectionSchedules.batchId, batchId));
+      // 4. Insert fresh schedules and team assignments
+      for (const appId of targetAppIds) {
+        const [newSchedule] = await tx.insert(inspectionSchedules).values({
+          batchId,
+          applicationId: appId,
+          scheduledDate: startDate,
+          status: "SCHEDULED",
+        }).returning({ id: inspectionSchedules.id });
 
-        const scheduleIds = existingSchedules.map(s => s.id);
-        if (scheduleIds.length > 0) {
-          await tx.delete(inspectionTeamAssignments)
-            .where(inArray(inspectionTeamAssignments.scheduleId, scheduleIds));
-          
-          await tx.delete(inspectionSchedules)
-            .where(eq(inspectionSchedules.batchId, batchId));
-        }
-
-        // CRITICAL FIX: Clean up any lingering active schedules for these applications across ANY batch 
-        // to completely prevent unique_active_application_inspection constraint crashes.
-        if (matchingAppIds.length > 0) {
-          await tx.delete(inspectionSchedules)
-            .where(inArray(inspectionSchedules.applicationId, matchingAppIds));
-        }
-
-        // Insert new schedules for each facility application in the batch
-        for (const app of matchingApps) {
-          const [newSchedule] = await tx.insert(inspectionSchedules).values({
-            batchId,
-            applicationId: app.id,
-            scheduledDate: startDate,
-            status: "SCHEDULED",
-          }).returning({ id: inspectionSchedules.id });
-
-          // Assign the team members to each schedule in the batch
-          if (Array.isArray(inspectors)) {
-            for (const ins of inspectors) {
-              await tx.insert(inspectionTeamAssignments).values({
-                scheduleId: newSchedule.id,
-                inspectorId: ins.inspectorId,
-                role: ins.role,
-              });
-            }
+        if (Array.isArray(inspectors)) {
+          for (const ins of inspectors) {
+            await tx.insert(inspectionTeamAssignments).values({
+              scheduleId: newSchedule.id,
+              inspectorId: ins.inspectorId,
+              role: ins.role,
+            });
           }
         }
       }
     });
 
-    return NextResponse.json({ success: true, message: "Batch successfully updated and re-dispatched!" });
+    return NextResponse.json({ success: true, message: "Inspection batch successfully updated!" });
   } catch (error: any) {
-    console.error("Batch Update Error:", error);
+    console.error("Batch Patch Error:", error);
     return NextResponse.json({ success: false, error: error.message || "Internal Server Error" }, { status: 500 });
   }
 }

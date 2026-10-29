@@ -1,7 +1,7 @@
 // @/app/LocalInspectionReports/ddd/schedule-inspection/[id]/page.tsx
 import { db } from "@/db";
-import { applications, companies, users, facilities, productLines, products } from "@/db/schema";
-import { eq, and, asc } from "drizzle-orm";
+import { applications, companies, users, facilities, inspectionSchedules } from "@/db/schema";
+import { eq, and, notInArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import ScheduleConsoleClient from "@/components/LocalInspectionReports/ScheduleConsoleClient";
 
@@ -52,7 +52,7 @@ export default async function ScheduleInspectionPage({ params }: PageProps) {
     latitude: targetApp.facilityLatitude ?? null,
     longitude: targetApp.facilityLongitude ?? null,
     facility_type: targetApp.facilityType || "Veterinary Pharmaceuticals",
-    product_lines: [], // Populated below if needed, or fetched via dropdown filters
+    product_lines: [],
   } : null;
 
   // 2. Fetch all system users safely
@@ -72,7 +72,14 @@ export default async function ScheduleInspectionPage({ params }: PageProps) {
     directorate: u.directorate || "VMAP",
   }));
 
-  // 3. Fetch qualified facilities for the dropdown filters using standard select queries
+  // 3. Fetch IDs of applications that already have an active inspection schedule
+  const activeSchedules = await db
+    .select({ applicationId: inspectionSchedules.applicationId })
+    .from(inspectionSchedules);
+  
+  const scheduledAppIds = activeSchedules.map(s => s.applicationId);
+
+  // 4. Fetch qualified facilities for dropdown filters, omitting already scheduled applications
   const qualifiedFacilitiesRaw = await db
     .select({
       id: facilities.id,
@@ -89,7 +96,8 @@ export default async function ScheduleInspectionPage({ params }: PageProps) {
       and(
         eq(applications.isDeskReview, false),
         eq(applications.currentPoint, "Report Approved and Archived"),
-        eq(applications.status, "APPROVED_AND_ARCHIVED")
+        eq(applications.status, "APPROVED_AND_ARCHIVED"),
+        scheduledAppIds.length > 0 ? notInArray(applications.id, scheduledAppIds) : undefined
       )
     );
 

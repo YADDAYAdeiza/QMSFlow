@@ -1,6 +1,7 @@
+// @/app/LocalInspectionReports/ddd/schedule-inspection/batch/[batchId]/page.tsx
 import { db } from "@/db";
-import { scheduleBatches, inspectionSchedules, inspectionTeamAssignments, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { scheduleBatches, inspectionSchedules, users, applications } from "@/db/schema";
+import { eq, notInArray, not } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import ScheduleConsoleBatchClient from "@/components/LocalInspectionReports/ScheduleConsoleBatchClient";
 
@@ -90,8 +91,17 @@ export default async function EditInspectionBatchPage({ params }: PageProps) {
     is_available: true,
   }));
 
-  // 4. Fetch all qualified facilities for map and itinerary management
+  // 4. Fetch IDs of applications scheduled in OTHER batches (exclude current batch's applications)
+  const activeSchedules = await db
+    .select({ applicationId: inspectionSchedules.applicationId, batchId: inspectionSchedules.batchId })
+    .from(inspectionSchedules)
+    .where(not(eq(inspectionSchedules.batchId, batchId)));
+
+  const scheduledAppIds = activeSchedules.map(s => s.applicationId);
+
+  // 5. Fetch all qualified facilities for map and itinerary management, omitting those locked in other batches
   const qualifiedApps = await db.query.applications.findMany({
+    where: scheduledAppIds.length > 0 ? notInArray(applications.id, scheduledAppIds) : undefined,
     with: {
       facility: {
         with: {
