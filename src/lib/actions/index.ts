@@ -287,22 +287,23 @@ export async function submitLODApplication(
       }
 
       // 5. Comment & Detail Threading
-      const existingDetails = (existingApp?.details as any) || {};
-      const newComment = {
-        from: userName,
-        role: userRole,
-        text: data.lodRemarks || (isUpdate ? "Technical details updated." : "Application initiated."),
-        round: isActuallyRound2 ? 2 : 1,
-        action: isActuallyRound2 ? "COMPLIANCE_DATA_UPDATE" : "INTAKE_DIRECTIVE",
-        timestamp: new Date().toISOString()
-      };
+const existingDetails = (existingApp?.details as any) || {};
+const newComment = {
+  from: userName,
+  role: userRole,
+  text: data.lodRemarks || (isUpdate ? "Technical details updated." : "Application initiated."),
+  round: isActuallyRound2 ? 2 : 1,
+  action: isActuallyRound2 ? "COMPLIANCE_DATA_UPDATE" : "INTAKE_DIRECTIVE",
+  timestamp: new Date().toISOString()
+};
 
-      const enhancedDetails = {
-        ...data,
-        directorate: appDirectorate,
-        comments: [...(existingDetails.comments || []), newComment],
-        isComplianceReview: isActuallyRound2 
-      };
+const enhancedDetails = {
+  ...existingDetails, // <--- PRESERVES existing details (companyName, facilityName, addresses, etc.)
+  ...data,            // <--- Overrides with fresh incoming form data if present
+  directorate: appDirectorate,
+  comments: [...(existingDetails.comments || []), newComment],
+  isComplianceReview: isActuallyRound2 
+};
 
       let appId: number;
 

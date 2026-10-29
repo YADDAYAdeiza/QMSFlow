@@ -9,10 +9,15 @@ export async function POST(request: Request) {
     const { applicationId, scheduledDate, inspectors, facilities } = body;
 
     await db.transaction(async (tx) => {
-      // Generate a unique batch reference string to satisfy the not-null constraint
+      // 1. Clean up any existing active schedule for this application to avoid unique constraint violations
+      await tx
+        .delete(inspectionSchedules)
+        .where(eq(inspectionSchedules.applicationId, Number(applicationId)));
+
+      // 2. Generate a unique batch reference string
       const batchReference = `BATCH-${Date.now()}`;
 
-      // 1. Create the schedule batch with the required batchReference
+      // 3. Create the schedule batch record
       const [newBatch] = await tx.insert(scheduleBatches).values({
         batchReference,
         title: `Inspection Batch - ${new Date().toLocaleDateString()}`,
@@ -22,9 +27,12 @@ export async function POST(request: Request) {
         createdAt: new Date(),
       }).returning({ id: scheduleBatches.id });
 
-      // 2. Insert schedules and team assignments for each facility in the batch
+      // 4. Insert schedules and team assignments for each facility in the batch
       if (Array.isArray(facilities)) {
         for (const facilityId of facilities) {
+          // Note: If your inspection_schedules table has a facilityId column, include it here:
+          // facilityId: facilityId,
+          
           const [newSchedule] = await tx.insert(inspectionSchedules).values({
             batchId: newBatch.id,
             applicationId: Number(applicationId),

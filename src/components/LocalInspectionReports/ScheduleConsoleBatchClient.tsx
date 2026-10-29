@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import "leaflet/dist/leaflet.css";
 
 const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
@@ -124,6 +125,8 @@ interface Props {
 }
 
 export default function ScheduleConsoleBatchClient({ batchId, initialUsers = [], initialFacilities = [], initialBatchData }: Props) {
+  const router = useRouter();
+
   const [selectedFacilityCountry, setSelectedFacilityCountry] = useState<string>("ALL");
   const [selectedFacilityDirectorate, setSelectedFacilityDirectorate] = useState<string>("ALL");
   const [selectedSterility, setSelectedSterility] = useState<string>("ALL");
@@ -267,7 +270,12 @@ export default function ScheduleConsoleBatchClient({ batchId, initialUsers = [],
       if (!result.success && response.status !== 200) {
         throw new Error(result.error || 'Failed to update batch schedule.');
       }
+
       alert("Inspection batch successfully updated and re-assigned!");
+      
+      // Automatically navigate back to the Manage Inspection Batches tab
+      router.push("/LocalInspectionReports/ddd/inbox?tab=inspection_batches");
+      router.refresh();
     } catch (err: unknown) {
       alert(err instanceof Error ? `Update Error: ${err.message}` : 'An unexpected error occurred.');
     } finally {

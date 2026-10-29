@@ -32,7 +32,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
           .from(applications)
           .where(inArray(applications.facilityId, facilities));
 
-        // Delete existing schedules for this batch to rebuild the itinerary queue cleanly
+        const matchingAppIds = matchingApps.map(app => app.id);
+
+        // Delete existing team assignments linked to this batch's schedules first
         const existingSchedules = await tx.select({ id: inspectionSchedules.id })
           .from(inspectionSchedules)
           .where(eq(inspectionSchedules.batchId, batchId));
@@ -44,6 +46,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
           
           await tx.delete(inspectionSchedules)
             .where(eq(inspectionSchedules.batchId, batchId));
+        }
+
+        // CRITICAL FIX: Clean up any lingering active schedules for these applications across ANY batch 
+        // to completely prevent unique_active_application_inspection constraint crashes.
+        if (matchingAppIds.length > 0) {
+          await tx.delete(inspectionSchedules)
+            .where(inArray(inspectionSchedules.applicationId, matchingAppIds));
         }
 
         // Insert new schedules for each facility application in the batch

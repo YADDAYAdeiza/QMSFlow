@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import "leaflet/dist/leaflet.css";
 
 const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
@@ -106,13 +107,37 @@ interface FacilityOption {
   product_lines: ProductLineOption[];
 }
 
-interface Props {
-  applicationId: string;
-  initialUsers: Inspector[];
-  initialFacilities: FacilityOption[];
+interface BatchEditData {
+  id?: string;
+  title?: string;
+  startDate?: string;
+  endDate?: string;
+  assignedFacilities?: FacilityOption[];
+  teamLeader?: string;
+  coInspectors?: string[];
+  traineeInspectors?: string[];
 }
 
-export default function ScheduleConsoleClient({ applicationId, initialUsers = [], initialFacilities = [] }: Props) {
+interface Props {
+  applicationId?: string;
+  batchId?: string;
+  initialUsers: Inspector[];
+  initialFacilities: FacilityOption[];
+  initialBatchData?: BatchEditData;
+  initialApplicationFacility?: FacilityOption | null;
+}
+
+export default function ScheduleConsoleClient({ 
+  applicationId, 
+  batchId, 
+  initialUsers = [], 
+  initialFacilities = [], 
+  initialBatchData,
+  initialApplicationFacility 
+}: Props) {
+  const router = useRouter();
+  const isEditMode = Boolean(batchId);
+
   const [selectedFacilityCountry, setSelectedFacilityCountry] = useState<string>("ALL");
   const [selectedFacilityDirectorate, setSelectedFacilityDirectorate] = useState<string>("ALL");
   const [selectedSterility, setSelectedSterility] = useState<string>("ALL");
@@ -120,12 +145,23 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
   const [selectedClassification, setSelectedClassification] = useState<string>("ALL");
 
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>("");
-  const [assignedFacilities, setAssignedFacilities] = useState<FacilityOption[]>([]);
+  
+  // Automatically seed queue with batch assigned facilities or the linked application facility
+  const [assignedFacilities, setAssignedFacilities] = useState<FacilityOption[]>(() => {
+    if (initialBatchData?.assignedFacilities && initialBatchData.assignedFacilities.length > 0) {
+      return initialBatchData.assignedFacilities;
+    }
+    if (initialApplicationFacility) {
+      return [initialApplicationFacility];
+    }
+    return [];
+  });
 
-  const [inspectionDate, setInspectionDate] = useState("");
-  const [teamLeader, setTeamLeader] = useState("");
-  const [coInspectors, setCoInspectors] = useState<string[]>([]);
-  const [traineeInspectors, setTraineeInspectors] = useState<string[]>([]);
+  const [inspectionDate, setInspectionDate] = useState(initialBatchData?.startDate || "");
+  const [batchTitle, setBatchTitle] = useState(initialBatchData?.title || "");
+  const [teamLeader, setTeamLeader] = useState(initialBatchData?.teamLeader || "");
+  const [coInspectors, setCoInspectors] = useState<string[]>(initialBatchData?.coInspectors || []);
+  const [traineeInspectors, setTraineeInspectors] = useState<string[]>(initialBatchData?.traineeInspectors || []);
 
   const [focusedInspector, setFocusedInspector] = useState<Inspector | null>(null);
 
@@ -227,7 +263,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
 
   const handleSubmitSchedule = async () => {
     if (!inspectionDate || !teamLeader) {
-      alert("Validation Error: Inspection target date and a designated Team Leader are mandatory parameters.");
+      alert("Validation Error: Inspection target date and designated Team Leader are required parameters.");
       return;
     }
     if (assignedFacilities.length === 0) {
@@ -243,22 +279,41 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
         ...traineeInspectors.map((id) => ({ inspectorId: id, role: "TRAINEE_INSPECTOR" as const })),
       ];
 
-      const response = await fetch('/api/LocalInspectionReports/schedule-inspection/batch', {
-        method: 'POST',
+      const endpoint = isEditMode
+        ? `/api/LocalInspectionReports/schedule-inspection/batch/${batchId}`
+        : '/api/LocalInspectionReports/schedule-inspection/batch';
+
+      const method = isEditMode ? 'PATCH' : 'POST';
+
+      const payload = isEditMode ? {
+        title: batchTitle,
+        startDate: inspectionDate,
+        endDate: inspectionDate,
+        inspectors: inspectorPayload,
+        facilities: assignedFacilities.map(f => f.id),
+      } : {
+        applicationId: Number(applicationId),
+        scheduledDate: inspectionDate,
+        inspectors: inspectorPayload,
+        facilities: assignedFacilities.map(f => f.id),
+      };
+
+      const response = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          applicationId: Number(applicationId),
-          scheduledDate: inspectionDate,
-          inspectors: inspectorPayload,
-          facilities: assignedFacilities.map(f => f.id),
-        }),
+        body: JSON.stringify(payload),
       });
 
       const result = await response.json();
       if (!result.success && response.status !== 200) {
-        throw new Error(result.error || 'Failed to update inspection schedule.');
+        throw new Error(result.error || 'Failed to commit inspection batch schedule.');
       }
-      alert("Foreign inspection batch schedule successfully committed and dispatched!");
+      
+      alert(isEditMode ? "Inspection batch successfully updated and re-assigned!" : "Foreign inspection batch schedule successfully committed and dispatched!");
+      
+      // Reroute back to DDD inbox with the Inspection Scheduling Queue tab active
+      router.push("/LocalInspectionReports/ddd/inbox?tab=finished_verifications");
+      router.refresh();
     } catch (err: unknown) {
       alert(err instanceof Error ? `Submission Error: ${err.message}` : 'An unexpected error occurred during submission.');
     } finally {
@@ -276,10 +331,24 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-xs font-black uppercase tracking-wider text-slate-900">
-              👥 Inspection Team Matrix
+              👥 {isEditMode ? "Reassign Team Matrix" : "Inspection Team Matrix"}
             </h3>
-            <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full">High-Performer Enabled</span>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isEditMode ? "bg-indigo-50 text-indigo-700" : "bg-emerald-50 text-emerald-700"}`}>
+              {isEditMode ? "Batch Edit Mode" : "High-Performer Enabled"}
+            </span>
           </div>
+
+          {isEditMode && (
+            <div>
+              <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Batch Title</label>
+              <input 
+                type="text" 
+                className="w-full text-xs font-semibold border border-slate-300 rounded-xl p-3 bg-slate-50/50 focus:bg-white focus:outline-indigo-500"
+                value={batchTitle}
+                onChange={(e) => setBatchTitle(e.target.value)}
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Target Inspection Date</label>
@@ -446,6 +515,23 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
               >
                 + Add Facility to Itinerary
               </button>
+
+              <button
+                type="button"
+                disabled={!activeFacility}
+                onClick={() => {
+                  if (!activeFacility) return;
+                  const facilitiesToAdd = [activeFacility, ...closestTwoFacilities];
+                  setAssignedFacilities(prev => {
+                    const existingIds = new Set(prev.map(f => f.id));
+                    const newItems = facilitiesToAdd.filter(f => f && !existingIds.has(f.id));
+                    return [...prev, ...newItems];
+                  });
+                }}
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+              >
+                ⚡ Add Facility + Proximals (3-Batch)
+              </button>
             </div>
           </div>
 
@@ -570,7 +656,7 @@ export default function ScheduleConsoleClient({ applicationId, initialUsers = []
             onClick={handleSubmitSchedule}
             className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-black uppercase rounded-xl shadow-md transition-all cursor-pointer"
           >
-            {submitting ? 'Committing Multi-Table Transactions...' : '🚀 Finalize & Dispatch Mission Orders'}
+            {submitting ? 'Committing Multi-Table Transactions...' : (isEditMode ? '💾 Save Changes & Re-Dispatch Batch' : '🚀 Finalize & Dispatch Mission Orders')}
           </button>
         </div>
       </div>
