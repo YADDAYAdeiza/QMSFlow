@@ -22,8 +22,8 @@ export async function sendOversightEmail(appDetails: {
 
     const ccOversight = [
       "adeiza.yusuf@nafdac.gov.ng",
-      "agboola.waheed@nafdac.gov.ng",
-      "emmanuel.ngu@nafdac.gov.ng",
+      // "agboola.waheed@nafdac.gov.ng",
+      // "emmanuel.ngu@nafdac.gov.ng",
     ];
     
     const portalLandingPageUrl = "https://qms-flow.vercel.app";

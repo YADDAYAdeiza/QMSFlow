@@ -20,10 +20,13 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
+      console.error("❌ [Server Route] Unauthorized access attempt.");
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
+    console.log("📥 [Server Route] Received Payload Body:", body);
+
     const { scheduleId, applicationId, scheduledDate, inspectors } = body as {
       scheduleId?: string | null;
       applicationId: number;
@@ -35,6 +38,7 @@ export async function POST(request: Request) {
     };
 
     if (!applicationId || !scheduledDate || !inspectors || inspectors.length === 0) {
+      console.error("❌ [Server Route] Validation Failed: Missing mandatory fields.");
       return NextResponse.json({ success: false, error: "Invalid payload parameters." }, { status: 400 });
     }
 
@@ -49,6 +53,7 @@ export async function POST(request: Request) {
     const invalidIds = inspectorIds.filter(id => !validUserIds.has(id));
 
     if (invalidIds.length > 0) {
+      console.error("❌ [Server Route] Invalid Inspector IDs detected:", invalidIds);
       return NextResponse.json(
         { success: false, error: `Validation Error: One or more selected inspectors do not exist in the active user registry.` },
         { status: 400 }
@@ -57,12 +62,17 @@ export async function POST(request: Request) {
 
     const currentStep = inspectionScheduleBatchWorkflow.steps.INSPECTION_PENDING;
     const nextStep = inspectionScheduleBatchWorkflow.steps.DDD_SCHEDULE_ROUTING;
+
+    console.log("⚙️ [Workflow Mapping] Moving from:", currentStep?.key, "-> To:", nextStep?.key);
+    console.log("🎯 [Target Step Details] CurrentPoint:", nextStep?.currentPoint, "| StatusLabel:", nextStep?.statusLabel);
+
     const now = new Date();
     let targetScheduleId = scheduleId;
 
     const emailMetadata = await db.transaction(async (tx) => {
       // 1. Create or Update the single Inspection Schedule record
       if (targetScheduleId) {
+        console.log("🔄 [Transaction] Updating existing schedule ID:", targetScheduleId);
         await tx
           .update(inspectionSchedules)
           .set({
@@ -72,6 +82,7 @@ export async function POST(request: Request) {
           })
           .where(eq(inspectionSchedules.id, targetScheduleId));
       } else {
+        console.log("➕ [Transaction] Inserting brand new schedule for app ID:", applicationId);
         const [inserted] = await tx
           .insert(inspectionSchedules)
           .values({
@@ -86,6 +97,7 @@ export async function POST(request: Request) {
       }
 
       // 2. Clear & Reset Team Assignments
+      console.log("👥 [Transaction] Clearing old team assignments and inserting new team for schedule:", targetScheduleId);
       await tx
         .delete(inspectionTeamAssignments)
         .where(eq(inspectionTeamAssignments.scheduleId, targetScheduleId!));
@@ -99,6 +111,7 @@ export async function POST(request: Request) {
       await tx.insert(inspectionTeamAssignments).values(teamValues);
 
       // 3. Close active QMS timeline record for INSPECTION_PENDING
+      console.log("⏱️ [Transaction] Closing active QMS timeline for app:", applicationId);
       await tx
         .update(qmsTimelines)
         .set({ endTime: now })
@@ -110,6 +123,7 @@ export async function POST(request: Request) {
         );
 
       // 4. Open NEW QMS timeline record for DDD_SCHEDULE_ROUTING
+      console.log("⏱️ [Transaction] Opening new QMS timeline at point:", nextStep.currentPoint);
       await tx.insert(qmsTimelines).values({
         applicationId,
         point: nextStep.currentPoint,
@@ -123,6 +137,7 @@ export async function POST(request: Request) {
       });
 
       // 5. Sync Application Status and Point to DDD_SCHEDULE_ROUTING
+      console.log("📝 [Transaction] Executing application update to currentPoint:", nextStep.currentPoint);
       const [updatedApp] = await tx
         .update(applications)
         .set({
@@ -137,6 +152,17 @@ export async function POST(request: Request) {
         })
         .where(eq(applications.id, applicationId))
         .returning();
+
+      if (!updatedApp) {
+        throw new Error(`Failed to update application record with ID ${applicationId}`);
+      }
+
+      console.log("✅ [Transaction Success] Updated application row state:", {
+        id: updatedApp.id,
+        appNumber: updatedApp.applicationNumber,
+        newCurrentPoint: updatedApp.currentPoint,
+        newStatus: updatedApp.status
+      });
 
       // 6. Fetch Company and Facility details for email context
       const [comp] = await tx
@@ -158,7 +184,7 @@ export async function POST(request: Request) {
       };
     });
 
-    // 🚀 Trigger Context-Aware Email Dispatch (Explicitly communicating "Scheduled")
+    // 🚀 Trigger Context-Aware Email Dispatch
     if (emailMetadata) {
       await sendOversightEmail({
         appNumber: emailMetadata.appNumber,
@@ -167,17 +193,18 @@ export async function POST(request: Request) {
         facilityName: emailMetadata.facilityName,
         lodRemarks: `Inspection successfully Scheduled for ${scheduledDate}. Team assigned and routed to Divisional Deputy Director Schedule Preparation.`,
         customRecipient: emailMetadata.notificationEmail || undefined,
-        emailTitle: "Inspection Scheduled & Routed", // 👈 Clearly communicates scheduled status
+        emailTitle: "Inspection Scheduled & Routed",
       });
     }
 
+    console.log("🚀 [Server Route] Transaction committed successfully. Returning response.");
     return NextResponse.json({
       success: true,
       scheduleId: targetScheduleId,
       message: "Single inspection scheduled and routed to DDD Schedule Preparation successfully.",
     });
   } catch (error: any) {  
-    console.error("Error scheduling inspection:", error);
+    console.error("🔥 [Server Route Error Caught]:", error);
     return NextResponse.json(
       { success: false, error: error.message || "Internal Server Error" },
       { status: 500 }

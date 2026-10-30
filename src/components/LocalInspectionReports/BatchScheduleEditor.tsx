@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useTransition } from "react";
-import { Edit3, Eye, Save, AlertCircle, Trash2, Loader2} from "lucide-react";
+import { Edit3, Eye, Save, AlertCircle, Trash2, Loader2 } from "lucide-react";
 import RecommendApprovalModal from "@/app/LocalInspectionReports/ddd/schedule/print/RecommendApprovalModal";
 import PrintTrigger from "@/app/LocalInspectionReports/ddd/schedule/print/PrintTrigger";
 import { useBatchScheduleManager, EditableScheduleItem, InspectorPoolItem } from "@/hooks/LocalInspectionReports/useBatchScheduleManager";
@@ -55,7 +55,7 @@ export default function BatchScheduleEditor({
     setSaveError,
     handleRemoveRow,
     handleDateChange,
-    handleInspectionTypeChange, // Handled inside custom hook
+    handleInspectionTypeChange,
     handleDriverChange,
     handleTeamLeaderChange,
     handleCoInspectorToggle,
@@ -72,7 +72,7 @@ export default function BatchScheduleEditor({
 
   const isRework = batchStatus === "REWORK_REQUIRED";
 
-  // Dynamic active schedule list derived directly from active rows
+  // Dynamic active schedule list derived directly from currently active rows
   const currentActiveScheduleIds = rows.map((r) => r.scheduleId);
 
   return (

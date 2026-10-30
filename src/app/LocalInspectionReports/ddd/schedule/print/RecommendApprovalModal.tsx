@@ -42,8 +42,7 @@ export default function RecommendApprovalModal({
 
   const isDisabled = isPending || isSubmitting;
 
-  const handleSubmit = async (e: React.FormEvent) => 
-    {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isDisabled) return;
 
@@ -53,7 +52,7 @@ export default function RecommendApprovalModal({
       try {
         let activeBatchId = batchId;
 
-        // 1. If batchId is missing, resolve or auto-create the batch container
+        // 1. If batchId is missing, resolve or auto-create the batch container using exact active schedule IDs
         if (!activeBatchId) {
           const batchRes = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
             method: "PUT",
@@ -61,7 +60,7 @@ export default function RecommendApprovalModal({
             body: JSON.stringify({
               startDate,
               endDate,
-              activeScheduleIds: scheduleIds,
+              activeScheduleIds: scheduleIds, // Scoped strictly to the currently active schedules on screen
               updates: [], // Pass empty updates if no row edits occurred inside the modal
             }),
           });
@@ -111,7 +110,7 @@ export default function RecommendApprovalModal({
         setIsSubmitting(false);
       }
     });
-    };
+  };
 
   return (
     <>

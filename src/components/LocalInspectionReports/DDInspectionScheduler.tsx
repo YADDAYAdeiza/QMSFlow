@@ -72,6 +72,7 @@ export default function DDInspectionScheduler({
         if (!res.ok) throw new Error('Failed to retrieve inspector workforce matrix from QMS registry.');
         
         const data = await res.json();
+        // console.log('data: ', data);
         setInspectors(data.inspectors || []);
       } catch (err: unknown) {
         if (err instanceof Error) {
@@ -124,6 +125,8 @@ export default function DDInspectionScheduler({
         ...traineeInspectors.map((id) => ({ inspectorId: id, role: "TRAINEE_INSPECTOR" as const })),
       ];
 
+      console.log('inspectorPayload: ', inspectorPayload);
+
       // Call the POST endpoint for individual inspection scheduling
       const response = await fetch('/api/LocalInspectionReports/schedule/single', {
         method: 'POST',
@@ -139,6 +142,7 @@ export default function DDInspectionScheduler({
       const result = await response.json();
       if (!result.success) throw new Error(result.error || 'Failed to update inspection schedule.');
       
+      console.log('result: ', result);
       alert("Inspection successfully scheduled.");
       if (onSuccess) onSuccess();
 
