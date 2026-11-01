@@ -19,22 +19,25 @@ export function buildCompanyFilePath(
   companyId: string | null | undefined,
   folder: CompanySubFolder,
   fileName: string,
-  applicationId?: string
+  applicationId?: string,
+  companyName?: string // <-- Accept company name for pre-submission forms
 ): string {
   const sanitize = (val: string) => val.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
   const cleanFileName = fileName.trim().replace(/[^a-zA-Z0-9_.-]/g, '_');
 
-  const cleanCompanyId = companyId ? sanitize(String(companyId)) : '';
-  const cleanAppId = applicationId ? sanitize(applicationId) : '';
-
-  if (cleanCompanyId && cleanAppId) {
-    return `companies/${cleanCompanyId}/${cleanAppId}/${folder}/${cleanFileName}`;
+  // Resolve folder name: Uses ID if available, otherwise cleans the Company Name input
+  let companyFolder = 'Unassigned_Company';
+  if (companyId) {
+    companyFolder = sanitize(String(companyId));
+  } else if (companyName && companyName.trim() !== '') {
+    companyFolder = sanitize(companyName);
   }
 
-  const fallbackId = cleanCompanyId || cleanAppId || 'unassigned';
-  return `companies/${fallbackId}/${folder}/${cleanFileName}`;
-}
+  const cleanAppId = applicationId ? sanitize(applicationId) : 'New_Intake';
 
+  // Result: companies/{Company_Name_Or_ID}/{Application_Reference}/{Folder}/{FileName}
+  return `companies/${companyFolder}/${cleanAppId}/${folder}/${cleanFileName}`;
+}
 export function getStoragePublicUrl(bucketName: string, path: string): string {
   const supabase = createClient();
   const { data } = supabase.storage.from(bucketName).getPublicUrl(path);

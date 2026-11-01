@@ -9,6 +9,7 @@ import {
 import { submitToDDD } from "@/lib/actions/staff";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { buildCompanyFilePath, uploadDossierFile } from "@/lib/utils/supabaseUpload"; // <--- IMPORT UTILITY
 
 const GMP_SYSTEMS = [
   "Quality Management System",
@@ -32,12 +33,16 @@ interface Props {
   riskId: string;
   previousFindings?: any[];
   previousIsSra?: boolean;
+  companyId?: string | number | null; // <--- Added optional company ID prop for path construction
+  applicationNumber?: string;         // <--- Added optional application reference for path construction
 }
 
 export default function ReviewSubmissionForm({
   appId, staffId, staffName, currentDivision, comments, isHubVetting, isComplianceReview, riskId, 
   previousFindings = [], 
-  previousIsSra = false 
+  previousIsSra = false,
+  companyId,
+  applicationNumber
 }: Props) {
   const router = useRouter();
   const supabase = createClient();
@@ -50,7 +55,7 @@ export default function ReviewSubmissionForm({
   const [justification, setJustification] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [fullPaymentDate, setFullPaymentDate] = useState(""); // <-- New state for IRSD payment date input
+  const [fullPaymentDate, setFullPaymentDate] = useState("");
 
   const [findings, setFindings] = useState<Array<{ id: string; system: string; severity: string; text: string }>>(
     previousFindings.length > 0 ? previousFindings.map(f => ({ ...f, id: Math.random().toString(36).substr(2, 9) })) : []
@@ -94,27 +99,25 @@ export default function ReviewSubmissionForm({
       let publicUrl = "";
       
       if (evidenceFile && isIrsdStaff && !isComplianceReview) {
-        const fileExt = evidenceFile.name.split('.').pop();
-        const filePath = `verification_evidence/${appId}_report_${Date.now()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from('documents') 
-          .upload(filePath, evidenceFile);
-        
-        if (uploadError) throw uploadError;
+        // --- UTILIZE STANDARDIZED PATH UTILITY ---
+        // Tucked under '06_Facility_Verification' with a clear verification report filename prefix
+        const fileName = `Verification_Report_${appId}_${Date.now()}.pdf`;
+        const filePath = buildCompanyFilePath(
+          companyId ? String(companyId) : undefined,
+          '06_Facility_Verification',
+          fileName,
+          applicationNumber ? String(applicationNumber) : String(appId)
+        );
 
-        const { data: { publicUrl: url } } = supabase.storage
-          .from('documents')
-          .getPublicUrl(filePath);
-          
-        publicUrl = url;
+        // Upload using centralized utility (forces 'documents' bucket)
+        publicUrl = await uploadDossierFile(evidenceFile, filePath);
       }
 
       const complianceData = {
         riskId,
         isSra,
         isComplianceReview,
-        fullPaymentDate: isIrsdStaff ? fullPaymentDate : undefined, // <-- Pass date if IRSD staff
+        fullPaymentDate: isIrsdStaff ? fullPaymentDate : undefined,
         summary: { 
           criticalCount: counts.critical, 
           majorCount: counts.major, 

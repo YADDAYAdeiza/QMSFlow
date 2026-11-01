@@ -24,6 +24,30 @@ const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: num
   return Math.round(R * c);
 };
 
+// Helper component to dynamically fit map bounds around all assigned facilities
+function MapBoundsHandler({ assignedFacilities, activeFacility }: { assignedFacilities: FacilityOption[], activeFacility: FacilityOption | null }) {
+  const { useMap } = require("react-leaflet");
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+
+    const validFacilities = assignedFacilities.filter(f => f?.latitude != null && f?.longitude != null);
+
+    if (validFacilities.length > 0) {
+      const L = require("leaflet");
+      const bounds = L.latLngBounds(validFacilities.map(f => [f.latitude!, f.longitude!]));
+      
+      // Fit map view to encompass all batch queue facilities nicely with padding
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    } else if (activeFacility?.latitude != null && activeFacility?.longitude != null) {
+      map.setView([activeFacility.latitude, activeFacility.longitude], 10);
+    }
+  }, [map, assignedFacilities, activeFacility]);
+
+  return null;
+}
+
 const getTravelLogistics = (distanceKm: number, country: string) => {
   if (distanceKm > 500) {
     return {
@@ -481,43 +505,64 @@ export default function ScheduleConsoleBatchClient({ batchId, initialUsers = [],
         </div>
       </div>
 
-      {/* COLUMN 2: Map & Travel Radar */}
+    {/* COLUMN 2: Map & Travel Radar */}
       <div className="xl:col-span-5 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
         <div>
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 mb-3 flex items-center justify-between">
             <span>🗺️ Proximity & Travel Radar</span>
-            {activeFacility && (
+            {assignedFacilities.length > 0 && (
               <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-bold">
-                {activeFacility.name} ({activeFacility.country})
+                {assignedFacilities.length} Facilities in Itinerary
               </span>
             )}
           </h3>
 
           <div className="h-[430px] w-full rounded-xl overflow-hidden border border-slate-300 relative z-0 mb-4 shadow-inner">
-            {isMounted ? (
-              <MapContainer
-                key={`${centerLat}-${centerLng}`}
-                center={[centerLat, centerLng]}
-                zoom={5}
-                style={{ height: "100%", width: "100%" }}
-                className="w-full h-full"
-              >
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                {activeFacility && (
-                  <Marker position={[centerLat, centerLng]} icon={createColoredIcon("#6366f1")}>
+          {isMounted ? (
+            <MapContainer
+              center={[centerLat, centerLng]}
+              zoom={5}
+              style={{ height: "100%", width: "100%" }}
+              className="w-full h-full"
+            >
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              
+              {/* Auto-recenter and fit bounds to all assigned facilities */}
+              <MapBoundsHandler assignedFacilities={assignedFacilities} activeFacility={activeFacility} />
+
+              {/* Render markers for all facilities in the Batch Itinerary Queue */}
+              {assignedFacilities.map((fac, index) => {
+                const fLat = fac.latitude;
+                const fLng = fac.longitude;
+                
+                if (fLat == null || fLng == null) return null;
+                
+                const isSelected = fac.id === activeFacility?.id;
+                const pinColor = isSelected ? "#6366f1" : "#64748b";
+
+                return (
+                  <Marker 
+                    key={`batch-marker-${fac.id}-${index}`}
+                    position={[fLat, fLng]} 
+                    icon={createColoredIcon(pinColor)}
+                  >
                     <Popup>
                       <div className="text-xs space-y-1">
-                        <strong>{activeFacility.name}</strong><br />
-                        📍 {activeFacility.address} ({activeFacility.country})
+                        <strong className="text-indigo-900 font-bold">{fac.name}</strong><br />
+                        📍 {fac.address} ({fac.country})<br />
+                        <span className="text-[10px] text-slate-500 uppercase font-semibold">
+                          Type: {fac.facility_type || 'Standard Facility'}
+                        </span>
                       </div>
                     </Popup>
                   </Marker>
-                )}
-              </MapContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full bg-slate-100 text-slate-400 text-xs">Loading Map...</div>
-            )}
-          </div>
+                );
+              })}
+            </MapContainer>
+          ) : (
+            <div className="flex items-center justify-center h-full bg-slate-100 text-slate-400 text-xs">Loading Map...</div>
+          )}
+        </div>
         </div>
 
         <div className="pt-3 mt-4 border-t border-slate-200">

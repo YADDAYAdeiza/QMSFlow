@@ -1,17 +1,26 @@
 "use client"
 
 import React, { useState } from 'react'
-import { createClient } from '@/utils/supabase/client'
 import { Upload, CheckCircle2, Loader2, FileText } from 'lucide-react'
-
-const supabase = await createClient();
+import { buildCompanyFilePath, uploadDossierFile, CompanySubFolder } from '@/lib/utils/supabaseUpload'
 
 interface FileUploadProps {
   label: string
   onUploadComplete: (url: string) => void
+  companyId?: string | number | null
+  companyName?: string // <--- 1. Added companyName prop
+  applicationId?: string
+  folder?: CompanySubFolder
 }
 
-export default function FileUpload({ label, onUploadComplete }: FileUploadProps) {
+export default function FileUpload({ 
+  label, 
+  onUploadComplete, 
+  companyId, 
+  companyName, // <--- Destructure companyName
+  applicationId, 
+  folder = '06_Facility_Verification' 
+}: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null)
 
@@ -23,31 +32,24 @@ export default function FileUpload({ label, onUploadComplete }: FileUploadProps)
       setIsUploading(true)
       setFileName(file.name)
 
-      // 1. Create a unique path (ApplicationNumber/Filename)
-      // We use a timestamp to prevent overwriting files with the same name
-      const fileExt = file.name.split('.').pop()
-      const filePath = `intake_${Date.now()}.${fileExt}`
+      // 1. Build the standardized, safe path passing both companyId and companyName fallback
+      const filePath = buildCompanyFilePath(
+        companyId ? String(companyId) : undefined,
+        folder,
+        file.name,
+        applicationId,
+        companyName // <--- 2. Forward companyName so pre-submission folders use what you typed!
+      )
 
-      // 2. UPLOAD TO SUPABASE
-      // Bucket name: 'documents' (Lowercase as requested)
-      const { data, error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(filePath, file)
+      // 2. Upload file via the standardized utility into the 'documents' bucket
+      const publicUrl = await uploadDossierFile(file, filePath)
 
-      if (uploadError) throw uploadError
-
-      // 3. GET THE PUBLIC URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath)
-
-      // 4. TRIGGER CALLBACK
-      // This sends the URL back to LODEntryForm.tsx to fill poaUrl or inspectionReportUrl
+      // 3. Trigger callback with the public URL
       onUploadComplete(publicUrl)
 
     } catch (error: any) {
       console.error('Upload Error:', error.message)
-      alert('Upload failed: ' + error.message)
+      alert('Upload failed: ' + (error.message || 'Unknown error'))
       setFileName(null)
     } finally {
       setIsUploading(false)
@@ -87,6 +89,7 @@ export default function FileUpload({ label, onUploadComplete }: FileUploadProps)
             <span className={`text-xs font-bold truncate max-w-[150px] ${fileName ? 'text-emerald-700' : 'text-slate-400'}`}>
               {isUploading ? 'Uploading to Documents...' : fileName || 'Click to upload PDF'}
             </span>
+
           </div>
 
           {!isUploading && !fileName && (

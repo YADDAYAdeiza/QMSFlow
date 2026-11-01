@@ -1,5 +1,5 @@
 "use client"
-
+import { buildCompanyFilePath, uploadDossierFile } from "@/lib/utils/supabaseUpload";
 import React, { useState, useTransition, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { pdf, BlobProvider } from '@react-pdf/renderer';
@@ -174,12 +174,22 @@ export default function DirectorReviewClient({ app, usersList, pdfUrl, currentUs
     setProcessing(true);
     try {
       const blob = await pdf(docConfig.component).toBlob();
-      const path = `Final_Outputs/${app.applicationNumber}/${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
       
-      const { error: uploadError } = await supabase.storage.from('documents').upload(path, blob);
-      if (uploadError) throw uploadError;
+      // 1. Define file details for the signed output
+      const fileName = `${docConfig.prefix}_SIGNED_${Date.now()}.pdf`;
+      const companyId = app.companyId || app.company_id || details.companyId;
+      const applicationId = app.applicationNumber || app.id?.toString();
 
-      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
+      // 2. Build standardized path under '06_Facility_Verification'
+      const filePath = buildCompanyFilePath(
+        companyId ? String(companyId) : undefined,
+        '06_Facility_Verification',
+        fileName,
+        applicationId ? String(applicationId) : undefined
+      );
+
+      // 3. Upload using the centralized utility function
+      const publicUrl = await uploadDossierFile(blob, filePath);
 
       startTransition(async () => {
         const metadataUpdate = isInspection 
