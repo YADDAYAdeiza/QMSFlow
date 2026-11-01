@@ -17,7 +17,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
   const { tab } = (await searchParams) || {};
   const activeTab = tab || "rework"; // Default focus to Rework for quick action
 
-  // Fetch batches relevant to Divisional Deputy Director routing
+  // Fetch batches relevant to Divisional Deputy Director routing based on Workflow Config
   const rawBatches = await db
     .select({
       id: scheduleBatches.id,
@@ -35,7 +35,7 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
     .leftJoin(users, eq(scheduleBatches.endorsedBy, users.id))
     .where(
       or(
-        // Rework Required sitting on Divisional Deputy Director Desk
+        // 1. Rework Required sitting on Divisional Deputy Director Desk
         and(
           eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED),
           eq(
@@ -43,10 +43,20 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
             inspectionScheduleBatchWorkflow.steps.REWORK_REQUIRED.currentPoint
           )
         ),
-        // Pending Director Review
-        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL),
-        // Approved Logs
-        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.APPROVED)
+        // 2. Pending Director Review (Perfectly aligned with SCHEDULE_DRAFT step config)
+        and(
+          eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT.statusLabel),
+          eq(
+            scheduleBatches.currentPoint,
+            inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT.currentPoint
+          )
+        ),
+        // 3. Director Approved & Dispatched Logs (Strictly INSPECTION_SCHEDULED)
+        eq(scheduleBatches.status, inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED),
+        eq(
+          scheduleBatches.currentPoint,
+          inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED.currentPoint
+        )
       )
     )
     .orderBy(desc(scheduleBatches.createdAt));
@@ -54,11 +64,17 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
   const reworkBatches = rawBatches.filter(
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
   );
+  
   const pendingBatches = rawBatches.filter(
-    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL
+    (b) =>
+      b.status === inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT.statusLabel &&
+      b.currentPoint === inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT.currentPoint
   );
+
   const approvedBatches = rawBatches.filter(
-    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.APPROVED
+    (b) =>
+      b.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED ||
+      b.currentPoint === inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED.currentPoint
   );
 
   let currentList = reworkBatches;
@@ -165,7 +181,11 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
                   const lastReworkNote = historyArr
                     .slice()
                     .reverse()
-                    .find((h) => h.action === "RETURNED_FOR_REWORK")?.comment;
+                    .find((h) => h.action === "RETURNED_FOR_REWORK" || h.action === "REWORK")?.comment;
+
+                  const isBatchApproved = 
+                    batch.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED ||
+                    batch.currentPoint === inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED.currentPoint;
 
                   return (
                     <tr key={batch.id} className="hover:bg-slate-50/50">
@@ -181,14 +201,14 @@ export default async function DivisionalDeputyDirectorScheduleInboxPage({
                       <td className="p-4">
                         <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                            batch.status === inspectionScheduleBatchWorkflow.statuses.APPROVED
+                            isBatchApproved
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                               : batch.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
                               ? "bg-amber-50 text-amber-700 border-amber-200"
                               : "bg-blue-50 text-blue-700 border-blue-200"
                           }`}
                         >
-                          {batch.status}
+                          {isBatchApproved ? "APPROVED" : batch.status}
                         </span>
                       </td>
                       <td className="p-4 max-w-xs text-xs text-slate-600 truncate">

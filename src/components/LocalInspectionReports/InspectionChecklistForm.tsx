@@ -131,6 +131,7 @@ export default function InspectionChecklistForm({
   const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [isAiEnhancing, setIsAiEnhancing] = useState(false);
   const [isGeolocating, setIsGeolocating] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
 
@@ -416,6 +417,34 @@ export default function InspectionChecklistForm({
       major_count: severity === "major" ? Math.max(0, prev.major_count - 1) : prev.major_count,
       other_count: severity === "other" ? Math.max(0, prev.other_count - 1) : prev.other_count,
     }));
+  };
+
+  const handleAiEnhance = async () => {
+    if (isReadOnly || isAiEnhancing || isCompiling) return;
+    setIsAiEnhancing(true);
+    try {
+      const res = await fetch("/api/LocalInspectionReports/ai-synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+
+      const data = await res.json();
+      if (data.success && data.enhancedFields) {
+        setFormData(prev => ({
+          ...prev,
+          ...data.enhancedFields,
+          observations: data.enhancedFields.observations || prev.observations
+        }));
+        alert("AI successfully fleshed out and professionalized the report notes! You can now review and make any final edits.");
+      } else {
+        throw new Error(data.error || "Synthesis failed.");
+      }
+    } catch (err: any) {
+      alert(`AI Enhancement Error: ${err.message}`);
+    } finally {
+      setIsAiEnhancing(false);
+    }
   };
 
   const handleDraftSubmit = async () => {
@@ -932,28 +961,40 @@ export default function InspectionChecklistForm({
 
       {/* Global Form Actions */}
       {!isReadOnly && (
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
-          {onSaveDraft && (
-            <button
-              type="button"
-              onClick={handleDraftSubmit}
-              disabled={isSavingDraft || isCompiling}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 text-xs font-medium py-2.5 px-4 rounded-md transition flex items-center gap-2 disabled:opacity-50"
-            >
-              {isSavingDraft ? <Spinner /> : null}
-              {isSavingDraft ? "Saving Draft..." : "Save Draft"}
-            </button>
-          )}
-
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-700">
           <button
             type="button"
-            onClick={handleFinalSubmit}
-            disabled={isCompiling || isSavingDraft}
-            className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider py-2.5 px-5 rounded-md transition flex items-center gap-2 shadow-lg disabled:opacity-50"
+            onClick={handleAiEnhance}
+            disabled={isAiEnhancing || isCompiling || isSavingDraft}
+            className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold uppercase tracking-wider py-2.5 px-4 rounded-md transition flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer"
           >
-            {isCompiling ? <Spinner /> : null}
-            {isCompiling ? "Generating..." : "AI Generate Report Framework"}
+            {isAiEnhancing ? <Spinner /> : "✨"}
+            {isAiEnhancing ? "Enhancing Notes..." : "AI Flesh Out & Professionalize Notes"}
           </button>
+
+          <div className="flex items-center gap-3 ml-auto">
+            {onSaveDraft && (
+              <button
+                type="button"
+                onClick={handleDraftSubmit}
+                disabled={isSavingDraft || isCompiling || isAiEnhancing}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 text-xs font-medium py-2.5 px-4 rounded-md transition flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {isSavingDraft ? <Spinner /> : null}
+                {isSavingDraft ? "Saving Draft..." : "Save Draft"}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleFinalSubmit}
+              disabled={isCompiling || isSavingDraft || isAiEnhancing}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider py-2.5 px-5 rounded-md transition flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer"
+            >
+              {isCompiling ? <Spinner /> : null}
+              {isCompiling ? "Saving..." : "Save & Sync Report"}
+            </button>
+          </div>
         </div>
       )}
     </div>

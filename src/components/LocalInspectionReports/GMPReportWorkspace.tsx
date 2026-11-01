@@ -7,6 +7,7 @@ import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWor
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
 import InspectionChecklistForm from "./InspectionChecklistForm";
 import ReportRichTextEditor from "./ReportRichTextEditor";
+import GMPReportStructuredView from "./GMPReportStructuredView";
 import { uploadDossierPdf, buildCompanyFilePath } from "@/lib/utils/supabaseUpload";
 import CertificateOrCapaPreviewTab from "@/components/LocalInspectionReports/CertificateOrCapaPreviewTab";
 
@@ -19,8 +20,8 @@ const BASE_CHECKLIST_TEMPLATE = {
   activities_carried_out: [] as string[],
   vicinity_assessment: "",
   lead_inspector: "",
-  co_inspectors: "",
-  trainee_inspectors: "",
+  co_inspectors: [] as string[],
+  trainees: [] as string[],
   historical_baseline: {
     prev_date_type: "",
     prev_team: "",
@@ -71,8 +72,8 @@ interface WorkspaceProps {
   applicantEmail?: string;
   scheduledDate?: string;
   leadInspectorName?: string;
-  coInspectors?: string;
-  traineeInspectors?: string;
+  coInspectors?: string | string[];
+  traineeInspectors?: string | string[];
   initialStepKey?: keyof typeof inspectionReportWorkflow.steps;
   initialReportHtml?: string | null;
   initialChecklistSnapshot?: any;
@@ -84,6 +85,15 @@ interface WorkspaceProps {
 const formatDeskTitle = (title?: string) => {
   if (!title) return "Unlabeled Desk";
   return title.replace(/DDD/g, "Divisional Deputy Director");
+};
+
+// Helper to safely normalize initial string/array props into clean arrays
+const parseInitialList = (val: any): string[] => {
+  if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
+  if (typeof val === 'string' && val.trim()) {
+    return val.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return [];
 };
 
 export default function GMPReportWorkspace({
@@ -110,15 +120,14 @@ export default function GMPReportWorkspace({
   const router = useRouter();
   const expectedUserRaw = activeUserName;
 
-  console.log('From client - traineeInspectors:', traineeInspectors)
-
   const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
   const [activeUserRole, setActiveUserRole] = useState<string>(initialActiveUserRole);
   const [remarks, setRemarks] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
 
-  const [activeDocTab, setActiveDocTab] = useState<'PDF' | 'RTF' | 'CERTIFICATE'>('RTF');
+  // Default active tab is 'STRUCTURED' to showcase the official Annexure-2 Sagar layout instantly
+  const [activeDocTab, setActiveDocTab] = useState<'PDF' | 'RTF' | 'CERTIFICATE' | 'STRUCTURED'>('STRUCTURED');
 
   const [pdfStorageUrl, setPdfStorageUrl] = useState<string | null>(initialChecklistSnapshot?.pdfStorageUrl || null);
   const [pdfCertificateUrl, setPdfCertificateUrl] = useState<string | null>(initialChecklistSnapshot?.pdfCertificateUrl || null);
@@ -132,14 +141,19 @@ export default function GMPReportWorkspace({
 
   const [commentsList, setCommentsList] = useState<CommentTrailItem[]>(initialComments);
   const [reportHtml, setReportHtml] = useState<string | null>(initialReportHtml);
+  
   const [checklistSnapshot, setChecklistSnapshot] = useState<any>(() => {
     const base = initialChecklistSnapshot || BASE_CHECKLIST_TEMPLATE;
+    const resolvedLead = base.lead_inspector || leadInspectorName || "";
+    const resolvedCo = parseInitialList(base.co_inspectors || coInspectors);
+    const resolvedTrainees = parseInitialList(base.trainees || base.trainee_inspectors || traineeInspectors);
+
     return {
       ...BASE_CHECKLIST_TEMPLATE,
       ...base,
-      lead_inspector: base.lead_inspector || leadInspectorName,
-      co_inspectors: base.co_inspectors || coInspectors,
-      trainee_inspectors: base.trainee_inspectors || traineeInspectors,
+      lead_inspector: resolvedLead,
+      co_inspectors: resolvedCo,
+      trainees: resolvedTrainees,
     };
   });
 
@@ -150,7 +164,7 @@ export default function GMPReportWorkspace({
 
   useEffect(() => {
     if (!isPdfViewAuthorized && (activeDocTab === 'PDF' || activeDocTab === 'CERTIFICATE')) {
-      setActiveDocTab('RTF');
+      setActiveDocTab('STRUCTURED');
     }
   }, [isPdfViewAuthorized, activeDocTab]);
 
@@ -241,23 +255,10 @@ export default function GMPReportWorkspace({
   };
 
   const isAuthorizedToForward = !!activeUserId && !!activeUserRole;
-
-  const isAuthorizedRole =
-    activeUserRole === "TEAM_LEADER" ||
-    activeUserRole === "DDD" ||
-    activeUserRole === "Divisional Deputy Director" ||
-    activeUserRole === "IRSD_STAFF" ||
-    activeUserRole === "STAFF" ||
-    activeUserRole === "INSPECTOR" ||
-    activeUserRole === "REVIEWER" ||
-    activeUserRole === activeStepConfig?.role;
-
   const canDispatchForward = true;
-
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
-const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
-    // Ensure we are using the most current payload from the checklist form or fallback to state
+  const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
     const payloadToSave = draftPayload || checklistSnapshot;
     if (!payloadToSave) return;
 
@@ -306,51 +307,70 @@ const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
     }
   };
 
-const handleClientSignDocument = () => {
-    if (!reportHtml) {
-      alert("No report HTML available to sign.");
-      return;
-    }
-
+  const handleClientSignDocument = () => {
     const currentUserName = expectedUserRaw.trim().toLowerCase();
-    console.log("Attempting electronic signature for authenticated user:", currentUserName);
+    
+    // 1. Check if we are interacting with the Structured View or Tiptap Editor
+    const structuredContainer = document.querySelector('.max-w-4xl.mx-auto'); // Structured view container wrapper
+    const editorContainer = document.querySelector('.ProseMirror'); // Tiptap container
 
-    const editorContainer = document.querySelector('.ProseMirror');
-    if (!editorContainer) {
-      alert("Editor container not found.");
-      return;
-    }
-
-    const cells = editorContainer.querySelectorAll('td');
     let toggled = false;
 
-    for (const td of Array.from(cells)) {
-      // Ensure we match the exact card name attribute or text content
-      const cardName = td.getAttribute('data-card-name');
-      if (cardName && cardName.includes(currentUserName)) {
-        const img = td.querySelector('img');
-        if (img) {
-          const isSigned = img.getAttribute('data-signed') === 'true';
+    // Search and toggle within Structured View if present
+    if (structuredContainer) {
+      const signatureCards = structuredContainer.querySelectorAll('[data-card-name]');
+      for (const card of Array.from(signatureCards)) {
+        const cardName = card.getAttribute('data-card-name') || "";
+        if (cardName.includes(currentUserName) || currentUserName.includes(cardName)) {
+          const sigBox = card.querySelector('.signature-display-box') as HTMLElement;
+          const placeholder = card.querySelector('.unsigned-placeholder') as HTMLElement;
 
-          img.style.visibility = isSigned ? 'hidden' : 'visible';
-          img.style.display = isSigned ? 'none' : 'block';
-          img.setAttribute('data-signed', isSigned ? 'false' : 'true');
-          
-          toggled = true;
-          break; 
+          if (sigBox && placeholder) {
+            const isSigned = sigBox.getAttribute('data-signed') === 'true';
+
+            sigBox.style.display = isSigned ? 'none' : 'block';
+            sigBox.setAttribute('data-signed', isSigned ? 'false' : 'true');
+            placeholder.style.display = isSigned ? 'block' : 'none';
+
+            toggled = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // Search and toggle within Tiptap Editor if structured match wasn't toggled
+    if (!toggled && editorContainer) {
+      const cells = editorContainer.querySelectorAll('td');
+      for (const td of Array.from(cells)) {
+        const cardName = td.getAttribute('data-card-name') || "";
+        if (cardName.includes(currentUserName) || currentUserName.includes(cardName)) {
+          const img = td.querySelector('img');
+          if (img) {
+            const isSigned = img.getAttribute('data-signed') === 'true';
+
+            img.style.visibility = isSigned ? 'hidden' : 'visible';
+            img.style.display = isSigned ? 'none' : 'block';
+            img.setAttribute('data-signed', isSigned ? 'false' : 'true');
+            
+            toggled = true;
+            break; 
+          }
         }
       }
     }
 
     if (toggled) {
-      const freshHtml = editorContainer.innerHTML;
-      setReportHtml(freshHtml);
-      const updatedSnapshot = { ...checklistSnapshot, compiledReportHtml: freshHtml };
-      setChecklistSnapshot(updatedSnapshot);
-      handleSaveDraft(updatedSnapshot, true);
+      if (editorContainer) {
+        const freshHtml = editorContainer.innerHTML;
+        setReportHtml(freshHtml);
+        const updatedSnapshot = { ...checklistSnapshot, compiledReportHtml: freshHtml };
+        setChecklistSnapshot(updatedSnapshot);
+        handleSaveDraft(updatedSnapshot, true);
+      }
       alert(`Signature successfully toggled for ${expectedUserRaw}!`);
     } else {
-      alert(`Could not locate a signature block matching user "${expectedUserRaw}" in the document.`);
+      alert(`Could not locate a signature block matching user "${expectedUserRaw}". Ensure your name matches the Lead, Co-Inspector, or Trainee field in Step 1.`);
     }
   };
 
@@ -414,7 +434,7 @@ const handleClientSignDocument = () => {
         setChecklistSnapshot(updatedSnapshot);
         await handleSaveDraft(updatedSnapshot, true);
 
-        alert("AI Technical Report Narrative compiled and saved successfully!");
+        alert("Technical Report framework synced successfully!");
       } else {
         alert("Synthesis aborted: " + outcome.error);
       }
@@ -489,7 +509,7 @@ const handleClientSignDocument = () => {
     }
   };
 
- const handleTransition = async (
+  const handleTransition = async (
     direction: "FORWARD" | "REWORK" | "TARGETED_REWORK",
     targetStepOverride?: keyof typeof inspectionReportWorkflow.steps
   ) => {
@@ -682,28 +702,38 @@ const handleClientSignDocument = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF"].includes(currentStep) && (
+              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "STAFF_TECHNICAL_REVIEW", "DDD_TECHNICAL_REVIEW"].includes(currentStep) && (
                 <div className="bg-slate-100 border-b border-slate-200 px-4 pt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1 overflow-x-auto">
+                    {/* Structured View Tab Button (Exact Sagar Layout Format) */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveDocTab('STRUCTURED')}
+                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all border-t border-x whitespace-nowrap cursor-pointer ${
+                        activeDocTab === 'STRUCTURED'
+                          ? 'bg-white text-emerald-900 border-slate-200 shadow-sm'
+                          : 'bg-slate-200/60 text-slate-600 border-transparent hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>📊</span> Official Structured Report (Sagar Layout)
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => setActiveDocTab('RTF')}
-                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all border-t border-x whitespace-nowrap ${
+                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all border-t border-x whitespace-nowrap cursor-pointer ${
                         activeDocTab === 'RTF'
                           ? 'bg-white text-emerald-900 border-slate-200 shadow-sm'
                           : 'bg-slate-200/60 text-slate-600 border-transparent hover:bg-slate-200'
                       }`}
                     >
-                      <span>📝</span> Narrative Draft (DER-800-06)
-                      {reportHtml && (
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      )}
+                      <span>📝</span> Legacy Tiptap Editor (DER-800-06)
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setActiveDocTab('PDF')}
-                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all border-t border-x whitespace-nowrap ${
+                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all border-t border-x whitespace-nowrap cursor-pointer ${
                         activeDocTab === 'PDF'
                           ? 'bg-white text-slate-800 border-slate-200 shadow-sm'
                           : 'bg-slate-200/60 text-slate-600 border-transparent hover:bg-slate-200'
@@ -715,7 +745,7 @@ const handleClientSignDocument = () => {
                     <button
                       type="button"
                       onClick={() => setActiveDocTab('CERTIFICATE')}
-                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all border-t border-x whitespace-nowrap ${
+                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all border-t border-x whitespace-nowrap cursor-pointer ${
                         activeDocTab === 'CERTIFICATE'
                           ? 'bg-white text-amber-900 border-slate-200 shadow-sm'
                           : 'bg-slate-200/60 text-slate-600 border-transparent hover:bg-slate-200'
@@ -726,7 +756,7 @@ const handleClientSignDocument = () => {
                   </div>
 
                   <div className="pb-2.5 flex flex-wrap items-center gap-2">
-                    {reportHtml && (
+                    {reportHtml && activeDocTab === 'RTF' && (
                       <button
                         type="button"
                         onClick={handleCommitPdfToStorage}
@@ -754,6 +784,10 @@ const handleClientSignDocument = () => {
                             </a>
                           )}
                         </>
+                      ) : activeDocTab === 'STRUCTURED' ? (
+                        <span className="font-sans text-xs text-emerald-700 font-semibold">
+                          📊 Official NAFDAC Annexure-2 Layout Active
+                        </span>
                       ) : activeDocTab === 'CERTIFICATE' ? (
                         <span className="font-sans text-xs text-amber-700 font-semibold">
                           📜 Certificate & CAPA Issuance Review
@@ -771,6 +805,17 @@ const handleClientSignDocument = () => {
               )}
 
               <div className="p-5 min-h-[600px] bg-white">
+                {/* Official Structured Report View Tab (Step 2 Integration) */}
+                {activeDocTab === 'STRUCTURED' && (
+                  <div className="animate-fadeIn min-h-[600px] bg-slate-50/50 p-4 rounded-lg border border-slate-200">
+                    <GMPReportStructuredView
+                      checklistSnapshot={checklistSnapshot}
+                      companyName={companyName}
+                      applicationId={applicationId}
+                    />
+                  </div>
+                )}
+
                 {activeDocTab === 'RTF' && (
                   <div>
                     {reportHtml ? (
@@ -821,7 +866,7 @@ const handleClientSignDocument = () => {
                           type="button"
                           onClick={handleCommitPdfToStorage}
                           disabled={isRenderingPdf}
-                          className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all"
+                          className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer"
                         >
                           <span>💾</span> {isRenderingPdf ? "Rendering PDF..." : "Reflect Changes...and Upload"}
                         </button>
@@ -921,7 +966,7 @@ const handleClientSignDocument = () => {
                 type="button"
                 disabled={isSavingDraft || (currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE")}
                 onClick={() => handleSaveDraft(checklistSnapshot)}
-                className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-sm"
+                className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
               >
                 {isSavingDraft ? "Saving Draft Matrix..." : "💾 Save Collaborative Draft"}
               </button>
@@ -941,7 +986,7 @@ const handleClientSignDocument = () => {
                   <select
                     value={selectedStaff}
                     onChange={(e) => setSelectedStaff(e.target.value)}
-                    className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800"
+                    className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 cursor-pointer"
                   >
                     <option value="">-- Choose VMD Officer --</option>
                     {staffDirectory.filter(s => s.division === "VMD").map(staff => (
@@ -960,7 +1005,7 @@ const handleClientSignDocument = () => {
                     <select
                       value={selectedStaff}
                       onChange={(e) => setSelectedStaff(e.target.value)}
-                      className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
                       disabled={isLoadingStaff}
                     >
                       <option value="">
@@ -988,14 +1033,14 @@ const handleClientSignDocument = () => {
                 </div>
               )}
 
-              {reportHtml && (
+              {(currentStep === "STAFF_TECHNICAL_REVIEW" || currentStep === "DDD_TECHNICAL_REVIEW" || activeDocTab === 'STRUCTURED' || activeDocTab === 'RTF') && (
                 <div className="mb-4">
                   <button
                     type="button"
                     onClick={handleClientSignDocument}
                     className="w-full inline-flex justify-center items-center px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center cursor-pointer"
                   >
-                    ✍️ Apply Official Electronic Signature
+                    ✍️ Toggle My Inspector Signature ({expectedUserRaw})
                   </button>
                 </div>
               )}
@@ -1039,7 +1084,7 @@ const handleClientSignDocument = () => {
                           : "Confirm absolute final certification and release of official GMP Certificate?";
                         if (window.confirm(msg)) handleTransition("FORWARD");
                       }}
-                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed ${
+                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer ${
                         checklistSnapshot?.final_recommendation === "CAPA_PENDING"
                           ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
                           : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
@@ -1062,7 +1107,7 @@ const handleClientSignDocument = () => {
                           handleTransition("REWORK");
                         }
                       }}
-                      className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-lg transition-all text-center"
+                      className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-lg transition-all text-center cursor-pointer"
                     >
                       ↩️ Rework / Send Back to Technical Desk
                     </button>
@@ -1079,7 +1124,7 @@ const handleClientSignDocument = () => {
                           (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)
                         }
                         onClick={() => handleTransition("FORWARD")}
-                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center cursor-pointer"
                       >
                         {isSubmitting
                           ? "Routing..."
@@ -1098,7 +1143,7 @@ const handleClientSignDocument = () => {
                         type="button"
                         disabled={isSubmitting}
                         onClick={() => handleTransition("REWORK")}
-                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-xs font-bold rounded-lg transition-all text-center"
+                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-xs font-bold rounded-lg transition-all text-center cursor-pointer"
                       >
                         ↩️ Return to Previous Desk for Rework
                       </button>
@@ -1128,7 +1173,7 @@ const handleClientSignDocument = () => {
                         handleTransition("TARGETED_REWORK", "STAFF_TECHNICAL_REVIEW");
                       }
                     }}
-                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center"
+                    className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center cursor-pointer"
                   >
                     ↩️ Direct Return to Technical Field Reviewers
                   </button>
