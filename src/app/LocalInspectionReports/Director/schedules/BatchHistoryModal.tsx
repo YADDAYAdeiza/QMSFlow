@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 
 export interface HistoryEntry {
   action: string;
@@ -25,18 +25,27 @@ export default function BatchHistoryModal({
 }: BatchHistoryModalProps) {
   const [isOpen, setIsOpen] = useState(false);
 
-  // Safely parses history whether passed as an array, null/undefined, or JSON string
-  const historyList: HistoryEntry[] = React.useMemo(() => {
+  const historyList: HistoryEntry[] = useMemo(() => {
     if (!history) return [];
-    if (Array.isArray(history)) return history;
+
+    let parsed: unknown = history;
+
     if (typeof history === "string") {
       try {
-        return JSON.parse(history);
+        parsed = JSON.parse(history);
       } catch {
         return [];
       }
     }
-    return [];
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter(
+      (entry): entry is HistoryEntry =>
+        entry !== null &&
+        typeof entry === "object" &&
+        !Array.isArray(entry)
+    );
   }, [history]);
 
   const getActionBadge = (action: string) => {
@@ -66,15 +75,13 @@ export default function BatchHistoryModal({
       {isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 print:hidden text-left">
           <div className="bg-white rounded-xl w-full max-w-2xl p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[85vh] flex flex-col box-border overflow-hidden text-left">
-            
-            {/* Header section with explicit left alignment and word break handling */}
             <div className="flex justify-between items-start border-b pb-3 border-slate-200 gap-3 w-full min-w-0 text-left">
               <div className="min-w-0 flex-1 overflow-hidden text-left">
                 <h3 className="text-base font-bold text-slate-900 truncate block text-left">
                   Audit Trail & Minutes History
                 </h3>
                 <p className="text-xs text-slate-500 font-mono mt-1 break-all text-left">
-                  <span className="font-semibold text-slate-700">Ref: {batchReference}</span>
+                  <span className="font-semibold text-slate-700">Ref: {batchReference || "N/A"}</span>
                   {title ? ` — ${title}` : ""}
                 </p>
               </div>
@@ -88,7 +95,6 @@ export default function BatchHistoryModal({
               </button>
             </div>
 
-            {/* History Timeline Content */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4 min-w-0 text-left">
               {historyList.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 text-xs italic">
@@ -106,7 +112,6 @@ export default function BatchHistoryModal({
 
                     return (
                       <div key={idx} className="relative group min-w-0 text-left">
-                        {/* Dot on timeline */}
                         <div className="absolute -left-[23px] top-1.5 w-3 h-3 rounded-full bg-slate-400 border-2 border-white ring-2 ring-slate-100" />
 
                         <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-2 min-w-0 text-left">
@@ -148,7 +153,6 @@ export default function BatchHistoryModal({
               )}
             </div>
 
-            {/* Footer */}
             <div className="flex justify-end pt-2 border-t border-slate-100 shrink-0">
               <button
                 type="button"

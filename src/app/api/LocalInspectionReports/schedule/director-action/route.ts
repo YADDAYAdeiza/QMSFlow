@@ -9,7 +9,7 @@ import { sendOversightEmail } from "@/lib/utils/mail";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { batchId, action, comments, userId, userRole } = body;
+    const { batchId, action, comments, userId, userRole, isForeign } = body;
 
     if (!batchId || !action) {
       return NextResponse.json(
@@ -75,14 +75,18 @@ export async function POST(request: Request) {
         timestamp: now.toISOString(),
       };
 
+      // Determine the resolved boolean value for isForeign
+      const resolvedIsForeign = typeof isForeign === "boolean" ? isForeign : batch.isForeign;
+
       await db.transaction(async (tx) => {
-        // 1. Update batch status and history
+        // 1. Update batch status, history, and isForeign flag
         await tx
           .update(scheduleBatches)
           .set({
             status: inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL,
             currentPoint: targetStep.currentPoint,
             endorsedBy: validUserId,
+            isForeign: resolvedIsForeign,
             history: [...currentHistory, newHistoryEntry],
             updatedAt: now,
           })

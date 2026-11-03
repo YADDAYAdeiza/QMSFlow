@@ -154,6 +154,7 @@ export default async function PrintInspectionSchedulePage({
         isApproved={activeBatch?.status === "APPROVED"}
         userId={userId}
         isReadOnly={isReadOnly}
+        isForeign={false} // <--- Add this
       />
     </main>
   );

@@ -317,6 +317,7 @@ export const scheduleBatches = pgTable("schedule_batches", {
   currentPoint: varchar("current_point", { length: 100 })
     .notNull()
     .default("Divisional Deputy Director IRSD Routing"),
+  isForeign: boolean("is_foreign").notNull().default(false), // <--- Added field
   endorsedBy: uuid("endorsed_by"),
   approvedBy: uuid("approved_by"),
   history: jsonb("history").$type<Array<{
@@ -329,7 +330,7 @@ export const scheduleBatches = pgTable("schedule_batches", {
     timestamp: string;
   }>>().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(), // <--- Use camelCase updatedAt
 });
 
 const generatedDays = customType<{ data: number }>({

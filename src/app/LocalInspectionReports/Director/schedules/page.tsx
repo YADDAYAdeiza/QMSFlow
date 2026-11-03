@@ -15,7 +15,7 @@ export default async function DirectorScheduleInboxPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const { tab } = (await searchParams) || {};
-  const activeTab = tab || "pending";
+  const activeTab = tab || "pending_local";
 
   const rawBatches = await db
     .select({
@@ -29,6 +29,7 @@ export default async function DirectorScheduleInboxPage({
       history: scheduleBatches.history,
       createdAt: scheduleBatches.createdAt,
       endorsedByName: users.name,
+      isForeign: scheduleBatches.isForeign,
     })
     .from(scheduleBatches)
     .leftJoin(users, eq(scheduleBatches.endorsedBy, users.id))
@@ -56,8 +57,11 @@ export default async function DirectorScheduleInboxPage({
     )
     .orderBy(desc(scheduleBatches.createdAt));
 
-  const pendingBatches = rawBatches.filter(
-    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL
+  const pendingLocalBatches = rawBatches.filter(
+    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL && !b.isForeign
+  );
+  const pendingForeignBatches = rawBatches.filter(
+    (b) => b.status === inspectionScheduleBatchWorkflow.statuses.PENDING_APPROVAL && b.isForeign
   );
   const approvedBatches = rawBatches.filter(
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.INSPECTION_SCHEDULED
@@ -66,9 +70,10 @@ export default async function DirectorScheduleInboxPage({
     (b) => b.status === inspectionScheduleBatchWorkflow.statuses.REWORK_REQUIRED
   );
 
-  let currentList = pendingBatches;
-  if (activeTab === "approved") currentList = approvedBatches;
+  let currentList = pendingLocalBatches;
+  if (activeTab === "pending_foreign") currentList = pendingForeignBatches;
   if (activeTab === "rework") currentList = reworkBatches;
+  if (activeTab === "approved") currentList = approvedBatches;
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 font-sans">
@@ -82,16 +87,26 @@ export default async function DirectorScheduleInboxPage({
       </header>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-200 gap-2">
+      <div className="flex border-b border-slate-200 gap-2 flex-wrap">
         <Link
-          href="?tab=pending"
+          href="?tab=pending_local"
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "pending"
+            activeTab === "pending_local"
               ? "border-blue-600 text-blue-600 font-semibold"
               : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
         >
-          Pending My Approval ({pendingBatches.length})
+          Pending Local Schedules ({pendingLocalBatches.length})
+        </Link>
+        <Link
+          href="?tab=pending_foreign"
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "pending_foreign"
+              ? "border-indigo-600 text-indigo-600 font-semibold"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          Pending GMP (Foreign) Schedules ({pendingForeignBatches.length})
         </Link>
         <Link
           href="?tab=rework"
@@ -129,6 +144,7 @@ export default async function DirectorScheduleInboxPage({
                   <th className="p-4">Batch Ref</th>
                   <th className="p-4">Schedule Title</th>
                   <th className="p-4">Endorsed By</th>
+                  <th className="p-4">Type</th>
                   <th className="p-4">Status</th>
                   <th className="p-4 text-right">Actions</th>
                 </tr>
@@ -144,6 +160,17 @@ export default async function DirectorScheduleInboxPage({
                     </td>
                     <td className="p-4 text-slate-600">
                       {batch.endorsedByName || "Divisional Deputy Director"}
+                    </td>
+                    <td className="p-4">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${
+                          batch.isForeign
+                            ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                            : "bg-slate-100 text-slate-700 border border-slate-200"
+                        }`}
+                      >
+                        {batch.isForeign ? "GMP Foreign" : "Local Inspection"}
+                      </span>
                     </td>
                     <td className="p-4">
                       <span
@@ -175,7 +202,7 @@ export default async function DirectorScheduleInboxPage({
                         history={batch.history as any}
                       />
 
-                      {activeTab === "pending" && (
+                      {(activeTab === "pending_local" || activeTab === "pending_foreign" || activeTab === "rework") && (
                         <DirectorBatchActionModal
                           batchId={batch.id}
                           title={batch.title}

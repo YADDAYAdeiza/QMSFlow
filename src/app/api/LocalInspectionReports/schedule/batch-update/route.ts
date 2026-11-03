@@ -29,7 +29,8 @@ export async function PUT(request: Request) {
       updates = [], 
       activeScheduleIds = [], 
       startDate, 
-      endDate 
+      endDate,
+      isForeign = false // <--- 1. Extract isForeign from request body
     } = body as {
       batchId?: string;
       updates: Array<{
@@ -45,6 +46,7 @@ export async function PUT(request: Request) {
       activeScheduleIds?: string[];
       startDate: string;
       endDate: string;
+      isForeign?: boolean; // <--- Type definition
     };
 
     let targetBatchId = batchId;
@@ -86,7 +88,8 @@ export async function PUT(request: Request) {
           .where(
             and(
               eq(scheduleBatches.startDate, startDate),
-              eq(scheduleBatches.endDate, endDate)
+              eq(scheduleBatches.endDate, endDate),
+              eq(scheduleBatches.isForeign, isForeign) // <--- Ensure we match correct batch type if pre-existing
             )
           )
           .limit(1);
@@ -102,17 +105,24 @@ export async function PUT(request: Request) {
           .insert(scheduleBatches)
           .values({
             batchReference: uniqueReference,
-            title: `VMAP Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
+            title: `${isForeign ? "GMP Foreign" : "VMAP"} Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
             startDate: calculatedStartDate,
             endDate: calculatedEndDate,
             status: draftStep.statusLabel,
             currentPoint: draftStep.currentPoint,
+            isForeign: isForeign, // <--- 2. Save isForeign flag upon container creation
             history: [],
           })
           .returning({ id: scheduleBatches.id });
 
         targetBatchId = newBatch.id;
       }
+    } else {
+      // If batch already exists, ensure its isForeign flag is synchronized
+      await db
+        .update(scheduleBatches)
+        .set({ isForeign, updatedAt: now })
+        .where(eq(scheduleBatches.id, targetBatchId));
     }
 
     const emailDispatchQueue: Array<{
@@ -279,7 +289,7 @@ export async function PUT(request: Request) {
           .set({
             startDate: calculatedStartDate,
             endDate: calculatedEndDate,
-            title: `VMAP Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
+            title: `${isForeign ? "GMP Foreign" : "VMAP"} Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
             updatedAt: now,
           })
           .where(eq(scheduleBatches.id, targetBatchId));

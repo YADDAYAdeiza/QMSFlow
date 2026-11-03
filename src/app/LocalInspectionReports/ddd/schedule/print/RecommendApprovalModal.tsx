@@ -15,6 +15,7 @@ interface RecommendApprovalModalProps {
   history?: HistoryEntry[] | null | undefined;
   isRework?: boolean;
   userId?: string;
+  isForeign?: boolean; // <--- Add this
 }
 
 export default function RecommendApprovalModal({
@@ -27,6 +28,7 @@ export default function RecommendApprovalModal({
   history,
   isRework = false,
   userId,
+  isForeign = false, // <--- Add this
 }: RecommendApprovalModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [comments, setComments] = useState("");
@@ -86,7 +88,8 @@ export default function RecommendApprovalModal({
             comments,
             userId: isValidUuid ? userId : null,
             userRole: "Divisional Deputy Director",
-            action: isRework ? "RESUBMIT" : "RECOMMEND", 
+            action: isRework ? "RESUBMIT" : "RECOMMEND",
+            isForeign, // <--- Send isForeign to backend
           }),
         });
 

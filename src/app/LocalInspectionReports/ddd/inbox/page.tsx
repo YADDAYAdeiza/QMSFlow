@@ -9,6 +9,7 @@ import CategorizeButton from "@/components/LocalInspectionReports/CategorizeButt
 import CategorizeEndorsementTrigger from "@/components/LocalInspectionReports/CategorizeEndorsementTrigger"; 
 import { facilityCategorizationWorkflow } from "@/config/workflows/facilityCategorizationWorkflow";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
+import FacilityVerificationsView from "@/components/LocalInspectionReports/FacilityVerificationsView"; // Client component wrapper for modal preview
 
 interface CommentTrail {
   text?: string;
@@ -26,6 +27,8 @@ interface ApplicationDetails {
   comments?: CommentTrail[];
   facilityName?: string;
   facilityAddress?: string;
+  poaUrl?: string;
+  verificationReportUrl?: string;
   [key: string]: unknown;
 }
 
@@ -35,7 +38,7 @@ interface ApplicationItem {
   type: string;
   status: string;
   currentPoint: string | null;
-  companyName: string; // Local Applicant Company Name
+  companyName: string; 
   facilityId: string | null;
   isCategorized: boolean | null;
   nextInspectionDate?: Date | string | null;
@@ -43,7 +46,7 @@ interface ApplicationItem {
   capaStatus?: string | null;
   updatedAt?: Date | string | null;
   isDeskReview?: boolean | null;
-  displayFacilityName?: string; // Target Foreign Facility Name extracted from JSON
+  displayFacilityName?: string; 
 }
 
 interface BatchItem {
@@ -76,6 +79,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
     "approved", 
     "capa_approved",
     "finished_verifications",
+    "facility_verifications", 
     "inspection_batches"
   ];
   const activeTab = validTabs.includes(tab || "") ? tab : "categorization";
@@ -126,7 +130,10 @@ export default async function DivisionalDeputyDirectorDashboardPage({
             "APPROVED", 
             "CAPA_APPROVED",
             "FINALIZED",
-            "APPROVED_AND_ARCHIVED"
+            "APPROVED_AND_ARCHIVED",
+            "CLELRED",
+            "CLEAED",
+            "CLEARED"
           ]),
           inArray(applications.currentPoint, [
             batchPendingStep.currentPoint,
@@ -147,7 +154,8 @@ export default async function DivisionalDeputyDirectorDashboardPage({
             "DDD_IRSD_REVIEW",
             "Divisional Deputy Director IRSD Concurrence",
             "Applicant Notification Hub - Final Approval Certified",
-            "Report Approved and Archived"
+            "Report Approved and Archived",
+            "Director Final Review"
           ])
         )
       );
@@ -174,14 +182,12 @@ export default async function DivisionalDeputyDirectorDashboardPage({
       };
     });
 
-    // Fetch active schedule mappings to filter out scheduled items from the queue
     const activeSchedules = await db
       .select({ applicationId: inspectionSchedules.applicationId })
       .from(inspectionSchedules);
     
     scheduledAppIds = new Set(activeSchedules.map(s => s.applicationId));
 
-    // Fetch batches registry
     const rawBatches = await db
       .select({
         id: scheduleBatches.id,
@@ -285,7 +291,6 @@ export default async function DivisionalDeputyDirectorDashboardPage({
     app => app && app.status === "CAPA_APPROVED" && hasDivisionalDeputyDirectorHistory(app)
   );
 
-  // Automatically hide items from the scheduling queue once they are scheduled in a batch
   const finishedVerifications = safeRecords.filter(
     app => 
       app &&
@@ -294,6 +299,17 @@ export default async function DivisionalDeputyDirectorDashboardPage({
       app.status === "APPROVED_AND_ARCHIVED" &&
       app.isDeskReview === false &&
       !scheduledAppIds.has(app.id)
+  );
+
+  // --- Strict Filter for Completed Facility Verifications ---
+  const facilityVerificationsList = safeRecords.filter(
+    app => 
+      app && 
+      app.type === "Facility Verification" &&
+      (
+        (app.currentPoint === "Director Final Review" && app.status === "CLEARED") ||
+        (app.currentPoint === "Report Approved and Archived" && app.status === "APPROVED_AND_ARCHIVED")
+      )
   );
   
   let currentList: ApplicationItem[] = [];
@@ -307,6 +323,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
   else if (activeTab === "approved") currentList = approved;
   else if (activeTab === "capa_approved") currentList = capaApproved;
   else if (activeTab === "finished_verifications") currentList = finishedVerifications;
+  else if (activeTab === "facility_verifications") currentList = facilityVerificationsList;
 
   const isIrsdTab = activeTab === "irsd_intake" || activeTab === "irsd_review" || activeTab === "irsd_in_flight";
 
@@ -425,6 +442,21 @@ export default async function DivisionalDeputyDirectorDashboardPage({
           )}
         </Link>
         <Link 
+          href="?tab=facility_verifications" 
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
+            activeTab === "facility_verifications" 
+              ? "border-cyan-600 text-cyan-600 font-semibold" 
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+          }`}
+        >
+          <span>🏭 Facility Verifications</span>
+          {facilityVerificationsList.length > 0 && (
+            <span className="px-2 py-0.5 text-xs rounded-full bg-cyan-100 text-cyan-800 font-bold">
+              {facilityVerificationsList.length}
+            </span>
+          )}
+        </Link>
+        <Link 
           href="?tab=inspection_batches" 
           className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
             activeTab === "inspection_batches" 
@@ -469,7 +501,6 @@ export default async function DivisionalDeputyDirectorDashboardPage({
               <h2 className="text-lg font-bold text-slate-900">Foreign Inspection Batches Registry</h2>
               <p className="text-xs text-slate-500">Manage active mission batches, review itineraries, reassign officers, or drop obsolete schedules.</p>
             </div>
-            {/* Printable Schedule Link */}
             <Link
               href="/LocalInspectionReports/ddd/schedule-inspection/print"
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
@@ -522,6 +553,8 @@ export default async function DivisionalDeputyDirectorDashboardPage({
             </div>
           )}
         </div>
+      ) : activeTab === "facility_verifications" ? (
+        <FacilityVerificationsView records={facilityVerificationsList} />
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
           {currentList.length === 0 ? (
@@ -534,9 +567,12 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                 <thead>
                   <tr className="bg-slate-50/70 border-b border-slate-200 text-xs font-semibold text-slate-500 tracking-wider">
                     <th className="p-4">Application ID</th>
-                    <th className="p-4">{activeTab === "finished_verifications" ? "Target Facility & Local Agent" : "Company Name"}</th>
+                    <th className="p-4">
+                      {activeTab === "finished_verifications" ? "Target Facility & Local Agent" : "Company Name"}
+                    </th>
                     <th className="p-4">Type</th>
                     <th className="p-4">Current Location</th>
+                    
                     {activeTab === "categorization" ? (
                       <th className="p-4">Categorization Status</th>
                     ) : activeTab === "endorse_categorization" ? (
@@ -550,6 +586,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                     ) : (
                       <th className="p-4">System Status</th>
                     )}
+                    
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -558,7 +595,6 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                     <tr key={app.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="p-4 font-mono font-medium text-slate-900">{app.applicationNumber}</td>
                       
-                      {/* Facility vs Local Agent Column Rendering */}
                       <td className="p-4">
                         {activeTab === "finished_verifications" ? (
                           <div>
@@ -620,7 +656,7 @@ export default async function DivisionalDeputyDirectorDashboardPage({
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
                             app.status === "CAPA_APPROVED"
                               ? "bg-purple-50 text-purple-700 border-purple-200"
-                              : app.status === "APPROVED" || app.status === "FINALIZED" || app.status === "APPROVED_AND_ARCHIVED"
+                              : app.status === "APPROVED" || app.status === "FINALIZED" || app.status === "APPROVED_AND_ARCHIVED" || app.status === "CLEARED"
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                               : app.status === batchPendingStep?.statusLabel
                               ? "bg-amber-50 text-amber-700 border-amber-200"

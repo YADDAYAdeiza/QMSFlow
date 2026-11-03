@@ -52,7 +52,7 @@ export default function DirectorBatchActionModal({
         alert(
           actionType === "APPROVE"
             ? "Inspection schedule batch successfully APPROVED and finalized!"
-            : "Schedule batch returned to Divisional Deputy Director (Head IRSD) for rework."
+            : "Schedule batch returned to Divisional Deputy Director for rework."
         );
         router.refresh();
       } catch (err: any) {
@@ -65,7 +65,6 @@ export default function DirectorBatchActionModal({
   return (
     <>
       <div className="inline-flex items-center gap-1.5">
-        {/* Approve Button */}
         <button
           type="button"
           onClick={() => handleOpen("APPROVE")}
@@ -74,7 +73,6 @@ export default function DirectorBatchActionModal({
           ✓ Approve
         </button>
 
-        {/* Request Rework Button */}
         <button
           type="button"
           onClick={() => handleOpen("REWORK")}
@@ -84,7 +82,6 @@ export default function DirectorBatchActionModal({
         </button>
       </div>
 
-      {/* Modal Backdrop */}
       {isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
           <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">

@@ -152,6 +152,32 @@ export default async function LocalInspectionReportsPage() {
             </div>
           </Link>
 
+          {/* Facility Verifications Inbox Card (NEW) */}
+          <Link
+            href="/LocalInspectionReports/ddd/inbox?tab=facility_verifications"
+            className="group bg-white border border-slate-200 hover:border-cyan-500 rounded-xl p-6 shadow-sm transition-all flex flex-col justify-between"
+          >
+            <div className="space-y-3">
+              <div className="h-10 w-10 bg-cyan-50 group-hover:bg-cyan-600 group-hover:text-white text-cyan-600 rounded-lg flex items-center justify-center font-bold text-lg transition-colors">
+                🏭
+              </div>
+              <h3 className="text-base font-bold text-slate-900 group-hover:text-cyan-600 transition-colors">
+                Facility Verifications
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Review completed verifications with iFrame previews for POA dossiers and verification reports.
+              </p>
+            </div>
+            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 group-hover:text-cyan-600">
+                Open Verifications
+              </span>
+              <span className="text-xs text-slate-400 group-hover:translate-x-1 transition-transform">
+                &rarr;
+              </span>
+            </div>
+          </Link>
+
           {/* LOD Role Workspace */}
           {isLOD && (
             <Link

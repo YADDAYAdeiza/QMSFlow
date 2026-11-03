@@ -29,6 +29,7 @@ interface BatchScheduleEditorProps {
   isApproved: boolean;
   userId?: string;
   isReadOnly?: boolean;
+  isForeign?: boolean; // <--- Add this
 }
 
 export default function BatchScheduleEditor({
@@ -43,6 +44,7 @@ export default function BatchScheduleEditor({
   isApproved,
   userId,
   isReadOnly = false,
+  isForeign = false, // <--- Add this with default
 }: BatchScheduleEditorProps) {
   const [isPending, startTransition] = useTransition();
 
@@ -168,6 +170,7 @@ export default function BatchScheduleEditor({
                   history={batchHistory}
                   isRework={isRework}
                   userId={userId}
+                  isForeign={isForeign} // <--- Pass down here
                 />
               )}
             </>
