@@ -91,7 +91,7 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
   const localCompanies = aliasedTable(companies, "local_companies");
   const foreignCompanies = aliasedTable(companies, "foreign_companies");
 
-  // 3. Query inspection schedules with robust foreign & local fallbacks
+ // 3. Query inspection schedules with robust foreign & local fallbacks
   let rawSchedules: any[] = [];
   try {
     rawSchedules = await db
@@ -99,7 +99,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
         scheduleId: inspectionSchedules.id,
         scheduledDate: inspectionSchedules.scheduledDate,
         status: inspectionSchedules.status,
-        scheduleDetails: inspectionSchedules.details,
         localCompanyName: localCompanies.name,
         localCompanyAddress: localCompanies.address,
         foreignCompanyName: foreignCompanies.name,
