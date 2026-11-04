@@ -2,7 +2,7 @@
 // @/components/LocalInspectionReports/GMPReportWorkspace.tsx
 
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { executeInspectionReportTransition } from "@/lib/LocalInspectionReports/inspectionReportsEngine";
 import InspectionChecklistForm from "./InspectionChecklistForm";
@@ -87,7 +87,6 @@ const formatDeskTitle = (title?: string) => {
   return title.replace(/DDD/g, "Divisional Deputy Director");
 };
 
-// Helper to safely normalize initial string/array props into clean arrays
 const parseInitialList = (val: any): string[] => {
   if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
   if (typeof val === 'string' && val.trim()) {
@@ -110,7 +109,7 @@ export default function GMPReportWorkspace({
   leadInspectorName = "",
   coInspectors = "",
   traineeInspectors = "",
-  initialStepKey = "DDD_TECHNICAL_ASSIGNMENT",
+  initialStepKey = "STAFF_TECHNICAL_REVIEW",
   initialReportHtml = null,
   initialChecklistSnapshot = null,
   initialComments = [],
@@ -118,15 +117,19 @@ export default function GMPReportWorkspace({
   productLinesState = []
 }: WorkspaceProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryStep = searchParams.get("step") as keyof typeof inspectionReportWorkflow.steps;
+
   const expectedUserRaw = activeUserName;
 
-  const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(initialStepKey);
+  const [currentStep, setCurrentStep] = useState<keyof typeof inspectionReportWorkflow.steps>(
+    (queryStep && inspectionReportWorkflow.steps[queryStep]) ? queryStep : initialStepKey
+  );
   const [activeUserRole, setActiveUserRole] = useState<string>(initialActiveUserRole);
   const [remarks, setRemarks] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
 
-  // Default active tab is 'STRUCTURED' to showcase the official Annexure-2 Sagar layout instantly
   const [activeDocTab, setActiveDocTab] = useState<'PDF' | 'RTF' | 'CERTIFICATE' | 'STRUCTURED'>('STRUCTURED');
 
   const [pdfStorageUrl, setPdfStorageUrl] = useState<string | null>(initialChecklistSnapshot?.pdfStorageUrl || null);
@@ -157,29 +160,26 @@ export default function GMPReportWorkspace({
     };
   });
 
-  const activeStepConfig = inspectionReportWorkflow.steps[currentStep];
+  const activeStepWorkflowConfig = inspectionReportWorkflow.steps[currentStep];
 
   const stepsWithPdfPreview = ["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "FINALIZED"];
   const isPdfViewAuthorized = stepsWithPdfPreview.includes(currentStep);
+
+  useEffect(() => {
+    if (queryStep && inspectionReportWorkflow.steps[queryStep]) {
+      setCurrentStep(queryStep);
+      const targetConfig = inspectionReportWorkflow.steps[queryStep];
+      if (targetConfig?.role) {
+        setActiveUserRole(targetConfig.role);
+      }
+    }
+  }, [queryStep]);
 
   useEffect(() => {
     if (!isPdfViewAuthorized && (activeDocTab === 'PDF' || activeDocTab === 'CERTIFICATE')) {
       setActiveDocTab('STRUCTURED');
     }
   }, [isPdfViewAuthorized, activeDocTab]);
-
-  const handleStepSwitch = (nextStepKey: string) => {
-    const validKey = nextStepKey as keyof typeof inspectionReportWorkflow.steps;
-    if (!inspectionReportWorkflow.steps[validKey]) return;
-
-    setCurrentStep(validKey);
-    setStepEntryTime(Date.now());
-
-    const targetStepConfig = inspectionReportWorkflow.steps[validKey];
-    if (targetStepConfig?.role) {
-      setActiveUserRole(targetStepConfig.role);
-    }
-  };
 
   useEffect(() => {
     async function fetchStaffMembers() {
@@ -259,6 +259,7 @@ export default function GMPReportWorkspace({
   const availableDivisions = ["VMD", "PAD", "AFPD", "IRSD"];
 
   const handleSaveDraft = async (draftPayload: any, skipRefresh = false) => {
+    if (currentStep !== "STAFF_TECHNICAL_REVIEW") return;
     const payloadToSave = draftPayload || checklistSnapshot;
     if (!payloadToSave) return;
 
@@ -308,15 +309,14 @@ export default function GMPReportWorkspace({
   };
 
   const handleClientSignDocument = () => {
+    if (currentStep !== "STAFF_TECHNICAL_REVIEW") return;
     const currentUserName = expectedUserRaw.trim().toLowerCase();
     
-    // 1. Check if we are interacting with the Structured View or Tiptap Editor
-    const structuredContainer = document.querySelector('.max-w-4xl.mx-auto'); // Structured view container wrapper
-    const editorContainer = document.querySelector('.ProseMirror'); // Tiptap container
+    const structuredContainer = document.querySelector('.max-w-4xl.mx-auto');
+    const editorContainer = document.querySelector('.ProseMirror');
 
     let toggled = false;
 
-    // Search and toggle within Structured View if present
     if (structuredContainer) {
       const signatureCards = structuredContainer.querySelectorAll('[data-card-name]');
       for (const card of Array.from(signatureCards)) {
@@ -339,7 +339,6 @@ export default function GMPReportWorkspace({
       }
     }
 
-    // Search and toggle within Tiptap Editor if structured match wasn't toggled
     if (!toggled && editorContainer) {
       const cells = editorContainer.querySelectorAll('td');
       for (const td of Array.from(cells)) {
@@ -375,6 +374,7 @@ export default function GMPReportWorkspace({
   };
 
   const handleAICorrelationCompile = async (completedFormPayload: any) => {
+    if (currentStep !== "STAFF_TECHNICAL_REVIEW") return;
     if (!completedFormPayload) return;
     try {
       setChecklistSnapshot(completedFormPayload);
@@ -570,8 +570,8 @@ export default function GMPReportWorkspace({
         }
       }
 
-      const activeDivision = activeStepConfig && availableDivisions.includes(activeStepConfig.division)
-        ? activeStepConfig.division
+      const activeDivision = activeStepWorkflowConfig && availableDivisions.includes(activeStepWorkflowConfig.division)
+        ? activeStepWorkflowConfig.division
         : "VMD";
 
       const targetStepKey = direction === "TARGETED_REWORK"
@@ -647,35 +647,13 @@ export default function GMPReportWorkspace({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Simulation Rig Container */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
-        <div>
-          <h4 className="text-amber-800 font-bold text-sm uppercase tracking-wide">🔬 QMS Workflow Simulation Rig</h4>
-          <p className="text-xs text-amber-700">Manually select a desk step below to preview the interface as seen by different NAFDAC officials.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-amber-900">Active Desk View:</label>
-          <select
-            value={currentStep}
-            onChange={(e) => handleStepSwitch(e.target.value)}
-            className="text-xs bg-white border border-amber-300 rounded p-1.5 font-semibold text-slate-800 focus:outline-amber-500 cursor-pointer"
-          >
-            {Object.keys(inspectionReportWorkflow.steps).map((key) => (
-              <option key={key} value={key}>
-                {key.replace(/DDD/g, "Divisional Deputy Director")} - {formatDeskTitle(inspectionReportWorkflow.steps[key as keyof typeof inspectionReportWorkflow.steps]?.title)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
       {/* Header Panel */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
         <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800 text-white">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white mb-2 shadow-sm uppercase tracking-wider">
-                ⚙️ Status: {activeStepConfig?.statusLabel || "Processing"}
+                ⚙️ Status: {activeStepWorkflowConfig?.statusLabel || "Processing"}
               </span>
               <h1 className="text-2xl font-bold tracking-tight">{companyName}</h1>
               <p className="text-slate-300 text-xs mt-1">
@@ -687,11 +665,11 @@ export default function GMPReportWorkspace({
             <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 max-w-sm w-full">
               <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Current Custody Desk</p>
               <p className="text-sm font-bold text-emerald-400 mt-0.5 font-sans">
-                {formatDeskTitle(activeStepConfig?.title)}
+                {formatDeskTitle(activeStepWorkflowConfig?.title)}
               </p>
               <div className="text-[11px] text-slate-300 mt-1 space-y-0.5">
-                <p>Division: <span className="font-bold text-white">{activeStepConfig?.division || "VMD"}</span></p>
-                <p>Authorized Actor: <span className="italic text-white">{formatDeskTitle(activeStepConfig?.role) || "Reviewer"}</span></p>
+                <p>Division: <span className="font-bold text-white">{activeStepWorkflowConfig?.division || "VMD"}</span></p>
+                <p>Authorized Actor: <span className="italic text-white">{formatDeskTitle(activeStepWorkflowConfig?.role) || "Reviewer"}</span></p>
                 <p>Role Parameter: <span className="font-bold text-sky-400 font-mono text-[10px]">{activeUserRole}</span></p>
               </div>
             </div>
@@ -705,7 +683,6 @@ export default function GMPReportWorkspace({
               {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "STAFF_TECHNICAL_REVIEW", "DDD_TECHNICAL_REVIEW"].includes(currentStep) && (
                 <div className="bg-slate-100 border-b border-slate-200 px-4 pt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1 overflow-x-auto">
-                    {/* Structured View Tab Button (Exact Sagar Layout Format) */}
                     <button
                       type="button"
                       onClick={() => setActiveDocTab('STRUCTURED')}
@@ -756,7 +733,7 @@ export default function GMPReportWorkspace({
                   </div>
 
                   <div className="pb-2.5 flex flex-wrap items-center gap-2">
-                    {reportHtml && activeDocTab === 'RTF' && (
+                    {reportHtml && activeDocTab === 'RTF' && currentStep === "STAFF_TECHNICAL_REVIEW" && (
                       <button
                         type="button"
                         onClick={handleCommitPdfToStorage}
@@ -805,7 +782,6 @@ export default function GMPReportWorkspace({
               )}
 
               <div className="p-5 min-h-[600px] bg-white">
-                {/* Official Structured Report View Tab (Step 2 Integration) */}
                 {activeDocTab === 'STRUCTURED' && (
                   <div className="animate-fadeIn min-h-[600px] bg-slate-50/50 p-4 rounded-lg border border-slate-200">
                     <GMPReportStructuredView
@@ -862,14 +838,16 @@ export default function GMPReportWorkspace({
                           The primary report PDF for dossier <span className="font-mono font-semibold text-slate-700">#{applicationId}</span> has not been generated and saved to the <span className="font-mono text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">Documents</span> storage bucket yet.
                         </p>
 
-                        <button
-                          type="button"
-                          onClick={handleCommitPdfToStorage}
-                          disabled={isRenderingPdf}
-                          className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer"
-                        >
-                          <span>💾</span> {isRenderingPdf ? "Rendering PDF..." : "Reflect Changes...and Upload"}
-                        </button>
+                        {currentStep === "STAFF_TECHNICAL_REVIEW" && (
+                          <button
+                            type="button"
+                            onClick={handleCommitPdfToStorage}
+                            disabled={isRenderingPdf}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer"
+                          >
+                            <span>💾</span> {isRenderingPdf ? "Rendering PDF..." : "Reflect Changes...and Upload"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -893,10 +871,14 @@ export default function GMPReportWorkspace({
               leadInspectorName={leadInspectorName}
               coInspectors={coInspectors}
               traineeInspectors={traineeInspectors}
-              onSave={handleAICorrelationCompile}
-              onSaveDraft={handleSaveDraft}
-              onChange={(updatedData: any) => setChecklistSnapshot(updatedData)}
-              isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE"}
+              onSave={currentStep === "STAFF_TECHNICAL_REVIEW" ? handleAICorrelationCompile : undefined}
+              onSaveDraft={currentStep === "STAFF_TECHNICAL_REVIEW" ? handleSaveDraft : undefined}
+              onChange={(updatedData: any) => {
+                if (currentStep === "STAFF_TECHNICAL_REVIEW") {
+                  setChecklistSnapshot(updatedData);
+                }
+              }}
+              isReadOnly={currentStep !== "STAFF_TECHNICAL_REVIEW"}
             />
 
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
@@ -954,23 +936,25 @@ export default function GMPReportWorkspace({
           </div>
 
           <div className="space-y-6">
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
-              <h3 className="text-xs font-bold mb-2 uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                💾 Team Draft Status
-              </h3>
-              <p className="text-[11px] text-slate-500 mb-3 leading-normal">
-                Working in a technical trio? Save continuous drafts to share field findings without forwarding ownership custody.
-              </p>
-              <button
-                type="button"
-                disabled={isSavingDraft || (currentStep !== "STAFF_TECHNICAL_REVIEW" && currentStep !== "LOD_INTAKE")}
-                onClick={() => handleSaveDraft(checklistSnapshot)}
-                className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
-              >
-                {isSavingDraft ? "Saving Draft Matrix..." : "💾 Save Collaborative Draft"}
-              </button>
-            </div>
+            {currentStep === "STAFF_TECHNICAL_REVIEW" && (
+              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
+                <h3 className="text-xs font-bold mb-2 uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  💾 Team Draft Status
+                </h3>
+                <p className="text-[11px] text-slate-500 mb-3 leading-normal">
+                  Working in a technical trio? Save continuous drafts to share field findings without forwarding ownership custody.
+                </p>
+                <button
+                  type="button"
+                  disabled={isSavingDraft}
+                  onClick={() => handleSaveDraft(checklistSnapshot)}
+                  className="w-full inline-flex justify-center items-center px-3 py-2 bg-amber-50 border border-amber-300 hover:bg-amber-100 disabled:bg-slate-50 text-amber-800 text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
+                >
+                  {isSavingDraft ? "Saving Draft Matrix..." : "💾 Save Collaborative Draft"}
+                </button>
+              </div>
+            )}
 
             <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
@@ -1033,7 +1017,7 @@ export default function GMPReportWorkspace({
                 </div>
               )}
 
-              {(currentStep === "STAFF_TECHNICAL_REVIEW" || currentStep === "DDD_TECHNICAL_REVIEW" || activeDocTab === 'STRUCTURED' || activeDocTab === 'RTF') && (
+              {currentStep === "STAFF_TECHNICAL_REVIEW" && (
                 <div className="mb-4">
                   <button
                     type="button"
@@ -1065,7 +1049,7 @@ export default function GMPReportWorkspace({
                   placeholder={
                     currentStep === "DIRECTOR_FINAL_SIGN_OFF"
                       ? "Enter validation clearance minutes for final certified sign-off..."
-                      : `Provide dynamic feedback or instructions as ${formatDeskTitle(activeStepConfig?.role)}...`
+                      : `Provide dynamic feedback or instructions as ${formatDeskTitle(activeStepWorkflowConfig?.role)}...`
                   }
                   className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none text-slate-800 placeholder:text-slate-400 font-medium"
                 />
@@ -1084,10 +1068,10 @@ export default function GMPReportWorkspace({
                           : "Confirm absolute final certification and release of official GMP Certificate?";
                         if (window.confirm(msg)) handleTransition("FORWARD");
                       }}
-                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer ${
+                      className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center border disabled:bg-slate-200 disabled:cursor-not-allowed cursor-pointer ${
                         checklistSnapshot?.final_recommendation === "CAPA_PENDING"
-                          ? "bg-amber-600 hover:bg-amber-700 border-amber-700 shadow-amber-600/10"
-                          : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700 shadow-emerald-600/10"
+                          ? "bg-amber-600 hover:bg-amber-700 border-amber-700"
+                          : "bg-emerald-600 hover:bg-emerald-700 border-emerald-700"
                       }`}
                     >
                       {isSubmitting
@@ -1109,12 +1093,12 @@ export default function GMPReportWorkspace({
                       }}
                       className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-lg transition-all text-center cursor-pointer"
                     >
-                      ↩️ Rework / Send Back to Technical Desk
+                      ↩️ Return to Previous Desk for Rework
                     </button>
                   </>
                 ) : (
                   <>
-                    {activeStepConfig?.nextStepKey && (
+                    {activeStepWorkflowConfig?.nextStepKey && (
                       <button
                         type="button"
                         disabled={
@@ -1124,7 +1108,7 @@ export default function GMPReportWorkspace({
                           (currentStep === "DDD_IRSD_INTAKE" && !selectedStaff)
                         }
                         onClick={() => handleTransition("FORWARD")}
-                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:border-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center cursor-pointer"
+                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center cursor-pointer"
                       >
                         {isSubmitting
                           ? "Routing..."
@@ -1138,7 +1122,7 @@ export default function GMPReportWorkspace({
                       </button>
                     )}
 
-                    {activeStepConfig?.prevStepKey && (
+                    {activeStepWorkflowConfig?.prevStepKey && (
                       <button
                         type="button"
                         disabled={isSubmitting}
@@ -1175,7 +1159,7 @@ export default function GMPReportWorkspace({
                     }}
                     className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 text-white text-xs font-bold rounded-lg shadow-sm transition-all text-center cursor-pointer"
                   >
-                    ↩️ Direct Return to Technical Field Reviewers
+                    ↩️ Return to Previous Desk for Rework
                   </button>
                 </div>
               )}

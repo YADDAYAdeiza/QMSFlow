@@ -6,11 +6,13 @@ import {
   applications, 
   qmsTimelines, 
   localInspectionReports, 
-  inspectionObservationsAnalytics 
+  inspectionObservationsAnalytics,
+  companies
 } from "@/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
+import { sendOversightEmail } from "@/lib/utils/mail";
 
 interface TransitionPayload {
   applicationId: number;
@@ -63,12 +65,21 @@ export async function executeInspectionReportTransition({
     const nextStep = config.steps[targetStepKey];
     if (!nextStep) throw new Error(`Destination step ${targetStepKey} does not exist in configuration.`);
 
-    return await db.transaction(async (tx) => {
-      // 2. Locate Application parameters
-      const app = await tx.query.applications.findFirst({
-        where: eq(applications.id, applicationId)
-      });
-      if (!app) throw new Error("Application record not found.");
+    // Execute core database transaction
+    const transactionResult = await db.transaction(async (tx) => {
+      // 2. Locate Application and Company parameters with join
+      const appRecord = await tx
+        .select({
+          app: applications,
+          companyName: companies.name
+        })
+        .from(applications)
+        .innerJoin(companies, eq(applications.companyId, companies.id))
+        .where(eq(applications.id, applicationId))
+        .limit(1);
+
+      if (!appRecord || appRecord.length === 0) throw new Error("Application record not found.");
+      const { app, companyName } = appRecord[0];
 
       const oldDetails = (app.details as any) || {};
       const timestamp = new Date();
@@ -131,10 +142,8 @@ export async function executeInspectionReportTransition({
       const isIrsdIntakeDesk = targetStepKey === "DDD_IRSD_INTAKE" || 
                                 formattedToStep === "Divisional Deputy Director IRSD Routing";
 
-      // A. IF NO EXPLICIT TARGET & RETURNING BACKWARD (e.g. DDD_TECHNICAL_REVIEW -> STAFF_TECHNICAL_REVIEW or DDD_IRSD_REVIEW -> IRSD_STAFF_VETTING)
+      // A. IF NO EXPLICIT TARGET & RETURNING BACKWARD
       if (!finalVettingInspectorId && (direction === "REWORK" || direction === "TARGETED_REWORK") && !isLODPoolDesk && !isIrsdIntakeDesk) {
-        
-        // Query qms_timelines for the most recent staff member who held this exact destination step point
         const [priorTimeline] = await tx
           .select({ staffId: qmsTimelines.staffId })
           .from(qmsTimelines)
@@ -152,8 +161,7 @@ export async function executeInspectionReportTransition({
         }
       }
 
-      // B. IRSD INTAKE DESK OVERRIDE (Preserved Desirable Authority)
-      // Any file entering IRSD_INTAKE auto-assigns to the IRSD Divisional Deputy Director unless explicitly targeted
+      // B. IRSD INTAKE DESK OVERRIDE
       if (!finalVettingInspectorId && isIrsdIntakeDesk) {
         const [irsdDDD] = await tx
           .select({ id: users.id })
@@ -254,12 +262,7 @@ export async function executeInspectionReportTransition({
             companyId: app.companyId,
             qualitySystem: obs.qualitySystem || obs.quality_system || obs.system || "General Quality System",
             severity: String(obs.severity || "OTHER").toUpperCase(),
-            rootCauseCategory: 
-              obs.root_cause_category || 
-              obs.rootCauseCategory || 
-              obs.root_cause || 
-              obs.rootCause || 
-              "Uncategorized",
+            rootCauseCategory: obs.root_cause_category || obs.rootCauseCategory || obs.root_cause || obs.rootCause || "Uncategorized",
             observationText: obs.observationText || obs.observation_text || obs.text || obs.observation || "Observation recorded without description.",
           }));
 
@@ -292,21 +295,73 @@ export async function executeInspectionReportTransition({
         }
       });
 
-      // 8. Refresh dashboard views
-      // revalidatePath("/LocalInspectionReports/ddd", "layout");
-      // revalidatePath("/LocalInspectionReports/staff", "layout");
-      // revalidatePath("/LocalInspectionReports/director", "layout");
-      // revalidatePath("/ddd/inbox");
-      // revalidatePath("/director/inbox");
+      // ------------------------------------------------------------------
+      // 📧 8. RESOLVE TARGET RECIPIENT EMAIL FOR OVERSIGHT DISPATCH
+      // ------------------------------------------------------------------
+      let recipientEmail: string | undefined = undefined;
 
+      if (assignedOwner) {
+        // If an explicit officer is assigned, grab their email from the users table
+        const [assignedUserRecord] = await tx
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, assignedOwner))
+          .limit(1);
 
-      // In your POST handler after database mutation:
+        if (assignedUserRecord?.email) {
+          recipientEmail = assignedUserRecord.email;
+        }
+      } else if (nextStep.role === "Director") {
+        // Fallback to Director email env configuration or pool query if role is Director
+        const [directorRecord] = await tx
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.role, "Director"))
+          .limit(1);
+        recipientEmail = directorRecord?.email || process.env.DIRECTOR_EMAIL;
+      }
+
       revalidatePath("/LocalInspectionReports/ddd/inbox", "page");
       revalidatePath("/LocalInspectionReports/Director/Inbox", "page");
       revalidatePath("/LocalInspectionReports/Inspectors/Inbox", "page");
 
-      return { success: true, arrivedAt: targetStepKey, currentStatus: finalStatusLabel };
+      return { 
+        success: true, 
+        arrivedAt: targetStepKey, 
+        currentStatus: finalStatusLabel,
+        appNumber: app.applicationNumber,
+        appType: app.type,
+        companyName,
+        facilityName: oldDetails.facilityName || incomingSnapshot?.inspected_site_name || "N/A",
+        recipientEmail
+      };
     });
+
+    // ------------------------------------------------------------------
+    // 📨 9. TRIGGER OUT-OF-TRANSACTION EMAIL DISPATCH
+    // ------------------------------------------------------------------
+    if (transactionResult.success && transactionResult.recipientEmail) {
+      console.log(`\n📧 [ROUTING ENGINE] Triggering Oversight Email Dispatch...`);
+      console.log(`➡️ Target Recipient (To): ${transactionResult.recipientEmail}`);
+      console.log(`➡️ CC Oversight: adeiza.yusuf@nafdac.gov.ng`);
+      console.log(`➡️ Application Number: #${transactionResult.appNumber}`);
+      console.log(`➡️ Milestone Desk: ${nextStep.title}\n`);
+
+      await sendOversightEmail({
+        appNumber: transactionResult.appNumber,
+        type: transactionResult.appType || "GMP Inspection Report",
+        companyName: transactionResult.companyName,
+        facilityName: transactionResult.facilityName,
+        lodRemarks: remarks,
+        customRecipient: transactionResult.recipientEmail,
+        emailTitle: `New Desk Assignment: ${nextStep.title}`
+      });
+    } else {
+      console.log(`\n⚠️ [ROUTING ENGINE] Email dispatch skipped: recipientEmail was not resolved or transaction failed.\n`);
+    }
+
+    return { success: true, arrivedAt: transactionResult.arrivedAt, currentStatus: transactionResult.currentStatus };
+
   } catch (error: any) {
     console.error("INSPECTION_ROUTING_ENGINE_ERROR:", error);
     return { success: false, error: error.message };
