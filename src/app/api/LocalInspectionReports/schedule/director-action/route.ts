@@ -209,11 +209,16 @@ export async function POST(request: Request) {
       });
     }
 
-    // --- ACTION HANDLER 2: Final Director Approval ---
+// --- ACTION HANDLER 2: Final Director Approval ---
     if (action === "APPROVE") {
       const currentStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
-      const targetStep = inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED;
-      const nextAppStep = inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW;
+      
+      // 🌟 DYNAMIC TARGET STEP: Foreign batches go to PRS_SCHEDULE, Local batches go to INSPECTION_SCHEDULED
+      const targetStep = batch.isForeign
+        ? inspectionScheduleBatchWorkflow.steps.PRS_SCHEDULE
+        : inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED;
+
+      const nextAppStep = targetStep;
 
       const newHistoryEntry = {
         action: targetStep.statusLabel,
@@ -249,7 +254,7 @@ export async function POST(request: Request) {
               )
             );
 
-          // Open new QMS timeline using config workflow references
+          // Open new QMS timeline using config workflow references (PRS_SCHEDULE or INSPECTION_SCHEDULED)
           for (const appId of applicationIds) {
             await tx.insert(qmsTimelines).values({
               applicationId: appId,
@@ -290,8 +295,8 @@ export async function POST(request: Request) {
                 companyName: comp?.name || "Registered Establishment",
                 facilityName: fac?.name || "Manufacturing Facility",
                 notificationEmail: (appData.details as any)?.notificationEmail,
-                emailTitle: "Inspection Batch Approved & Dispatched",
-                remarks: comments || "Batch approved by Director and dispatched to inspection team.",
+                emailTitle: batch.isForeign ? "Foreign Inspection Batch Approved & Dispatched to PRS" : "Inspection Batch Approved & Dispatched",
+                remarks: comments || "Batch approved by Director and dispatched.",
               });
             }
           }
@@ -312,7 +317,9 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         success: true,
-        message: "Batch approved and dispatched to inspectors.",
+        message: batch.isForeign
+          ? "Batch approved and dispatched to PRS."
+          : "Batch approved and dispatched to inspectors.",
       });
     }
 

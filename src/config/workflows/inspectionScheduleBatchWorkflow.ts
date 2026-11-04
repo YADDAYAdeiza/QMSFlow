@@ -20,10 +20,10 @@ export const inspectionScheduleBatchWorkflow = {
     REWORK_REQUIRED: "REWORK_REQUIRED",
     APPROVED: "APPROVED",
     INSPECTION_SCHEDULED: "INSPECTION_SCHEDULED",
+    PRS_SCHEDULE: "PRS_SCHEDULE", // <--- Added PRS Schedule Status
   },
 
   steps: {
-    // 1. Entry Step: Triggered automatically when facility categorization is endorsed and completed
     INSPECTION_PENDING: {
       key: "INSPECTION_PENDING",
       title: "Facility Awaiting Inspection Scheduling",
@@ -36,7 +36,6 @@ export const inspectionScheduleBatchWorkflow = {
       description: "Facility has been risk-categorized and logged, awaiting grouping into a schedule batch.",
     },
 
-    // 2. Intermediate Step: DDD drafts the schedule and routes to IRSD / Annexure preparation
     DDD_SCHEDULE_ROUTING: {
       key: "DDD_SCHEDULE_ROUTING",
       title: "Divisional Deputy Director IRSD Routing",
@@ -49,7 +48,6 @@ export const inspectionScheduleBatchWorkflow = {
       description: "Inspection scheduled by DDD, preparing Annexure batch for Director review.",
     },
 
-    // 3. Director Review Step: Picked up directly by the Director
     SCHEDULE_DRAFT: {
       key: "SCHEDULE_DRAFT",
       title: "Director Routing",
@@ -62,7 +60,6 @@ export const inspectionScheduleBatchWorkflow = {
       description: "Schedule batch submitted by DDD, awaiting Director review, sign-off, or rework.",
     },
 
-    // 4. Rework Step: Returned by Director to DDD for modification
     REWORK_REQUIRED: {
       key: "REWORK_REQUIRED",
       title: "Schedule Rework & Modification",
@@ -75,7 +72,6 @@ export const inspectionScheduleBatchWorkflow = {
       description: "Returned by Director to Head (IRSD) with remarks for revision.",
     },
 
-    // 5. Final Dispatched State: Director approves, handing over execution to inspectionReportWorkflow
     INSPECTION_SCHEDULED: {
       key: "INSPECTION_SCHEDULED",
       title: "Staff Technical Field Review",
@@ -86,6 +82,19 @@ export const inspectionScheduleBatchWorkflow = {
       nextStepKey: null,
       prevStepKey: "SCHEDULE_DRAFT",
       description: "Schedule approved by the Director and dispatched to assigned inspectors across the Directorate for field execution.",
+    },
+
+    // --- NEW FOREIGN INSPECTION ROUTING STEP ---
+    PRS_SCHEDULE: {
+      key: "PRS_SCHEDULE",
+      title: "PRS Scheduling & Documentation",
+      division: "PRS",
+      role: "PRS Desk Officer",
+      currentPoint: "PRS Scheduling",
+      statusLabel: "PRS_SCHEDULED",
+      nextStepKey: "PRS_REVIEW",
+      prevStepKey: null,
+      description: "Foreign inspection batch received from VMAP Directorate, undergoing PRS processing.",
     },
   } as Record<string, ScheduleBatchStepConfig>,
 
