@@ -76,19 +76,23 @@ export default async function DDDInboxPage({
   const irsdIntakeStep = getWorkflowStep(actingDirectorate, "DDD_IRSD_INTAKE");
   const irsdReviewStep = getWorkflowStep(actingDirectorate, "DDD_IRSD_REVIEW");
 
-  const incomingTitles = [
+  const incomingTitles = Array.from(new Set([
     techAssignmentStep?.title,
+    "Divisional Deputy Director Technical Assignment",
     techReviewStep?.title,
     irsdIntakeStep?.title,
     irsdReviewStep?.title,
-  ].filter(Boolean) as string[];
+  ].filter(Boolean))) as string[];
 
-  const incomingStatuses = [
-    techAssignmentStep?.statusLabel,
+  // Included "REWORK_REQUIRED" alongside other workflow status labels
+  const incomingStatuses = Array.from(new Set([
+    techAssignmentStep?.statusStatusLabel || techAssignmentStep?.statusLabel,
+    "PENDING_DIRECTOR_ALLOCATION",
     techReviewStep?.statusLabel,
     irsdIntakeStep?.statusLabel,
     irsdReviewStep?.statusLabel,
-  ].filter(Boolean) as string[];
+    "REWORK_REQUIRED",
+  ].filter(Boolean))) as string[];
 
   // For the assigned monitoring view (staff active steps)
   const staffAssignmentStep = getWorkflowStep(actingDirectorate, "STAFF_TECHNICAL_REVIEW");
@@ -100,12 +104,11 @@ export default async function DDDInboxPage({
   ].filter(Boolean) as string[];
 
   // 5. Config-Driven Database Query
- // 5. Config-Driven Database Query
   const rawInbox = await db
     .select({
       id: applications.id,
       applicationNumber: applications.applicationNumber,
-      type: applications.type, // Added type selection
+      type: applications.type,
       details: applications.details,
       status: applications.status,
       currentPoint: applications.currentPoint,
@@ -117,7 +120,7 @@ export default async function DDDInboxPage({
     .leftJoin(companies, eq(applications.companyId, companies.id))
     .innerJoin(qmsTimelines, eq(qmsTimelines.applicationId, applications.id))
     .where(and(
-      eq(applications.type, 'Facility Verification'), // Filter strictly for Facility Verification
+      eq(applications.type, 'Facility Verification'),
       isNull(qmsTimelines.endTime),
       eq(qmsTimelines.division, actingDivision),
       isAssignedView 

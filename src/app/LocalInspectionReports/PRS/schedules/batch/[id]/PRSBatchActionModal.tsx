@@ -34,7 +34,7 @@ export default function PRSBatchActionModal({
     startTransition(async () => {
       try {
         const response = await fetch(
-          "/api/LocalInspectionReports/schedule/prs-action",
+          "/api/LocalInspectionReports/PRS/schedule/prs-action",
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

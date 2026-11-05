@@ -1,9 +1,9 @@
+// @/app/api/LocalInspectionReports/schedule/approve/route.ts (or your respective path)
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { scheduleBatches, inspectionSchedules, applications, qmsTimelines, companies, facilities } from "@/db/schema";
 import { eq, inArray, notInArray, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
-import { inspectionReportWorkflow } from "@/config/workflows/inspectionReportWorkflow";
 import { sendOversightEmail } from "@/lib/utils/mail";
 
 export async function POST(request: Request) {
@@ -75,11 +75,10 @@ export async function POST(request: Request) {
         timestamp: now.toISOString(),
       };
 
-      // Determine the resolved boolean value for isForeign
-      const resolvedIsForeign = typeof isForeign === "boolean" ? isForeign : batch.isForeign;
+      // Ensure isForeign flag is accurately resolved and preserved
+      const resolvedIsForeign = typeof isForeign === "boolean" ? isForeign : !!batch.isForeign;
 
       await db.transaction(async (tx) => {
-        // 1. Update batch status, history, and isForeign flag
         await tx
           .update(scheduleBatches)
           .set({
@@ -92,7 +91,6 @@ export async function POST(request: Request) {
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        // 2. Scoped Batch Binding & Cleanup
         if (Array.isArray(body.activeScheduleIds) && body.activeScheduleIds.length > 0) {
           await tx
             .update(inspectionSchedules)
@@ -124,7 +122,6 @@ export async function POST(request: Request) {
         const applicationIds = await getBatchApplicationIds(tx, batch.id);
 
         if (applicationIds.length > 0) {
-          // Close active QMS timelines for previous step
           await tx
             .update(qmsTimelines)
             .set({ endTime: now })
@@ -135,7 +132,6 @@ export async function POST(request: Request) {
               )
             );
 
-          // Open new QMS timelines for Director review step
           for (const appId of applicationIds) {
             await tx.insert(qmsTimelines).values({
               applicationId: appId,
@@ -151,7 +147,6 @@ export async function POST(request: Request) {
             });
           }
 
-          // Update Applications Table
           await tx
             .update(applications)
             .set({
@@ -166,7 +161,6 @@ export async function POST(request: Request) {
             })
             .where(inArray(applications.id, applicationIds));
 
-          // Fetch details for email queue
           for (const appId of applicationIds) {
             const [appData] = await tx.select().from(applications).where(eq(applications.id, appId));
             if (appData) {
@@ -187,7 +181,6 @@ export async function POST(request: Request) {
         }
       });
 
-      // Dispatch Emails Post-Transaction
       for (const item of emailDispatchQueue) {
         await sendOversightEmail({
           appNumber: item.appNumber,
@@ -209,12 +202,14 @@ export async function POST(request: Request) {
       });
     }
 
-// --- ACTION HANDLER 2: Final Director Approval ---
+    // --- ACTION HANDLER 2: Final Director Approval ---
     if (action === "APPROVE") {
       const currentStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
       
-      // 🌟 DYNAMIC TARGET STEP: Foreign batches go to PRS_SCHEDULE, Local batches go to INSPECTION_SCHEDULED
-      const targetStep = batch.isForeign
+      // 🌟 RELIABLE FOREIGN DETECTION: Checks explicit request payload first, then falls back to synchronized batch column
+      const resolvedIsForeign = typeof isForeign === "boolean" ? isForeign : !!batch.isForeign;
+
+      const targetStep = resolvedIsForeign
         ? inspectionScheduleBatchWorkflow.steps.PRS_SCHEDULE
         : inspectionScheduleBatchWorkflow.steps.INSPECTION_SCHEDULED;
 
@@ -229,12 +224,14 @@ export async function POST(request: Request) {
       };
 
       await db.transaction(async (tx) => {
+        // Ensure the batch record explicitly locks in the correct isForeign status upon approval
         await tx
           .update(scheduleBatches)
           .set({
             status: targetStep.statusLabel,
             currentPoint: targetStep.currentPoint,
             approvedBy: validUserId,
+            isForeign: resolvedIsForeign,
             history: [...currentHistory, newHistoryEntry],
             updatedAt: now,
           })
@@ -243,7 +240,6 @@ export async function POST(request: Request) {
         const applicationIds = await getBatchApplicationIds(tx, batchId);
 
         if (applicationIds.length > 0) {
-          // Close active QMS timelines for Director review step
           await tx
             .update(qmsTimelines)
             .set({ endTime: now })
@@ -254,7 +250,6 @@ export async function POST(request: Request) {
               )
             );
 
-          // Open new QMS timeline using config workflow references (PRS_SCHEDULE or INSPECTION_SCHEDULED)
           for (const appId of applicationIds) {
             await tx.insert(qmsTimelines).values({
               applicationId: appId,
@@ -295,7 +290,7 @@ export async function POST(request: Request) {
                 companyName: comp?.name || "Registered Establishment",
                 facilityName: fac?.name || "Manufacturing Facility",
                 notificationEmail: (appData.details as any)?.notificationEmail,
-                emailTitle: batch.isForeign ? "Foreign Inspection Batch Approved & Dispatched to PRS" : "Inspection Batch Approved & Dispatched",
+                emailTitle: resolvedIsForeign ? "Foreign Inspection Batch Approved & Dispatched to PRS" : "Inspection Batch Approved & Dispatched",
                 remarks: comments || "Batch approved by Director and dispatched.",
               });
             }
@@ -317,9 +312,9 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         success: true,
-        message: batch.isForeign
-          ? "Batch approved and dispatched to PRS."
-          : "Batch approved and dispatched to inspectors.",
+        message: resolvedIsForeign
+          ? "Batch approved and successfully escalated to PRS workflow."
+          : "Batch approved and dispatched to local inspectors.",
       });
     }
 
@@ -350,7 +345,6 @@ export async function POST(request: Request) {
         const applicationIds = await getBatchApplicationIds(tx, batchId);
 
         if (applicationIds.length > 0) {
-          // Close active QMS timelines for Director review step
           await tx
             .update(qmsTimelines)
             .set({ endTime: now })
@@ -361,7 +355,6 @@ export async function POST(request: Request) {
               )
             );
 
-          // Open new QMS timeline for DDD rework step
           for (const appId of applicationIds) {
             await tx.insert(qmsTimelines).values({
               applicationId: appId,
@@ -385,7 +378,7 @@ export async function POST(request: Request) {
               details: sql`jsonb_set(
                 COALESCE(${applications.details}, '{}'::jsonb), 
                 '{inspectionWorkflowMeta,currentStepKey}', 
-                ${JSON.stringify(targetStep.key)}::jsonb
+                '"REWORK_REQUIRED"'::jsonb
               )`,
               updatedAt: now,
             })
