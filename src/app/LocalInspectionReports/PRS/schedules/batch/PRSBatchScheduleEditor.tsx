@@ -1,0 +1,389 @@
+// @/components/LocalInspectionReports/PRS/PRSBatchScheduleEditor.tsx
+"use client";
+
+import React, { useTransition } from "react";
+import { Edit3, Eye, Save, AlertCircle, Trash2, Loader2, ShieldCheck } from "lucide-react";
+import PrintTrigger from "@/app/LocalInspectionReports/ddd/schedule/print/PrintTrigger";
+import { useBatchScheduleManager, EditableScheduleItem, InspectorPoolItem } from "@/hooks/LocalInspectionReports/useBatchScheduleManager";
+import PRSBatchActionModal from "@/app/LocalInspectionReports/PRS/schedules/batch/[id]/PRSBatchActionModal";
+
+// Re-export type definitions for consuming Server Components
+export type { EditableScheduleItem, InspectorPoolItem };
+
+const INSPECTION_PURPOSES = [
+  "Pre-Production",
+  "Pre-Registration",
+  "Warehouse",
+  "Cold-chain",
+];
+
+interface PRSBatchScheduleEditorProps {
+  batchId?: string;
+  batchStatus?: string;
+  batchHistory?: any[];
+  startDate: string;
+  endDate: string;
+  scheduleIds: string[];
+  initialRows: EditableScheduleItem[];
+  inspectorPool: InspectorPoolItem[];
+  formattedHeaderDate: string;
+  isApproved: boolean;
+  userId?: string;
+  isReadOnly?: boolean;
+}
+
+export default function PRSBatchScheduleEditor({
+  batchId,
+  batchStatus,
+  batchHistory,
+  startDate,
+  endDate,
+  initialRows,
+  inspectorPool,
+  formattedHeaderDate,
+  isApproved,
+  userId,
+  isReadOnly = false,
+}: PRSBatchScheduleEditorProps) {
+  const [isPending, startTransition] = useTransition();
+
+  const {
+    rows,
+    isEditMode,
+    saveError,
+    setIsEditMode,
+    setSaveError,
+    handleRemoveRow,
+    handleDateChange,
+    handleInspectionTypeChange,
+    handleDriverChange,
+    handleTeamLeaderChange,
+    handleCoInspectorToggle,
+    handleTraineeToggle,
+    handleSaveChanges,
+    getInspectorName,
+  } = useBatchScheduleManager({
+    initialRows,
+    inspectorPool,
+    batchId,
+    startDate,
+    endDate,
+  });
+
+  return (
+    <div>
+      {/* Action Bar (Screen Only) */}
+      <div className="max-w-5xl mx-auto mb-6 p-4 bg-white rounded-lg shadow-md border border-slate-200 flex flex-wrap justify-between items-center gap-4 print:hidden">
+        <div className="text-xs font-medium text-slate-500">
+          PRS Inspection Schedule Period: <span className="font-bold text-slate-800">{formattedHeaderDate}</span>
+        </div>
+
+        <div className="flex items-center gap-3 ml-auto">
+          {!isReadOnly && !isApproved && (
+            <>
+              {/* Toggle Edit Mode */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditMode(!isEditMode);
+                  setSaveError(null);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md shadow-xs transition-colors cursor-pointer text-white ${
+                  isEditMode
+                    ? "bg-slate-600 hover:bg-slate-700"
+                    : "bg-indigo-600 hover:bg-indigo-700"
+                }`}
+              >
+                {isEditMode ? <Eye className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
+                {isEditMode ? "Switch to View Mode" : "Edit Batch Schedule"}
+              </button>
+
+              {/* Save Edits */}
+              {isEditMode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    startTransition(async () => {
+                      await handleSaveChanges();
+                    });
+                  }}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-xs font-bold rounded-md shadow-xs cursor-pointer transition-colors"
+                >
+                  {isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  {isPending ? "Saving..." : "Save Batch Edits"}
+                </button>
+              )}
+            </>
+          )}
+
+          {batchId && (
+            <PRSBatchActionModal 
+              batchId={batchId} 
+              title={`Annexure 08 (${startDate} to ${endDate})`} 
+              currentStepKey={batchStatus || ""} 
+            />
+          )}
+
+          <PrintTrigger />
+        </div>
+      </div>
+
+      {/* Save Error Alert */}
+      {saveError && (
+        <div className="max-w-5xl mx-auto mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-xs flex items-center gap-2 print:hidden">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
+
+      {/* Official PRS Annexure Sheet */}
+      <div className="max-w-5xl mx-auto bg-white p-6 border border-slate-300 shadow-sm print:shadow-none print:border-none print:p-0">
+        
+        {/* Annexure Top Metadata Banner */}
+        <div className="border border-black text-xs font-bold flex justify-between divide-x divide-black mb-4">
+          <div className="p-1.5 flex-1 text-left">Annexure No. 08 (PRS Verification)</div>
+          <div className="p-1.5 flex-1 text-center">SOP Ref No. VMAP-015-01</div>
+          <div className="p-1.5 flex-1 text-right">Title of Annexure: Foreign Inspection Schedule</div>
+        </div>
+
+        {/* Agency Logo & Title */}
+        <div className="text-center my-4 space-y-2">
+          <div className="flex justify-center mb-1">
+            <img
+              src="/nafdac_logo2-removebg-preview.png"
+              alt="NAFDAC Logo"
+              className="w-[70px] h-[70px] object-contain"
+            />
+          </div>
+          <h2 className="text-base font-extrabold tracking-wide uppercase">
+            PRS FOREIGN INSPECTION STATISTICAL SCHEDULE FOR {formattedHeaderDate}
+          </h2>
+          {!isReadOnly && isEditMode && (
+            <p className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded py-1 max-w-md mx-auto print:hidden">
+              ✏️ PRS BATCH EDITOR ACTIVE — Modify dates, team allocations, or delete entries below, then click "Save Batch Edits"
+            </p>
+          )}
+        </div>
+
+        {/* Schedule Table */}
+        <table className="w-full border-collapse border border-black text-xs">
+          <thead>
+            <tr className="border-b border-black text-center font-bold uppercase bg-slate-50 print:bg-transparent">
+              <th className="border-r border-black p-2 w-10">S/N</th>
+              <th className="border-r border-black p-2 w-1/4">NAMES AND ADDRESS OF COMPANY</th>
+              <th className="border-r border-black p-2 w-1/5">PURPOSE/TYPES OF INSPECTION</th>
+              <th className="border-r border-black p-2 w-1/3">NAME OF INSPECTORS</th>
+              <th className="border-r border-black p-2 w-32">DATE OF INSPECTION</th>
+              <th className={`p-2 ${!isReadOnly && isEditMode ? "border-r border-black w-24" : "w-24"}`}>
+                LOGISTICS
+              </th>
+              {!isReadOnly && isEditMode && (
+                <th className="p-2 w-12 text-center text-red-600 print:hidden">ACTION</th>
+              )}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-black">
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={!isReadOnly && isEditMode ? 7 : 6} className="p-8 text-center text-slate-500 italic">
+                  No inspection schedules found for this batch.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, index) => (
+                <tr key={row.scheduleId} className="border-b border-black align-top">
+                  <td className="border-r border-black p-2 text-center font-bold">{index + 1}.</td>
+                  
+                  <td className="border-r border-black p-2 uppercase font-semibold">
+                    <div>{row.companyName}</div>
+                    <div className="text-[11px] font-normal text-slate-700 mt-1">{row.companyAddress}</div>
+                  </td>
+                  
+                  <td className="border-r border-black p-2 uppercase font-medium">
+                    {!isReadOnly && isEditMode ? (
+                      <select
+                        value={row.inspectionType || ""}
+                        onChange={(e) => handleInspectionTypeChange(row.scheduleId, e.target.value)}
+                        className="w-full text-xs p-1 border border-slate-300 rounded bg-white font-medium uppercase"
+                      >
+                        <option value="">-- Select Purpose --</option>
+                        {INSPECTION_PURPOSES.map((purpose) => (
+                          <option key={purpose} value={purpose}>
+                            {purpose}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      row.inspectionType
+                    )}
+                  </td>
+
+                  <td className="border-r border-black p-2 uppercase">
+                    {!isReadOnly && isEditMode ? (
+                      <div className="space-y-3 lowercase">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-700 uppercase">Team Leader:</label>
+                          <select
+                            value={row.teamLeaderId}
+                            onChange={(e) => handleTeamLeaderChange(row.scheduleId, e.target.value)}
+                            className="w-full text-xs p-1 border border-slate-300 rounded bg-white uppercase font-medium"
+                          >
+                            <option value="">-- Select Team Leader --</option>
+                            {inspectorPool.map((ins) => (
+                              <option key={ins.id} value={ins.id}>
+                                {ins.full_name} ({ins.division || "STAFF"})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Co-Inspectors:</label>
+                          <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
+                            {inspectorPool
+                              .filter((ins) => ins.id !== row.teamLeaderId && !row.traineeInspectorIds.includes(ins.id))
+                              .map((ins) => (
+                                <label key={ins.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.coInspectorIds.includes(ins.id)}
+                                    onChange={() => handleCoInspectorToggle(row.scheduleId, ins.id)}
+                                    className="rounded text-indigo-600"
+                                  />
+                                  <span>{ins.full_name}</span>
+                                </label>
+                              ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-700 uppercase mb-0.5">Trainees (Max 2):</label>
+                          <div className="max-h-24 overflow-y-auto border border-slate-200 rounded p-1 space-y-1 bg-slate-50">
+                            {inspectorPool
+                              .filter((ins) => ins.id !== row.teamLeaderId && !row.coInspectorIds.includes(ins.id))
+                              .map((ins) => (
+                                <label key={ins.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.traineeInspectorIds.includes(ins.id)}
+                                    onChange={() => handleTraineeToggle(row.scheduleId, ins.id)}
+                                    className="rounded text-amber-600"
+                                  />
+                                  <span>{ins.full_name}</span>
+                                </label>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {row.teamLeaderId && (
+                          <div className="font-semibold flex justify-between items-center pr-1">
+                            <span>{getInspectorName(row.teamLeaderId)}</span>
+                            <span className="text-[10px] font-normal text-slate-600 lowercase italic">(TL)</span>
+                          </div>
+                        )}
+                        {row.coInspectorIds.map((id) => (
+                          <div key={id} className="font-semibold flex justify-between items-center pr-1">
+                            <span>{getInspectorName(id)}</span>
+                            <span className="text-[10px] font-normal text-slate-600 lowercase italic">(Co-Inspector)</span>
+                          </div>
+                        ))}
+                        {row.traineeInspectorIds.map((id) => (
+                          <div key={id} className="font-semibold flex justify-between items-center pr-1">
+                            <span>{getInspectorName(id)}</span>
+                            <span className="text-[10px] font-normal text-slate-600 lowercase italic">(Trainee)</span>
+                          </div>
+                        ))}
+                        {!row.teamLeaderId && row.coInspectorIds.length === 0 && (
+                          <span className="text-slate-400 italic">Unassigned</span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+
+                  <td className="border-r border-black p-2 text-center font-bold">
+                    {!isReadOnly && isEditMode ? (
+                      <input
+                        type="date"
+                        value={row.scheduledDate}
+                        onChange={(e) => handleDateChange(row.scheduleId, e.target.value)}
+                        className="w-full text-xs p-1 border border-slate-300 rounded font-sans"
+                      />
+                    ) : (
+                      row.scheduledDate
+                    )}
+                  </td>
+
+                  <td className={`p-2 text-center font-semibold uppercase ${!isReadOnly && isEditMode ? "border-r border-black" : ""}`}>
+                    {!isReadOnly && isEditMode ? (
+                      <input
+                        type="text"
+                        value={row.driver || ""}
+                        onChange={(e) => handleDriverChange(row.scheduleId, e.target.value)}
+                        placeholder="Logistics / Flight"
+                        className="w-full text-xs p-1 border border-slate-300 rounded font-sans uppercase"
+                      />
+                    ) : (
+                      row.driver || "FLIGHT / EXECUTIVE SHUTTLE"
+                    )}
+                  </td>
+
+                  {!isReadOnly && isEditMode && (
+                    <td className="p-2 text-center align-middle print:hidden">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRow(row.scheduleId)}
+                        className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                        title="Remove schedule from batch"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+
+        {/* PRS & DG Official Signature Footer */}
+        <div className="mt-12 pt-4 flex justify-between items-end text-xs font-bold px-8">
+          <div className="text-center space-y-1">
+            <p className="uppercase mb-2">VERIFIED & CERTIFIED BY (PRS)</p>
+            <div className="h-14 flex items-end justify-center">
+              <ShieldCheck className="w-8 h-8 text-indigo-700" />
+            </div>
+            <div className="border-b border-black w-48 mx-auto mb-1"></div>
+            <p className="uppercase">Director, Planning, Research & Statistics</p>
+            <p className="text-[11px] font-normal">PRS Division</p>
+          </div>
+
+          <div className="text-center space-y-1">
+            <p className="uppercase mb-2">APPROVED BY (DIRECTOR GENERAL)</p>
+            <div className="h-14 flex items-end justify-center">
+              {isApproved ? (
+                <span className="text-[10px] text-emerald-700 font-bold italic mb-1">
+                  ✓ DG Express Approval Granted
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-400 italic mb-1 print:hidden">
+                  [Pending DG Statistical Sign-off]
+                </span>
+              )}
+            </div>
+            <div className="border-b border-black w-52 mx-auto mb-1"></div>
+            <p className="uppercase">Office of the Director General</p>
+            <p className="text-[11px] font-normal">NAFDAC Headquarters</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}

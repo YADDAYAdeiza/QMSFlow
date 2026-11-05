@@ -680,7 +680,7 @@ export default function GMPReportWorkspace({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 bg-slate-50">
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "STAFF_TECHNICAL_REVIEW", "DDD_TECHNICAL_REVIEW", "DDD_IRSD_INTAKE"].includes(currentStep) && (
+              {["DDD_IRSD_REVIEW", "DIRECTOR_FINAL_SIGN_OFF", "STAFF_TECHNICAL_REVIEW", "DDD_TECHNICAL_REVIEW", "DDD_IRSD_INTAKE", "IRSD_STAFF_VETTING"].includes(currentStep) && (
                 <div className="bg-slate-100 border-b border-slate-200 px-4 pt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1 overflow-x-auto">
                     <button
