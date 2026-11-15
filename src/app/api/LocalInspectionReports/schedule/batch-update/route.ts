@@ -1,3 +1,4 @@
+// @/app/api/LocalInspectionReports/schedule/batch-update/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { 
@@ -30,7 +31,7 @@ export async function PUT(request: Request) {
       activeScheduleIds = [], 
       startDate, 
       endDate,
-      isForeign = false // <--- 1. Extract isForeign from request body
+      isForeign = false 
     } = body as {
       batchId?: string;
       updates: Array<{
@@ -46,7 +47,7 @@ export async function PUT(request: Request) {
       activeScheduleIds?: string[];
       startDate: string;
       endDate: string;
-      isForeign?: boolean; // <--- Type definition
+      isForeign?: boolean;
     };
 
     let targetBatchId = batchId;
@@ -89,7 +90,7 @@ export async function PUT(request: Request) {
             and(
               eq(scheduleBatches.startDate, startDate),
               eq(scheduleBatches.endDate, endDate),
-              eq(scheduleBatches.isForeign, isForeign) // <--- Ensure we match correct batch type if pre-existing
+              eq(scheduleBatches.isForeign, isForeign)
             )
           )
           .limit(1);
@@ -110,7 +111,7 @@ export async function PUT(request: Request) {
             endDate: calculatedEndDate,
             status: draftStep.statusLabel,
             currentPoint: draftStep.currentPoint,
-            isForeign: isForeign, // <--- 2. Save isForeign flag upon container creation
+            isForeign: isForeign,
             history: [],
           })
           .returning({ id: scheduleBatches.id });
@@ -118,7 +119,6 @@ export async function PUT(request: Request) {
         targetBatchId = newBatch.id;
       }
     } else {
-      // If batch already exists, ensure its isForeign flag is synchronized
       await db
         .update(scheduleBatches)
         .set({ isForeign, updatedAt: now })
@@ -155,6 +155,11 @@ export async function PUT(request: Request) {
         }
 
         if (currentScheduleId) {
+          // STRICT FILTER: If activeScheduleIds were passed, only process updates for items present in that active list
+          if (activeScheduleIds.length > 0 && !activeScheduleIds.includes(currentScheduleId)) {
+            continue; 
+          }
+
           await tx
             .update(inspectionSchedules)
             .set({
@@ -205,23 +210,20 @@ export async function PUT(request: Request) {
         }
       }
 
-      const remainingIds = activeScheduleDbIds.filter(Boolean);
-
+      // CRITICAL: Explicitly unlink any schedules currently belonging to this batch that are NOT in activeScheduleIds
       if (targetBatchId) {
+        const unlinkingConditions = [eq(inspectionSchedules.batchId, targetBatchId)];
+        if (activeScheduleIds.length > 0) {
+          unlinkingConditions.push(notInArray(inspectionSchedules.id, activeScheduleIds));
+        }
+
         const removedSchedules = await tx
           .select({ 
             id: inspectionSchedules.id,
             applicationId: inspectionSchedules.applicationId 
           })
           .from(inspectionSchedules)
-          .where(
-            and(
-              eq(inspectionSchedules.batchId, targetBatchId),
-              remainingIds.length > 0 
-                ? notInArray(inspectionSchedules.id, remainingIds)
-                : sql`1=1`
-            )
-          );
+          .where(and(...unlinkingConditions));
 
         const unlinkedAppIds = removedSchedules
           .map((s) => s.applicationId)
@@ -232,17 +234,9 @@ export async function PUT(request: Request) {
             .update(inspectionSchedules)
             .set({ 
               batchId: null,
-              scheduledDate: null,
               updatedAt: now,
             })
-            .where(
-              and(
-                eq(inspectionSchedules.batchId, targetBatchId),
-                remainingIds.length > 0 
-                  ? notInArray(inspectionSchedules.id, remainingIds)
-                  : sql`1=1`
-              )
-            );
+            .where(and(...unlinkingConditions));
         }
 
         if (unlinkedAppIds.length > 0) {
@@ -378,7 +372,6 @@ export async function PUT(request: Request) {
       }
     });
 
-    // 🚀 Trigger Context-Aware Batch Email Notifications Post-Transaction
     for (const item of emailDispatchQueue) {
       await sendOversightEmail({
         appNumber: item.appNumber,

@@ -1,3 +1,6 @@
+// @/app/LocalInspectionReports/Director/schedules/batch/[id]/page.tsx
+export const dynamic = "force-dynamic";
+
 import { db } from "@/db";
 import { 
   scheduleBatches, 
@@ -17,15 +20,12 @@ import { format, parseISO } from "date-fns";
 import BatchHistoryModal from "../../BatchHistoryModal";
 import DirectorBatchActionModal from "../../DirectorBatchActionModal";
 
-export const dynamic = "force-dynamic";
-
 interface PageProps {
   params: Promise<{ id?: string }>;
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 export default async function DirectorBatchDetailsPage({ params, searchParams }: PageProps) {
-  // 1. Safely resolve Next.js 16 async dynamic route parameters
   const resolvedParams = await params?.catch(() => ({})) || {};
   const batchId = resolvedParams?.id;
 
@@ -33,7 +33,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
     notFound();
   }
 
-  // 2. Fetch Batch Record safely
   let rawBatch: any = null;
   try {
     const batchRows = await db
@@ -64,7 +63,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
     notFound();
   }
 
-  // Safely normalize history
   let safeHistory: any[] = [];
   try {
     const hist = rawBatch.history;
@@ -87,11 +85,9 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
     title: rawBatch.title || "",
   };
 
-  // Create table aliases using aliasedTable
   const localCompanies = aliasedTable(companies, "local_companies");
   const foreignCompanies = aliasedTable(companies, "foreign_companies");
 
- // 3. Query inspection schedules with robust foreign & local fallbacks
   let rawSchedules: any[] = [];
   try {
     rawSchedules = await db
@@ -128,7 +124,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
     }
   }
 
-  // 4. Query team assignments safely
   const teamBySchedule: Record<
     string,
     { teamLeader?: string; coInspectors: string[]; trainees: string[] }
@@ -184,7 +179,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
 
   return (
     <main className="min-h-screen bg-slate-100 p-4 print:p-0 print:bg-white text-black font-sans">
-      {/* Action Header Controls for Director */}
       <div className="max-w-5xl mx-auto mb-6 p-4 bg-white rounded-lg shadow-md border border-slate-200 flex flex-wrap justify-between items-center gap-4 print:hidden">
         <div className="flex items-center gap-3">
           <Link
@@ -224,10 +218,7 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
         </div>
       </div>
 
-      {/* Official Annexure Sheet Container */}
       <div className="max-w-5xl mx-auto bg-white p-6 border border-slate-300 shadow-sm print:shadow-none print:border-none print:p-0">
-        
-        {/* Annexure Top Metadata Banner */}
         <div className="border border-black text-xs font-bold flex justify-between divide-x divide-black mb-4">
           <div className="p-1.5 flex-1 text-left">Annexure No. 08</div>
           <div className="p-1.5 flex-1 text-center">SOP Ref No. VMAP-015-01</div>
@@ -236,7 +227,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
           </div>
         </div>
 
-        {/* NAFDAC Logo & Title Header */}
         <div className="text-center my-4 space-y-2">
           <div className="flex justify-center mb-1">
             <img
@@ -253,7 +243,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
           </div>
         </div>
 
-        {/* Schedule Table */}
         <table className="w-full border-collapse border border-black text-xs">
           <thead>
             <tr className="border-b border-black text-center font-bold uppercase bg-slate-50 print:bg-transparent">
@@ -332,7 +321,7 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
                   schDetails.assignedDriver ||
                   schDetails.driver ||
                   appDetails.assignedDriver ||
-                  (batch.isForeign ? "FLIGHT / EXECUTIVE SHUTTLE" : "DAN BABA");
+                  (batch.isForeign ? "FLIGHT / EXECUTIVE SHUTTLE" : "DAN_BABA");
 
                 return (
                   <tr key={row.scheduleId || index} className="border-b border-black align-top">
@@ -386,7 +375,6 @@ export default async function DirectorBatchDetailsPage({ params, searchParams }:
           </tbody>
         </table>
 
-        {/* Official Endorsement & Approval Signature Footer */}
         <div className="mt-12 pt-4 flex justify-between items-end text-xs font-bold px-8">
           <div className="text-center space-y-1">
             <p className="uppercase mb-2">ENDORSED BY</p>

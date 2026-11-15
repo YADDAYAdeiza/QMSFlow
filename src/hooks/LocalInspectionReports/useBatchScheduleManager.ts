@@ -1,3 +1,4 @@
+// @/hooks/LocalInspectionReports/useBatchScheduleManager.ts
 "use client";
 
 import { useState, useEffect } from "react";
@@ -40,12 +41,14 @@ export function useBatchScheduleManager({
   const router = useRouter();
   const [rows, setRows] = useState<EditableScheduleItem[]>(initialRows || []);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Sync state when Server Component re-fetches with new initialRows
   useEffect(() => {
     setRows(initialRows || []);
+    setHasUnsavedChanges(false);
   }, [initialRows]);
 
   const getInspectorName = (id: string): string => {
@@ -54,34 +57,40 @@ export function useBatchScheduleManager({
   };
 
   const handleRemoveRow = (scheduleId: string) => {
+    setHasUnsavedChanges(true);
     setRows((prev) => prev.filter((r) => r.scheduleId !== scheduleId));
   };
 
   const handleDateChange = (scheduleId: string, scheduledDate: string) => {
+    setHasUnsavedChanges(true);
     setRows((prev) =>
       prev.map((r) => (r.scheduleId === scheduleId ? { ...r, scheduledDate } : r))
     );
   };
 
   const handleInspectionTypeChange = (scheduleId: string, inspectionType: string) => {
+    setHasUnsavedChanges(true);
     setRows((prev) =>
       prev.map((r) => (r.scheduleId === scheduleId ? { ...r, inspectionType } : r))
     );
   };
 
   const handleDriverChange = (scheduleId: string, driver: string) => {
+    setHasUnsavedChanges(true);
     setRows((prev) =>
       prev.map((r) => (r.scheduleId === scheduleId ? { ...r, driver } : r))
     );
   };
 
   const handleTeamLeaderChange = (scheduleId: string, teamLeaderId: string) => {
+    setHasUnsavedChanges(true);
     setRows((prev) =>
       prev.map((r) => (r.scheduleId === scheduleId ? { ...r, teamLeaderId } : r))
     );
   };
 
   const handleCoInspectorToggle = (scheduleId: string, inspectorId: string) => {
+    setHasUnsavedChanges(true);
     setRows((prev) =>
       prev.map((r) => {
         if (r.scheduleId !== scheduleId) return r;
@@ -95,6 +104,7 @@ export function useBatchScheduleManager({
   };
 
   const handleTraineeToggle = (scheduleId: string, inspectorId: string) => {
+    setHasUnsavedChanges(true);
     setRows((prev) =>
       prev.map((r) => {
         if (r.scheduleId !== scheduleId) return r;
@@ -109,6 +119,16 @@ export function useBatchScheduleManager({
         return { ...r, traineeInspectorIds: updated };
       })
     );
+  };
+
+  const handleCancelEdit = () => {
+    if (hasUnsavedChanges && !window.confirm("You have unsaved changes. Discard them?")) {
+      return;
+    }
+    setRows(initialRows || []);
+    setIsEditMode(false);
+    setHasUnsavedChanges(false);
+    setSaveError(null);
   };
 
   const handleSaveChanges = async () => {
@@ -146,22 +166,29 @@ export function useBatchScheduleManager({
         };
       });
 
-      const res = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
+      const payload = {
+        batchId,
+        startDate,
+        endDate,
+        activeScheduleIds,
+        updates,
+      };
+
+      console.log("📤 SUBMITTING PAYLOAD to batch-update-v2:", JSON.stringify(payload, null, 2));
+
+      const res = await fetch("/api/LocalInspectionReports/schedule/batch-update-v2", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          batchId,
-          startDate,
-          endDate,
-          activeScheduleIds,
-          updates,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to update schedules.");
 
+      // Success: Exit edit mode and clear dirty flag
       setIsEditMode(false);
+      setHasUnsavedChanges(false);
+      router.push(`/LocalInspectionReports/ddd/schedule-inspection/print?batchId=${batchId}&startDate=${startDate}&endDate=${endDate}`);
       router.refresh();
     } catch (err: any) {
       console.error("Save error:", err.message);
@@ -174,6 +201,7 @@ export function useBatchScheduleManager({
   return {
     rows,
     isEditMode,
+    hasUnsavedChanges,
     isSaving,
     saveError,
     setIsEditMode,
@@ -185,6 +213,7 @@ export function useBatchScheduleManager({
     handleTeamLeaderChange,
     handleCoInspectorToggle,
     handleTraineeToggle,
+    handleCancelEdit,
     handleSaveChanges,
     getInspectorName,
   };

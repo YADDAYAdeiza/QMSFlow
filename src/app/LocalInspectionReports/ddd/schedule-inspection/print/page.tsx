@@ -28,7 +28,7 @@ export default async function PrintInspectionSchedulePage({
   const resolvedParams = await searchParams;
   const { batchId, startDate, endDate, readOnly } = resolvedParams || {};
 
-  console.log("🔍 [PrintSchedulePage] Incoming Search Params:", { batchId, startDate, endDate });
+  console.log("🔍 [PrintInspectionSchedulePage] Resolved Params:", { batchId, startDate, endDate, readOnly });
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -41,7 +41,7 @@ export default async function PrintInspectionSchedulePage({
     userRole === "Director VMAP" || 
     userRole === "DIRECTOR";
 
-  // 1. Fetch Batch Metadata if batchId exists
+  // 1. Fetch Batch Metadata including history and isForeign flag
   let activeBatch = null;
   if (batchId) {
     const [found] = await db
@@ -52,20 +52,22 @@ export default async function PrintInspectionSchedulePage({
         endDate: scheduleBatches.endDate,
         status: scheduleBatches.status,
         history: scheduleBatches.history,
+        isForeign: scheduleBatches.isForeign,
       })
       .from(scheduleBatches)
       .where(eq(scheduleBatches.id, batchId))
       .limit(1);
     activeBatch = found || null;
-    console.log("📦 [PrintSchedulePage] Found Active Batch:", activeBatch);
   }
 
-  // 2. Resolve Date Range Defaults
-  const today = new Date();
-  const filterStart = startDate || activeBatch?.startDate || new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
-  const filterEnd = endDate || activeBatch?.endDate || new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split("T")[0];
+  console.log("🔍 [PrintInspectionSchedulePage] Active Batch Found:", activeBatch);
 
-  console.log("📅 [PrintSchedulePage] Resolved Date Window:", { filterStart, filterEnd });
+  // 2. Resolve Date Range Defaults (Prioritize activeBatch dates if editing an existing batch)
+  const today = new Date();
+  const filterStart = activeBatch?.startDate || startDate || new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
+  const filterEnd = activeBatch?.endDate || endDate || new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split("T")[0];
+
+  console.log("🔍 [PrintInspectionSchedulePage] Resolved Filter Dates:", { filterStart, filterEnd });
 
   // 3. Fetch Inspector Pool
   const rawUsers = await db
@@ -83,7 +85,7 @@ export default async function PrintInspectionSchedulePage({
     division: u.rank || u.directorate || "VMAP",
   }));
 
-  // 4. Build Filter Conditions
+  // 4. Build Filter Conditions: When batchId is provided, query strictly by batchId alone.
   const queryConditions: SQL[] = [];
   if (batchId) {
     queryConditions.push(eq(inspectionSchedules.batchId, batchId));
@@ -91,6 +93,8 @@ export default async function PrintInspectionSchedulePage({
     queryConditions.push(gte(inspectionSchedules.scheduledDate, filterStart));
     queryConditions.push(lte(inspectionSchedules.scheduledDate, filterEnd));
   }
+
+  console.log("🔍 [PrintInspectionSchedulePage] Query Conditions Count:", queryConditions.length);
 
   // 5. Query Schedules
   const rawSchedules = await db
@@ -112,8 +116,8 @@ export default async function PrintInspectionSchedulePage({
     .where(and(...queryConditions))
     .orderBy(asc(inspectionSchedules.scheduledDate));
 
-  console.log("📋 [PrintSchedulePage] Raw Schedules Query Result Count:", rawSchedules.length);
-  console.log("📋 [PrintSchedulePage] Raw Schedules Data:", rawSchedules);
+  console.log("🔍 [PrintInspectionSchedulePage] Raw Schedules Count Returned:", rawSchedules.length);
+  console.log("🔍 [PrintInspectionSchedulePage] Raw Schedules Data:", rawSchedules);
 
   // 6. Fetch Team Assignments
   const scheduleIds = rawSchedules.map((s) => s.scheduleId);
@@ -154,8 +158,6 @@ export default async function PrintInspectionSchedulePage({
     };
   });
 
-  console.log("✨ [PrintSchedulePage] Mapped Initial Rows Count:", initialRows.length);
-
   const formattedHeaderDate = `${format(parseISO(filterStart), "do MMM yyyy")} TO ${format(parseISO(filterEnd), "do MMM yyyy")}`;
 
   return (
@@ -173,7 +175,7 @@ export default async function PrintInspectionSchedulePage({
         isApproved={activeBatch?.status === "APPROVED"}
         userId={userId}
         isReadOnly={isReadOnly}
-        isForeign={true} // <--- Add this
+        isForeign={Boolean(activeBatch?.isForeign)}
       />
     </main>
   );

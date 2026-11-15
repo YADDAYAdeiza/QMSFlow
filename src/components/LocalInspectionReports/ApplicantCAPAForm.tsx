@@ -112,7 +112,7 @@ export interface CAPAItem {
   inspectorStatus?: string;
   uploadedEvidenceUrl?: string;
   evidenceFiles?: any[];
-  history?: AuditHistoryEntry[]; // <--- Maintained required state
+  history?: AuditHistoryEntry[];
 }
 
 export interface InspectionObservation {
@@ -132,16 +132,16 @@ export interface CAPASummary {
 }
 
 export interface ApplicantCAPAFormProps {
-  applicationId?:string
-  companyId?:string
+  applicationId?: string;
+  companyId?: string;
   referenceNumber?: string;
   companyName?: string;
   facilityAddress?: string;
   inspectionTitle?: string;
   inspectionDate?: string;
   initialObservations?: InspectionObservation[];
-  initialItems?: CAPAItem[] | string; // Accepts array or raw JSON string from Supabase
-  initialIsApplicant?: boolean; // Optional prop override if role is provided upstream
+  initialItems?: CAPAItem[] | string;
+  initialIsApplicant?: boolean;
   onSaveDraft?: (data: { items: CAPAItem[]; summary: CAPASummary; jsonPayload: string }) => Promise<void> | void;
   onSubmit?: (data: { items: CAPAItem[]; summary: CAPASummary; jsonPayload: string }) => Promise<void> | void;
   onApproveAndSign?: (data: { items: CAPAItem[]; summary: CAPASummary; jsonPayload: string }) => Promise<void> | void;
@@ -209,21 +209,12 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
     },
     ref
   ) => {
-    // Instantiate Supabase client for local component storage operations
     const supabase = createClient();
-
-    // 0. ROLE STATE & TOGGLE (Default: Applicant mode)
     const [isApplicant, setIsApplicant] = useState<boolean>(initialIsApplicant);
 
-    const toggleApplicantMode = () => {
-      setIsApplicant((prev) => !prev);
-    };
-
-    // 1. DYNAMIC INITIAL STATE MAPPER (Handles String JSON from Supabase & Maps Inspector History)
     const [items, setItems] = useState<CAPAItem[]>(() => {
       let parsedItems: any[] = [];
 
-      // Parse initial JSON from Supabase if it arrives as a string
       if (typeof initialItems === "string") {
         try {
           parsedItems = JSON.parse(initialItems);
@@ -234,13 +225,10 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
         parsedItems = initialItems;
       }
 
-      // If valid pre-populated CAPA items exist, map & normalize them
       if (parsedItems && parsedItems.length > 0) {
-
         return parsedItems.map((raw, idx) => normalizeRawCAPAItem(raw, idx));
       }
 
-      // Map incoming raw observations to CAPA items
       if (initialObservations && initialObservations.length > 0) {
         return initialObservations.map((obs, idx) => ({
           id: obs.id || `obs-${idx}-${Date.now()}`,
@@ -261,7 +249,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
         }));
       }
 
-      // Default fallback if no observations or items exist
       return [
         {
           id: `obs_${Date.now()}`,
@@ -282,8 +269,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
         },
       ];
     });
-
-    console.log('This is items: ',items);
 
     const [dossierFiles, setDossierFiles] = useState<UploadedFile[]>([]);
     const [documentFiles, setDocumentFiles] = useState<UploadedFile[]>([]);
@@ -311,21 +296,26 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
         const fileExt = file.name.split(".").pop() || "pdf";
         const cleanFileName = `capa_evidence_${itemId}_${Date.now()}.${fileExt}`;
         const compIdStr = companyId !== undefined && companyId !== null ? String(companyId) : "GENERAL";
-        // const appIdStr = referenceNumber !== undefined && referenceNumber !== null ? String(referenceNumber) : "GENERAL";
         const storagePath = buildCompanyFilePath(
-                      compIdStr,                         // 1st arg: companyId
-                      '05_CAPA_Evidence',    // 2nd arg: folder
-                      cleanFileName,                          // 3rd arg: fileName
-                      applicationId                    // 4th arg: applicationId
-                    )
+          compIdStr,
+          '05_CAPA_Evidence',
+          cleanFileName,
+          applicationId
+        );
 
-        // Uploads directly to the lowercase 'documents' bucket
         const publicUrl = await uploadDossierFile(file, storagePath);
 
         setItems((prevItems) =>
           prevItems.map((item) =>
             item.id === itemId
-              ? { ...item, uploadedEvidenceUrl: publicUrl }
+              ? {
+                  ...item,
+                  uploadedEvidenceUrl: publicUrl,
+                  evidenceFiles: [
+                    ...(item.evidenceFiles || []),
+                    { name: file.name, url: publicUrl, size: file.size, uploadedAt: new Date().toISOString() }
+                  ]
+                }
               : item
           )
         );
@@ -340,37 +330,26 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
       }
     };
 
-    const handleRemoveFile = async (
-      indexToRemove: number,
-      field: 'documents' | 'dossier' = 'documents'
-    ) => {
-      // 1. Get the target file object from the state
-      const targetArray = field === 'dossier' ? dossierFiles : documentFiles;
-      const targetFile = targetArray[indexToRemove];
-
-      if (!targetFile) return;
-
-      try {
-        // 2. If the file is already uploaded to Supabase, delete it from storage
-        if (targetFile.filePath) {
-          const { error: storageError } = await supabase.storage
-            .from('documents')
-            .remove([targetFile.filePath]);
-
-          if (storageError) {
-            console.error('Error removing file from Supabase storage:', storageError.message);
+    // --- REMOVE EVIDENCE FILE HANDLER ---
+    const handleRemoveFile = async (itemId: string, fileIndexToRemove: number) => {
+      setItems((prevItems) =>
+        prevItems.map((item) => {
+          if (item.id === itemId) {
+            const updatedFiles = (item.evidenceFiles || []).filter((_, idx) => idx !== fileIndexToRemove);
+            return {
+              ...item,
+              evidenceFiles: updatedFiles,
+              uploadedEvidenceUrl: updatedFiles.length > 0 ? updatedFiles[updatedFiles.length - 1].url : ""
+            };
           }
-        }
+          return item;
+        })
+      );
+    };
 
-        // 3. Update the local state array
-        if (field === 'dossier') {
-          setDossierFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove));
-        } else {
-          setDocumentFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove));
-        }
-      } catch (err) {
-        console.error('Unexpected error during file removal:', err);
-      }
+    // --- REMOVE CAPA ITEM ---
+    const handleRemoveItem = (id: string) => {
+      setItems((prev) => prev.filter((item) => item.id !== id));
     };
 
     const currentFormattedDate = useMemo(() => {
@@ -383,19 +362,19 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
     // Categorized items for table rendering
     const criticalItems = useMemo(
-      () => items.filter((i) => i.deficiencyCategory?.toUpperCase() === "CRITICAL"),
+      () => items.filter((i) => i.deficiencyCategory?.trim().toUpperCase() === "CRITICAL"),
       [items]
     );
     const majorItems = useMemo(
-      () => items.filter((i) => i.deficiencyCategory?.toUpperCase() === "MAJOR"),
+      () => items.filter((i) => i.deficiencyCategory?.trim().toUpperCase() === "MAJOR"),
       [items]
     );
     const otherItems = useMemo(
       () =>
         items.filter(
           (i) =>
-            i.deficiencyCategory?.toUpperCase() === "MINOR" ||
-            i.deficiencyCategory?.toUpperCase() === "RECOMMENDATION"
+            i.deficiencyCategory?.trim().toUpperCase() === "MINOR" ||
+            i.deficiencyCategory?.trim().toUpperCase() === "RECOMMENDATION"
         ),
       [items]
     );
@@ -406,28 +385,25 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
         totalDeficiencies: items.length,
         criticalCount: criticalItems.length,
         majorCount: majorItems.length,
-        minorCount: items.filter((i) => i.deficiencyCategory?.toUpperCase() === "MINOR").length,
+        minorCount: items.filter((i) => i.deficiencyCategory?.trim().toUpperCase() === "MINOR").length,
         recommendationCount: items.filter(
-          (i) => i.deficiencyCategory?.toUpperCase() === "RECOMMENDATION"
+          (i) => i.deficiencyCategory?.trim().toUpperCase() === "RECOMMENDATION"
         ).length,
       };
     }, [items, criticalItems, majorItems]);
 
-    // Keep active item index valid if items array changes
     useEffect(() => {
       if (activeItemIndex >= items.length && items.length > 0) {
         setActiveItemIndex(items.length - 1);
       }
     }, [items.length, activeItemIndex]);
 
-    // Field mutation helper
     const handleItemChange = (id: string, field: keyof CAPAItem, value: any) => {
       setItems((prev) =>
         prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
       );
     };
 
-    // SAVE DRAFT HANDLER (Passes stringified JSON for Supabase UPDATE)
     const handleSaveDraft = async () => {
       if (!onSaveDraft) return;
       setIsSavingLocal(true);
@@ -439,7 +415,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
       }
     };
 
-    // SUBMIT HANDLER (Passes stringified JSON for Supabase UPDATE)
     const handleSubmitForm = async () => {
       if (!onSubmit || activeSubmitting) return;
 
@@ -454,7 +429,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
       }
     };
 
-    // Final Approval Handler
     const handleFinalDirectorApproval = async () => {
       if (!onApproveAndSign) return;
       setIsApproving(true);
@@ -483,7 +457,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
-          {/* Applicant Draft Saving */}
           {isApplicant && onSaveDraft && (
             <Button 
               variant="outline" 
@@ -500,7 +473,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
             </Button>
           )}
 
-          {/* Applicant Final Submission */}
           {isApplicant && onSubmit && (
             <Button 
               onClick={handleSubmitForm}
@@ -521,7 +493,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
             </Button>
           )}
 
-          {/* Regulator / Inspector / Director Final Approval */}
           {!isApplicant && onApproveAndSign && (
             <Button
               onClick={handleFinalDirectorApproval}
@@ -608,7 +579,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
               <div className="space-y-2 max-h-[650px] overflow-y-auto pr-1">
                {items.map((item, index) => {
-                  // Determine if item was passed/accepted by the inspector
                   const isItemAccepted = 
                     item.status === "Acceptable" || 
                     item.inspectorStatus === "Acceptable" || 
@@ -619,10 +589,7 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                   return (
                     <div
                       key={item.id || index}
-                      onClick={() => {
-                        // Still allow selection to view details, but styles will indicate read-only status
-                        setActiveItemIndex(index);
-                      }}
+                      onClick={() => setActiveItemIndex(index)}
                       className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
                         isItemAccepted
                           ? isActive
@@ -691,7 +658,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                   </CardHeader>
 
                   <CardContent className="p-5 space-y-4">
-                    {/* DEFICIENCY & CLASSIFICATION */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div className="sm:col-span-2 space-y-1.5">
                         <Label className="text-xs font-bold text-slate-700">Identified Deficiency / Observation *</Label>
@@ -720,7 +686,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                       </div>
                     </div>
 
-                    {/* ROOT CAUSE ANALYSIS */}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-bold text-slate-700">Root Cause Analysis (RCA)</Label>
                       <Textarea
@@ -733,7 +698,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                       />
                     </div>
 
-                    {/* PROPOSED CORRECTION & PREVENTIVE ACTION */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-slate-700">Immediate Correction</Label>
@@ -759,7 +723,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                       </div>
                     </div>
 
-                    {/* METRICS & RESPONSIBILITY */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-slate-700">Indicators for Completion</Label>
@@ -795,7 +758,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                       </div>
                     </div>
 
-                    {/* EVIDENCE ATTACHMENTS */}
                     <div className="space-y-2 pt-2 border-t border-slate-100">
                       <Label className="text-xs font-bold text-slate-700">Objective Evidence & Attachments</Label>
                       
@@ -849,7 +811,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                       )}
                     </div>
 
-                    {/* COLLAPSIBLE AUDIT CYCLE & REVIEW HISTORY SEGMENT */}
                     <div className="pt-4 border-t border-slate-200">
                       <Collapsible>
                         <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left group">
@@ -871,7 +832,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                           {(items[activeItemIndex].history ?? []).length > 0 ? (
                             <div className="space-y-3 pl-2 border-l-2 border-slate-200 ml-2">
                               {items[activeItemIndex].history!.map((entry, hIdx) => {
-                                // Determine display values based on database schema
                                 const authorDisplay = entry.authorName || entry.authorRole || entry.role || entry.author || "Reviewer";
                                 const remarksText = entry.remarks || entry.inspectorRemarks;
                                 const applicantText = entry.proposedCorrection || entry.applicantComment;
@@ -879,7 +839,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
                                 return (
                                   <div key={hIdx} className="relative pl-4 space-y-1">
-                                    {/* Timeline Node Icon */}
                                     <span className="absolute -left-[17px] top-1.5 h-2.5 w-2.5 rounded-full bg-slate-400 border-2 border-white ring-1 ring-slate-200" />
 
                                     <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
@@ -887,7 +846,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                                       <span>{entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Previous Cycle"}</span>
                                     </div>
 
-                                    {/* Inspector Feedback / Remarks */}
                                     {remarksText && (
                                       <div className="p-2.5 bg-amber-50/60 border border-amber-200 rounded-md text-xs text-amber-900 mt-1">
                                         <p className="font-semibold text-[11px] text-amber-800 uppercase tracking-wider mb-0.5">
@@ -897,7 +855,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                                       </div>
                                     )}
 
-                                    {/* Applicant Response / Correction */}
                                     {applicantText && (
                                       <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-md text-xs text-slate-800 mt-1">
                                         <p className="font-semibold text-[11px] text-slate-600 uppercase tracking-wider mb-0.5">
@@ -907,7 +864,6 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                                       </div>
                                     )}
 
-                                    {/* Ruling / Status */}
                                     {statusText && (
                                       <div className="mt-1">
                                         <span className="text-[10px] font-medium text-slate-500 uppercase">Status Ruling: </span>
@@ -1019,7 +975,7 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                   <tbody>
                     <tr className="bg-red-100/80 font-bold text-red-950 border-b border-slate-500">
                       <td colSpan={9} className="border border-slate-500 p-1.5 uppercase tracking-wide">
-                        Critical Deficiencies
+                        Critical Deficiencies ({criticalItems.length})
                       </td>
                     </tr>
                     {criticalItems.length > 0 ? (
@@ -1046,7 +1002,7 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
                     <tr className="bg-amber-100/80 font-bold text-amber-950 border-b border-slate-500">
                       <td colSpan={9} className="border border-slate-500 p-1.5 uppercase tracking-wide">
-                        Major Deficiencies
+                        Major Deficiencies ({majorItems.length})
                       </td>
                     </tr>
                     {majorItems.length > 0 ? (
@@ -1073,7 +1029,7 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
 
                     <tr className="bg-slate-100 font-bold text-slate-900 border-b border-slate-500">
                       <td colSpan={9} className="border border-slate-500 p-1.5 uppercase tracking-wide">
-                        Others (Minor / Recommendations)
+                        Others (Minor / Recommendations) ({otherItems.length})
                       </td>
                     </tr>
                     {otherItems.length > 0 ? (
@@ -1115,16 +1071,16 @@ export const ApplicantCAPAForm = forwardRef<HTMLDivElement, ApplicantCAPAFormPro
                 <div>
                   <p className="font-bold text-slate-900">Reviewed By:</p>
                   
-                  {/* Signature Container & Line */}
                   <div className="relative my-1 border-b border-dashed border-slate-400 min-h-[50px] flex items-end justify-start">
                     <img 
-                      src="/MudSig-removebg-preview.png" 
+                      src="/Waheed_Proportional-removebg-preview.png" 
                       alt="Signature" 
-                      className="h-12 w-auto object-contain -mb-1"
+                      className="h-16 w-auto object-contain -mb-1"
                     />
                   </div>
 
-                  <p className="font-semibold text-slate-900">Divisional Deputy Director</p>
+                  <p className="font-semibold text-slate-900">Waheed Agboola</p>
+                  <p className="font-semibold text-slate-900">Director (VMAP)</p>
                   <p className="text-[11px] text-slate-800">For: Director-General (NAFDAC)</p>
                 </div>
               </div>

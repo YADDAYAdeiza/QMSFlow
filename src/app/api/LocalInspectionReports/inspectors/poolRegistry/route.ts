@@ -8,11 +8,10 @@ export async function GET() {
   try {
     const supabase = await createClient();
 
-    // 1. Fetch field-ready personnel
+    // 1. Fetch all personnel from the registry (no role restriction)
     const { data: staffList, error: staffError } = await supabase
       .from('users')
       .select('id, name, division, role')
-      .eq('role', 'Staff')
       .order('name', { ascending: true });
 
     if (staffError) throw staffError;
@@ -36,7 +35,7 @@ export async function GET() {
           )
         )
       `)
-        .eq('inspection_schedules.applications.current_point', inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title);
+      .eq('inspection_schedules.applications.current_point', inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title);
 
     if (joinError) throw joinError;
 
@@ -47,7 +46,7 @@ export async function GET() {
       const app = assignment.inspection_schedules?.applications;
       
       if (app) {
-        // 🔒 Staff are locked ONLY if the application is actively in STAFF_TECHNICAL_REVIEW
+        // 🔒 Personnel are locked ONLY if the application is actively in STAFF_TECHNICAL_REVIEW
         if (app.current_point === inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title) {
           const detailsObj = typeof app.details === 'string' ? JSON.parse(app.details) : app.details;
           const siteName = detailsObj?.savedChecklistSnapshot?.inspected_site_name || "Unknown Facility";
@@ -67,14 +66,13 @@ export async function GET() {
       }
     });
 
-    console.log('trackingMap: ', trackingMap);
-
     const structuredWorkforceMatrix = staffList.map((user) => {
       const lockedWorkflows = trackingMap[user.id] || [];
       return {
         id: user.id,
         full_name: user.name, 
         division: user.division,
+        role: user.role, // Added role field back in for complete visibility
         is_available: lockedWorkflows.length === 0,
         locked_workflows: lockedWorkflows
       };

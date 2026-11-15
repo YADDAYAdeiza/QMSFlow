@@ -10,24 +10,7 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-export interface AuditHistoryEntry {
-  cycle: number;
-  timestamp: string;
-  authorRole: "APPLICANT" | "INSPECTOR";
-  authorName: string;
-  rootCause?: string;
-  proposedCorrection?: string;
-  preventiveAction?: string;
-  timeline?: string;
-  responsibility?: string;
-  indicators?: string;
-  evidenceUrl?: string;
-  statusRuling?: "Acceptable" | "Deficient";
-  remarks?: string;
-}
-
 export default function DynamicCapaPage({ params }: PageProps) {
-  // Direct promise resolution for Next.js 15
   const resolvedParams = use(params);
   const applicationId = resolvedParams.id;
 
@@ -36,7 +19,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
   const [reportSnapshot, setReportSnapshot] = useState<any>(null);
   const [capaSubmissionData, setCapaSubmissionData] = useState<any>(null);
 
-  // Fetch both the application data AND existing CAPA submissions
   useEffect(() => {
     async function fetchInspectionData() {
       if (!applicationId) return;
@@ -47,7 +29,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
 
         const appIdNum = parseInt(applicationId, 10);
 
-        // Fetch Master Application Lifecycle data
         const { data: appData, error: appError } = await supabase
           .from("applications")
           .select("*")
@@ -60,7 +41,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
         }
         setReportSnapshot(appData);
 
-        // Fetch existing CAPA submission if present
         const { data: capaData, error: capaError } = await supabase
           .from("capa_submissions")
           .select("*")
@@ -81,11 +61,9 @@ export default function DynamicCapaPage({ params }: PageProps) {
     fetchInspectionData();
   }, [applicationId]);
 
-  // Extract snapshot details safely for render and handlers
   const snapshotDetails = reportSnapshot?.details || {};
-  const checklistSnapshot = snapshotDetails.savedChecklistSnapshot || {};
+  const checklistSnapshot = snapshotDetails.savedChecklistSnapshot || reportSnapshot || {};
 
-  // Extract companyId directly from master applications table or fallback to snapshot keys
   const companyId = 
     reportSnapshot?.company_id || 
     checklistSnapshot.company_id || 
@@ -95,29 +73,23 @@ export default function DynamicCapaPage({ params }: PageProps) {
     reportSnapshot?.companyId;
 
   const refNumber = checklistSnapshot.report_doc_number || reportSnapshot?.application_number || "PENDING-REF";
-  const companyName = checklistSnapshot.inspected_site_name || "Orange Kalbe Limited";
+  const companyName = checklistSnapshot.inspected_site_name || reportSnapshot?.company_name || "Company Name";
   const companyAddress = checklistSnapshot.vicinity_assessment 
     ? `${checklistSnapshot.vicinity_assessment}, Nigeria` 
     : "Registered Manufacturing Facility Site, Nigeria";
 
-  // Dynamic email extraction with fallback checks across JSON snapshot and master record
   const companyEmail = 
     checklistSnapshot.notificationEmail ||
     checklistSnapshot.company_email || 
-    checklistSnapshot.applicant_email || 
     reportSnapshot?.company_email || 
-    reportSnapshot?.applicant_email || 
     reportSnapshot?.email;
 
-  // --- SAVE DRAFT HANDLER ---
   const handleCapaSaveDraft = async (data: { items: any[]; summary?: any }) => {
     try {
       if (!applicationId) throw new Error("Missing Application ID.");
       const appIdNum = parseInt(applicationId, 10);
-      if (isNaN(appIdNum)) throw new Error("Invalid Application ID format.");
 
       const savedAt = new Date().toISOString();
-
       const rowData = {
         application_id: appIdNum,
         ref_number: refNumber,
@@ -132,12 +104,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
         .upsert(rowData, { onConflict: "application_id" });
 
       if (error) throw error;
-
-      setCapaSubmissionData((prev: any) => ({
-        ...prev,
-        ...rowData
-      }));
-
+      setCapaSubmissionData((prev: any) => ({ ...prev, ...rowData }));
       alert("💾 CAPA draft saved successfully!");
     } catch (err: any) {
       console.error("Draft save failed:", err);
@@ -145,42 +112,29 @@ export default function DynamicCapaPage({ params }: PageProps) {
     }
   };
 
-  // --- SUBMIT / RESUBMIT HANDLER (With Threaded History Append) ---
-  const handleCapaSubmit = async (data: {
-    items: any[];
-    summary?: any;
-    signatures?: {
-      managingDirector: { name: string; date: string };
-      responsiblePerson: { name: string; date: string };
-    };
-  }) => {
+  const handleCapaSubmit = async (data: { items: any[]; summary?: any; signatures?: any }) => {
     try {
       if (!applicationId) throw new Error("Missing Application ID.");
       const appIdNum = parseInt(applicationId, 10);
-      if (isNaN(appIdNum)) throw new Error("Invalid Application ID format. Must be a numeric value.");
-
       const submittedAt = new Date().toISOString();
 
-      // Format items & append the applicant's cycle response to history
       const processedItems = data.items.map((item: any) => {
-        let existingHistory: AuditHistoryEntry[] = Array.isArray(item.history) ? item.history : [];
-
-        // Determine current cycle counter
+        let existingHistory: any[] = Array.isArray(item.history) ? item.history : [];
         const lastInspectorEntry = [...existingHistory].reverse().find(h => h.authorRole === "INSPECTOR");
         const currentCycle = lastInspectorEntry ? lastInspectorEntry.cycle + 1 : (existingHistory[0]?.cycle || 1);
 
-        const newApplicantEntry: AuditHistoryEntry = {
+        const newApplicantEntry = {
           cycle: currentCycle,
           timestamp: submittedAt,
           authorRole: "APPLICANT",
-          authorName: data.signatures?.responsiblePerson?.name || data.summary?.signatures?.responsiblePerson?.name || "Quality Assurance Representative",
+          authorName: data.signatures?.responsiblePerson?.name || "Quality Assurance Representative",
           rootCause: item.rootCause || "",
-          proposedCorrection: item.proposedCorrection || item.correction || "",
-          preventiveAction: item.preventiveAction || item.correctiveAction || "",
+          proposedCorrection: item.proposedCorrection || "",
+          preventiveAction: item.preventiveAction || "",
           timeline: item.timeline || "",
-          responsibility: item.responsiblePerson || item.responsibility || "",
-          indicators: item.indicatorsForCompletion || item.indicators || "",
-          evidenceUrl: item.uploadedEvidenceUrl || item.evidenceUrl || "",
+          responsibility: item.responsiblePerson || "",
+          indicators: item.indicatorsForCompletion || "",
+          evidenceUrl: item.uploadedEvidenceUrl || "",
         };
 
         return {
@@ -205,8 +159,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
 
       if (upsertError) throw upsertError;
 
-      // Synchronize Master Applications Table back to Inspector Verification Desk
-      const { error: masterUpdateError } = await supabase
+      await supabase
         .from("applications")
         .update({
           status: "CAPA_SUBMITTED_PENDING", 
@@ -214,43 +167,6 @@ export default function DynamicCapaPage({ params }: PageProps) {
           updated_at: submittedAt
         })
         .eq("id", appIdNum);
-
-      if (masterUpdateError) {
-        console.error("Warning: CAPA logged but Master Application Tracker failed to sync:", masterUpdateError);
-      }
-
-      // Outbound mail notification
-      const recipientEmail = companyEmail || "adeiza.yusuf@nafdac.gov.ng";
-
-      try {
-        await fetch("/api/LocalInspectionReports/send-email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            to: recipientEmail,
-            cc: "adeiza.yusuf@nafdac.gov.ng",
-            subject: `🚨 Action Required: CAPA Submission for Application ID ${applicationId}`,
-            html: `
-              <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px;">
-                <h2 style="color: #047857; margin-top: 0;">New CAPA Ledger Submitted</h2>
-                <p>A Corrective and Preventive Action (CAPA) framework has been locked and uploaded to the VMAP infrastructure for audit validation.</p>
-                <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-                <p><strong>Application ID:</strong> ${applicationId}</p>
-                <p><strong>Reference Number:</strong> ${refNumber}</p>
-                <p><strong>Company Name:</strong> ${companyName}</p>
-                <p><strong>Submission Time:</strong> ${new Date(submittedAt).toLocaleString()}</p>
-                <br />
-                <a href="${window.location.origin}/LocalInspectionReports/admin/applications/${applicationId}/capa-verify" 
-                  style="background-color: #047857; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                  Open Adjudication Module
-                </a>
-              </div>
-            `,
-          }),
-        });
-      } catch (emailErr) {
-        console.error("Notification system routing anomaly:", emailErr);
-      }
 
       alert("🚀 CAPA Ledger successfully locked and transmitted to VMAP infrastructure!");
       window.location.reload();
@@ -290,6 +206,15 @@ export default function DynamicCapaPage({ params }: PageProps) {
   let finalObservations: InspectionObservation[] | undefined = undefined;
   let finalItems: CAPAItem[] | undefined = undefined;
 
+  // Safe mapping function to properly parse severity fields from JSON snapshot
+  const mapSeverityToCategory = (sev: string) => {
+    const s = (sev || "").trim().toUpperCase();
+    if (s === "CRITICAL") return "Critical";
+    if (s === "MAJOR") return "Major";
+    if (s === "OTHER" || s === "MINOR") return "Minor";
+    return sev ? sev.charAt(0).toUpperCase() + sev.slice(1).toLowerCase() : "Major";
+  };
+
   if (capaSubmissionData?.capa_items) {
     const rawCapaItems = capaSubmissionData.capa_items;
     const parsedItems = typeof rawCapaItems === "string" ? JSON.parse(rawCapaItems) : rawCapaItems;
@@ -298,7 +223,7 @@ export default function DynamicCapaPage({ params }: PageProps) {
       id: item.id || `obs_${index}_${Date.now()}`,
       deficiency: item.deficiency || item.observation || item.text || "No deficiency details provided.",
       inspectorRemarks: item.inspectorRemarks || item.remarks || "",
-      deficiencyCategory: (item.deficiencyCategory || item.category || (item.severity === "critical" ? "Critical" : item.severity === "major" ? "Major" : "Minor")),
+      deficiencyCategory: mapSeverityToCategory(item.deficiencyCategory || item.severity || item.category),
       rootCause: item.rootCause || "",
       proposedCorrection: item.proposedCorrection || item.correction || "",
       preventiveAction: item.preventiveAction || item.correctiveAction || "",
@@ -310,15 +235,14 @@ export default function DynamicCapaPage({ params }: PageProps) {
       evidenceFiles: item.evidenceFiles || [],
       history: Array.isArray(item.history) ? item.history : []
     }));
-    
   } else {
     const rawObservations = checklistSnapshot.observations || [];
     finalObservations = rawObservations.map((obs: any, index: number) => ({
       id: obs.id || `obs_${index}_${Date.now()}`,
-      deficiencyCategory: (obs.severity === "critical" ? "Critical" : obs.severity === "major" ? "Major" : "Minor"),
-      deficiency: obs.text || obs.deficiency || obs.observation || "No descriptive text provided in field inspection.",
+      deficiencyCategory: mapSeverityToCategory(obs.severity || obs.deficiencyCategory),
+      deficiency: obs.text || obs.deficiency || obs.observation || "No descriptive text provided.",
       inspectorRemarks: obs.inspectorRemarks || obs.remarks || "",
-      timeline: obs.severity === "critical" ? "Immediate" : "30 Days",
+      timeline: (obs.severity || "").toUpperCase() === "CRITICAL" ? "Immediate" : "30 Days",
       responsiblePerson: "Quality Assurance Manager"
     }));
   }
@@ -330,25 +254,12 @@ export default function DynamicCapaPage({ params }: PageProps) {
         
         {isReworkMode && (
           <div className="mt-4 p-4 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl text-xs font-semibold shadow-sm animate-pulse">
-            ⚠️ Attention Required: This CAPA checklist has been returned by the Divisional Deputy Director for rework. 
-            Please review the targeted comments appended to each item below, update your remedies, and resubmit.
-          </div>
-        )}
-
-        {isPendingVerification && (
-          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-xs font-semibold shadow-sm">
-            ⏳ Verification Pending: This dossier is currently locked and awaiting review inside the Divisional Deputy Director verification queue.
-          </div>
-        )}
-
-        {isPassed && (
-          <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl text-xs font-semibold shadow-sm">
-            ✅ Verification Complete: This CAPA framework has been fully verified and passed by the Directorate. Form entries are closed.
+            ⚠️ Attention Required: This CAPA checklist has been returned by the Divisional Deputy Director for rework.
           </div>
         )}
 
         <p className="text-xs text-slate-500 mt-3">
-          Processing Application Entry: <span className="font-mono bg-slate-200 px-1 py-0.5 rounded text-slate-800">ID {applicationId}</span> — Current Tracking State: <span className="font-mono text-emerald-700 font-bold">{reportSnapshot.status}</span>
+          Processing Application Entry: <span className="font-mono bg-slate-200 px-1.5 py-0.5 rounded text-slate-800">ID {applicationId}</span>
         </p>
       </div>
 

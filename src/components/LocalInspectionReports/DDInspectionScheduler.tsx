@@ -13,6 +13,7 @@ interface Inspector {
   id: string;
   full_name: string;
   division?: string;
+  role?: string;
   is_available: boolean;
   locked_workflows?: LockedWorkflow[];
 }
@@ -72,7 +73,6 @@ export default function DDInspectionScheduler({
         if (!res.ok) throw new Error('Failed to retrieve inspector workforce matrix from QMS registry.');
         
         const data = await res.json();
-        // console.log('data: ', data);
         setInspectors(data.inspectors || []);
       } catch (err: unknown) {
         if (err instanceof Error) {
@@ -125,8 +125,6 @@ export default function DDInspectionScheduler({
         ...traineeInspectors.map((id) => ({ inspectorId: id, role: "TRAINEE_INSPECTOR" as const })),
       ];
 
-      console.log('inspectorPayload: ', inspectorPayload);
-
       // Call the POST endpoint for individual inspection scheduling
       const response = await fetch('/api/LocalInspectionReports/schedule/single', {
         method: 'POST',
@@ -142,7 +140,6 @@ export default function DDInspectionScheduler({
       const result = await response.json();
       if (!result.success) throw new Error(result.error || 'Failed to update inspection schedule.');
       
-      console.log('result: ', result);
       alert("Inspection successfully scheduled.");
       if (onSuccess) onSuccess();
 
@@ -202,7 +199,7 @@ export default function DDInspectionScheduler({
               <option value="">-- Select Active, Clear Leader --</option>
               {availableInspectors.map(ins => (
                 <option key={ins.id} value={ins.id}>
-                  {ins.full_name} [{ins.division?.toUpperCase() || 'STAFF'}]
+                  {ins.full_name} [{ins.role || 'Staff'} - {ins.division?.toUpperCase() || 'VMD'}]
                 </option>
               ))}
             </select>
@@ -266,7 +263,7 @@ export default function DDInspectionScheduler({
             onClick={handleSubmitSchedule}
             disabled={submitting}
           >
-            {submitting ? 'Committing Multi-Table Transactions...' : 'Confirm & Issue Field Mandate'}
+            {submitting ? 'Issuing Field Mandate...' : 'Confirm & Issue Field Mandate'}
           </button>
         </div>
       </div>
@@ -293,7 +290,7 @@ export default function DDInspectionScheduler({
                 }`}
               >
                 <span className="truncate max-w-[130px]">
-                  {ins.full_name} <span className="opacity-75 text-[10px]">({ins.division?.toUpperCase() || 'STAFF'})</span>
+                  {ins.full_name} <span className="opacity-75 text-[10px]">({ins.role || 'Staff'} • {ins.division?.toUpperCase() || 'VMD'})</span>
                 </span>
                 <span className={`px-1.5 py-0.5 text-[10px] rounded font-bold ${
                   ins.is_available 
@@ -309,7 +306,7 @@ export default function DDInspectionScheduler({
           {focusedInspector ? (
             <div className="bg-white border border-slate-200 rounded p-3 shadow-inner min-h-[140px]">
               <h4 className="text-xs font-bold text-slate-800 truncate mb-2">
-                {focusedInspector.full_name} <span className="text-[10px] text-slate-400">({focusedInspector.division?.toUpperCase() || 'STAFF'})</span>
+                {focusedInspector.full_name} <span className="text-[10px] text-slate-400">({focusedInspector.role || 'Staff'} • {focusedInspector.division?.toUpperCase() || 'VMD'})</span>
               </h4>
               
               {!focusedInspector.is_available && focusedInspector.locked_workflows && focusedInspector.locked_workflows.length > 0 ? (

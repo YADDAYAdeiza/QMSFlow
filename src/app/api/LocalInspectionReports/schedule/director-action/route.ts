@@ -1,4 +1,4 @@
-// @/app/api/LocalInspectionReports/schedule/approve/route.ts (or your respective path)
+// @/app/api/LocalInspectionReports/schedule/director-action/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { scheduleBatches, inspectionSchedules, applications, qmsTimelines, companies, facilities } from "@/db/schema";
@@ -9,7 +9,7 @@ import { sendOversightEmail } from "@/lib/utils/mail";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { batchId, action, comments, userId, userRole, isForeign } = body;
+    const { batchId, action, comments, userId, userRole, isForeign, scheduleIds } = body;
 
     if (!batchId || !action) {
       return NextResponse.json(
@@ -75,7 +75,6 @@ export async function POST(request: Request) {
         timestamp: now.toISOString(),
       };
 
-      // Ensure isForeign flag is accurately resolved and preserved
       const resolvedIsForeign = typeof isForeign === "boolean" ? isForeign : !!batch.isForeign;
 
       await db.transaction(async (tx) => {
@@ -91,32 +90,27 @@ export async function POST(request: Request) {
           })
           .where(eq(scheduleBatches.id, batchId));
 
-        if (Array.isArray(body.activeScheduleIds) && body.activeScheduleIds.length > 0) {
+        // Robustly bind schedules using scheduleIds passed from frontend modal
+        if (Array.isArray(scheduleIds) && scheduleIds.length > 0) {
           await tx
             .update(inspectionSchedules)
             .set({ batchId: null })
             .where(
               and(
                 eq(inspectionSchedules.batchId, batch.id),
-                notInArray(inspectionSchedules.id, body.activeScheduleIds)
+                notInArray(inspectionSchedules.id, scheduleIds)
               )
             );
 
           await tx
             .update(inspectionSchedules)
             .set({ batchId: batch.id })
-            .where(inArray(inspectionSchedules.id, body.activeScheduleIds));
+            .where(inArray(inspectionSchedules.id, scheduleIds));
         } else {
           await tx
             .update(inspectionSchedules)
             .set({ batchId: batch.id })
-            .where(
-              and(
-                gte(inspectionSchedules.scheduledDate, batch.startDate),
-                lte(inspectionSchedules.scheduledDate, batch.endDate),
-                isNull(inspectionSchedules.batchId)
-              )
-            );
+            .where(eq(inspectionSchedules.batchId, batch.id));
         }
 
         const applicationIds = await getBatchApplicationIds(tx, batch.id);
@@ -203,10 +197,9 @@ export async function POST(request: Request) {
     }
 
     // --- ACTION HANDLER 2: Final Director Approval ---
+    // --- ACTION HANDLER 2: Final Director Approval ---
     if (action === "APPROVE") {
       const currentStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
-      
-      // 🌟 RELIABLE FOREIGN DETECTION: Checks explicit request payload first, then falls back to synchronized batch column
       const resolvedIsForeign = typeof isForeign === "boolean" ? isForeign : !!batch.isForeign;
 
       const targetStep = resolvedIsForeign
@@ -223,8 +216,9 @@ export async function POST(request: Request) {
         timestamp: now.toISOString(),
       };
 
+      let inspectorEmails: string[] = [];
+
       await db.transaction(async (tx) => {
-        // Ensure the batch record explicitly locks in the correct isForeign status upon approval
         await tx
           .update(scheduleBatches)
           .set({
@@ -238,6 +232,33 @@ export async function POST(request: Request) {
           .where(eq(scheduleBatches.id, batchId));
 
         const applicationIds = await getBatchApplicationIds(tx, batchId);
+
+        // --- NEW: Fetch assigned inspectors for this batch to notify them internally ---
+        const batchSchedules = await tx
+          .select({ scheduleId: inspectionSchedules.id })
+          .from(inspectionSchedules)
+          .where(eq(inspectionSchedules.batchId, batchId));
+
+        const scheduleIdsList = batchSchedules.map(s => s.scheduleId);
+        
+        if (scheduleIdsList.length > 0) {
+          const assignments = await tx
+            .select({ inspectorId: inspectionTeamAssignments.inspectorId })
+            .from(inspectionTeamAssignments)
+            .where(inArray(inspectionTeamAssignments.scheduleId, scheduleIdsList));
+
+          const uniqueInspectorIds = Array.from(new Set(assignments.map(a => a.inspectorId)));
+
+          if (uniqueInspectorIds.length > 0) {
+            const teamUsers = await tx
+              .select({ email: users.email })
+              .from(users)
+              .where(inArray(users.id, uniqueInspectorIds));
+
+            inspectorEmails = teamUsers.map(u => u.email).filter(Boolean) as string[];
+          }
+        }
+        // --------------------------------------------------------------------------
 
         if (applicationIds.length > 0) {
           await tx
@@ -298,6 +319,7 @@ export async function POST(request: Request) {
         }
       });
 
+      // Dispatch external applicant emails
       for (const item of emailDispatchQueue) {
         await sendOversightEmail({
           appNumber: item.appNumber,
@@ -309,6 +331,24 @@ export async function POST(request: Request) {
           emailTitle: item.emailTitle,
         });
       }
+
+      // --- NEW: Dispatch custom notification emails directly to the inspection team ---
+      for (const inspectorEmail of inspectorEmails) {
+        try {
+          await sendOversightEmail({
+            appNumber: "BATCH-NOTICE",
+            type: "Internal Dispatch",
+            companyName: batch.title,
+            facilityName: "Assigned Field Deployment",
+            lodRemarks: `The inspection schedule batch "${batch.title}" has been officially APPROVED by the Director. Please review your dashboard for deployment details. Comments: ${comments || "None"}`,
+            customRecipient: inspectorEmail,
+            emailTitle: "Action Required: Inspection Batch Approved & Deployed",
+          });
+        } catch (mailErr) {
+          console.error(`Failed to notify inspector at ${inspectorEmail}:`, mailErr);
+        }
+      }
+      // --------------------------------------------------------------------------
 
       return NextResponse.json({
         success: true,

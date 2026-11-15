@@ -1,4 +1,3 @@
-// @/app/api/LocalInspectionReports/schedule-inspection/batch/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { scheduleBatches, inspectionSchedules, inspectionTeamAssignments, applications } from "@/db/schema";
@@ -17,28 +16,39 @@ export async function POST(request: Request) {
         targetAppIds.push(Number(applicationId));
       }
 
-      // 2. Support facilities array (includes single facility or proximal / multi-facility batches)
+      // 2. Surgical foreign factory resolution
       if (Array.isArray(facilities) && facilities.length > 0) {
-        const matchingApps = await tx
-          .select({ id: applications.id })
-          .from(applications)
-          .where(inArray(applications.facilityId, facilities));
+        const parsedFacilityIds = facilities.map(id => Number(id)).filter(id => !isNaN(id));
 
-        for (const app of matchingApps) {
-          if (!targetAppIds.includes(app.id)) {
-            targetAppIds.push(app.id);
+        if (parsedFacilityIds.length > 0) {
+          const matchingApps = await tx
+            .select({ id: applications.id })
+            .from(applications)
+            .where(inArray(applications.foreignFactoryId, parsedFacilityIds));
+
+          for (const app of matchingApps) {
+            if (!targetAppIds.includes(app.id)) {
+              targetAppIds.push(app.id);
+            }
           }
         }
       }
 
       if (targetAppIds.length === 0) {
-        throw new Error("No valid applications or facilities found for scheduling dispatch.");
+        throw new Error("Batch Creation Failed: No valid foreign applications found for the selected facilities.");
       }
 
-      // 3. Clean up any existing active schedules for these specific applications to prevent unique constraint crashes
-      await tx
-        .delete(inspectionSchedules)
+      // 3. Clean up any existing active schedules for these specific applications
+      const conflictingSchedules = await tx
+        .select({ id: inspectionSchedules.id })
+        .from(inspectionSchedules)
         .where(inArray(inspectionSchedules.applicationId, targetAppIds));
+
+      const confScheduleIds = conflictingSchedules.map(s => s.id);
+      if (confScheduleIds.length > 0) {
+        await tx.delete(inspectionTeamAssignments).where(inArray(inspectionTeamAssignments.scheduleId, confScheduleIds));
+        await tx.delete(inspectionSchedules).where(inArray(inspectionSchedules.applicationId, targetAppIds));
+      }
 
       // 4. Generate a unique batch reference string
       const batchReference = `BATCH-${Date.now()}`;

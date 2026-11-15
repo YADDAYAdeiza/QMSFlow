@@ -15,7 +15,7 @@ interface RecommendApprovalModalProps {
   history?: HistoryEntry[] | null | undefined;
   isRework?: boolean;
   userId?: string;
-  isForeign?: boolean; // <--- Add this
+  isForeign?: boolean;
 }
 
 export default function RecommendApprovalModal({
@@ -28,7 +28,7 @@ export default function RecommendApprovalModal({
   history,
   isRework = false,
   userId,
-  isForeign = false, // <--- Add this
+  isForeign = false,
 }: RecommendApprovalModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [comments, setComments] = useState("");
@@ -44,76 +44,78 @@ export default function RecommendApprovalModal({
 
   const isDisabled = isPending || isSubmitting;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isDisabled) return;
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (isDisabled) return;
 
-    setIsSubmitting(true);
+      setIsSubmitting(true);
 
-    startTransition(async () => {
-      try {
-        let activeBatchId = batchId;
+      startTransition(async () => {
+        try {
+          let activeBatchId = batchId;
 
-        // 1. If batchId is missing, resolve or auto-create the batch container using exact active schedule IDs
-        if (!activeBatchId) {
-          const batchRes = await fetch("/api/LocalInspectionReports/schedule/batch-update", {
-            method: "PUT",
+          // 1. If batchId is missing, resolve or auto-create the batch container using exact active schedule IDs
+          if (!activeBatchId) {
+            // Inside RecommendApprovalModal.tsx (RecommendApp_3.txt)
+                const batchRes = await fetch("/api/LocalInspectionReports/schedule/batch-update-v2", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    startDate,
+                    endDate,
+                    activeScheduleIds: scheduleIds,
+                    updates: [],
+                    isForeign,
+                  }),
+                });
+
+            const batchData = await batchRes.json();
+            if (!batchRes.ok || !batchData.success || !batchData.batchId) {
+              throw new Error(batchData.error || "Failed to initialize schedule batch.");
+            }
+            activeBatchId = batchData.batchId;
+          }
+
+          // 2. Submit recommendation with guaranteed activeBatchId and explicit scheduleIds
+          const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+
+          const response = await fetch("/api/LocalInspectionReports/schedule/director-action", {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              batchId: activeBatchId,
+              scheduleIds: scheduleIds || [],
               startDate,
               endDate,
-              activeScheduleIds: scheduleIds, // Scoped strictly to the currently active schedules on screen
-              updates: [], // Pass empty updates if no row edits occurred inside the modal
+              comments,
+              userId: isValidUuid ? userId : null,
+              userRole: "Divisional Deputy Director",
+              action: isRework ? "RESUBMIT" : "RECOMMEND",
+              isForeign,
             }),
           });
 
-          const batchData = await batchRes.json();
-          if (!batchRes.ok || !batchData.success || !batchData.batchId) {
-            throw new Error(batchData.error || "Failed to initialize schedule batch.");
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+            throw new Error(result.error || "Failed to submit recommendation.");
           }
-          activeBatchId = batchData.batchId;
+
+          setIsOpen(false);
+          setComments("");
+          alert(
+            isRework
+              ? "Reworked schedule batch successfully resubmitted to the Director!"
+              : "Inspection schedule batch successfully routed to the Director for Approval!"
+          );
+          router.refresh();
+        } catch (err: any) {
+          console.error("Submission Error:", err);
+          alert(err.message || "An error occurred while submitting. Please try again.");
+        } finally {
+          setIsSubmitting(false);
         }
-
-        // 2. Submit recommendation with the guaranteed activeBatchId
-        const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-
-        const response = await fetch("/api/LocalInspectionReports/schedule/director-action", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            batchId: activeBatchId,
-            scheduleIds: scheduleIds || [],
-            startDate,
-            endDate,
-            comments,
-            userId: isValidUuid ? userId : null,
-            userRole: "Divisional Deputy Director",
-            action: isRework ? "RESUBMIT" : "RECOMMEND",
-            isForeign, // <--- Send isForeign to backend
-          }),
-        });
-
-        const result = await response.json();
-        if (!response.ok || !result.success) {
-          throw new Error(result.error || "Failed to submit recommendation.");
-        }
-
-        setIsOpen(false);
-        setComments("");
-        alert(
-          isRework
-            ? "Reworked schedule batch successfully resubmitted to the Director!"
-            : "Inspection schedule batch successfully routed to the Director for Approval!"
-        );
-        router.refresh();
-      } catch (err: any) {
-        console.error("Submission Error:", err);
-        alert(err.message || "An error occurred while submitting. Please try again.");
-      } finally {
-        setIsSubmitting(false);
-      }
-    });
-  };
+      });
+    };
 
   return (
     <>

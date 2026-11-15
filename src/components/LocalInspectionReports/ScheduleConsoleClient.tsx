@@ -58,6 +58,17 @@ const createColoredIcon = (colorHex: string) => {
   });
 };
 
+// Helper to normalize any incoming date format into strict YYYY-MM-DD for HTML date inputs & PostgreSQL
+const formatDateForInput = (dateStr?: string) => {
+  if (!dateStr) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().split('T')[0];
+  }
+  return "";
+};
+
 interface PendingAssignment {
   company_name: string;
   application_id: number;
@@ -157,7 +168,7 @@ export default function ScheduleConsoleClient({
     return [];
   });
 
-  const [inspectionDate, setInspectionDate] = useState(initialBatchData?.startDate || "");
+  const [inspectionDate, setInspectionDate] = useState(() => formatDateForInput(initialBatchData?.startDate));
   const [batchTitle, setBatchTitle] = useState(initialBatchData?.title || "");
   const [teamLeader, setTeamLeader] = useState(initialBatchData?.teamLeader || "");
   const [coInspectors, setCoInspectors] = useState<string[]>(initialBatchData?.coInspectors || []);
@@ -262,8 +273,9 @@ export default function ScheduleConsoleClient({
   const hasLeaderPending = (selectedLeaderObj?.pending_assignments?.length ?? 0) > 0;
 
   const handleSubmitSchedule = async () => {
-    if (!inspectionDate || !teamLeader) {
-      alert("Validation Error: Inspection target date and designated Team Leader are required parameters.");
+    const cleanDate = formatDateForInput(inspectionDate);
+    if (!cleanDate || !teamLeader) {
+      alert("Validation Error: A valid Target Inspection Date and designated Team Leader are required parameters.");
       return;
     }
     if (assignedFacilities.length === 0) {
@@ -287,13 +299,13 @@ export default function ScheduleConsoleClient({
 
       const payload = isEditMode ? {
         title: batchTitle,
-        startDate: inspectionDate,
-        endDate: inspectionDate,
+        startDate: cleanDate,
+        endDate: cleanDate,
         inspectors: inspectorPayload,
         facilities: assignedFacilities.map(f => f.id),
       } : {
         applicationId: Number(applicationId),
-        scheduledDate: inspectionDate,
+        scheduledDate: cleanDate,
         inspectors: inspectorPayload,
         facilities: assignedFacilities.map(f => f.id),
       };
@@ -311,7 +323,6 @@ export default function ScheduleConsoleClient({
       
       alert(isEditMode ? "Inspection batch successfully updated and re-assigned!" : "Foreign inspection batch schedule successfully committed and dispatched!");
       
-      // Reroute back to DDD inbox with the Inspection Scheduling Queue tab active
       router.push("/LocalInspectionReports/ddd/inbox?tab=finished_verifications");
       router.refresh();
     } catch (err: unknown) {

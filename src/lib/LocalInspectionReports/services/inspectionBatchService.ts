@@ -1,0 +1,382 @@
+// @/lib/LocalInspectionReports/services/inspectionBatchService.ts
+import { db } from "@/db";
+import { 
+  inspectionSchedules, 
+  inspectionTeamAssignments, 
+  scheduleBatches,
+  applications,
+  qmsTimelines,
+  companies,
+  facilities
+} from "@/db/schema";
+import { eq, inArray, notInArray, and, isNull, sql } from "drizzle-orm";
+import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
+
+export interface BatchUpdateItem {
+  scheduleId?: string | null;
+  applicationId: number;
+  scheduledDate: string;
+  driver?: string;
+  inspectors: Array<{
+    inspectorId: string;
+    role: "TEAM_LEADER" | "CO_INSPECTOR" | "TRAINEE_INSPECTOR";
+  }>;
+}
+
+export interface ProcessBatchParams {
+  batchId?: string;
+  updates: BatchUpdateItem[];
+  activeScheduleIds?: string[];
+  startDate: string;
+  endDate: string;
+  isForeign?: boolean;
+  userId: string;
+}
+
+export async function processInspectionBatch({
+  batchId,
+  updates = [],
+  activeScheduleIds = [],
+  startDate,
+  endDate,
+  isForeign = false,
+  userId,
+}: ProcessBatchParams) {
+  // ⚙️ LOG WHAT ENTERS THE SERVICE LAYER
+  console.log("⚙️ PROCESSING INSPECTION BATCH IN SERVICE:", {
+    batchId,
+    startDate,
+    endDate,
+    isForeign,
+    activeScheduleIdsCount: activeScheduleIds.length,
+    updatesCount: updates.length,
+    updatesPayload: updates,
+  });
+
+  let targetBatchId = batchId;
+  const draftStep = inspectionScheduleBatchWorkflow.steps.DDD_SCHEDULE_ROUTING;
+  const pendingStep = inspectionScheduleBatchWorkflow.steps.INSPECTION_PENDING;
+  const now = new Date();
+
+  // Dynamically compute the date span based on active updates if available
+  const allScheduledDates = updates.map((u) => u.scheduledDate).filter(Boolean);
+  const calculatedStartDate = allScheduledDates.length > 0 
+    ? allScheduledDates.reduce((min, p) => p < min ? p : min, allScheduledDates[0])
+    : startDate;
+  const calculatedEndDate = allScheduledDates.length > 0 
+    ? allScheduledDates.reduce((max, p) => p > max ? p : max, allScheduledDates[0])
+    : endDate;
+
+  // ==========================================
+  // SECTION 1: RESOLVE OR CREATE BATCH CONTAINER
+  // ==========================================
+  if (!targetBatchId) {
+    if (activeScheduleIds.length > 0) {
+      const [linkedSchedule] = await db
+        .select({ batchId: inspectionSchedules.batchId })
+        .from(inspectionSchedules)
+        .where(
+          and(
+            inArray(inspectionSchedules.id, activeScheduleIds),
+            sql`${inspectionSchedules.batchId} IS NOT NULL`
+          )
+        )
+        .limit(1);
+
+      if (linkedSchedule?.batchId) {
+        targetBatchId = linkedSchedule.batchId;
+      }
+    }
+
+    if (!targetBatchId) {
+      const [existingBatch] = await db
+        .select({ id: scheduleBatches.id })
+        .from(scheduleBatches)
+        .where(
+          and(
+            eq(scheduleBatches.startDate, startDate),
+            eq(scheduleBatches.endDate, endDate),
+            eq(scheduleBatches.isForeign, isForeign)
+          )
+        )
+        .limit(1);
+
+      if (existingBatch) {
+        targetBatchId = existingBatch.id;
+      }
+    }
+
+    if (!targetBatchId) {
+      const uniqueReference = `SCHEDULE-${calculatedStartDate}-${calculatedEndDate}-${Date.now().toString(36)}`;
+      const [newBatch] = await db
+        .insert(scheduleBatches)
+        .values({
+          batchReference: uniqueReference,
+          title: `${isForeign ? "GMP Foreign" : "VMAP"} Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
+          startDate: calculatedStartDate,
+          endDate: calculatedEndDate,
+          status: draftStep.statusLabel,
+          currentPoint: draftStep.currentPoint,
+          isForeign: isForeign,
+          history: [],
+        })
+        .returning({ id: scheduleBatches.id });
+
+      targetBatchId = newBatch.id;
+    }
+  } else {
+    await db
+      .update(scheduleBatches)
+      .set({ isForeign, updatedAt: now })
+      .where(eq(scheduleBatches.id, targetBatchId));
+  }
+
+  const emailDispatchQueue: Array<{
+    appNumber: string;
+    type: string;
+    companyName: string;
+    facilityName: string;
+    scheduledDate: string;
+    notificationEmail?: string;
+  }> = [];
+
+  // ==========================================
+  // SECTION 2: TRANSACTIONAL CORE
+  // ==========================================
+  await db.transaction(async (tx) => {
+    const activeScheduleDbIds: string[] = [];
+    const newlyLinkedAppIds: number[] = [];
+
+    for (const item of updates) {
+      let currentScheduleId = item.scheduleId;
+
+      if (!currentScheduleId && item.applicationId) {
+        const [existingSchedule] = await tx
+          .select({ id: inspectionSchedules.id })
+          .from(inspectionSchedules)
+          .where(eq(inspectionSchedules.applicationId, item.applicationId))
+          .limit(1);
+
+        if (existingSchedule) {
+          currentScheduleId = existingSchedule.id;
+        }
+      }
+
+      if (currentScheduleId) {
+        if (activeScheduleIds.length > 0 && !activeScheduleIds.includes(currentScheduleId)) {
+          continue; 
+        }
+
+        await tx
+          .update(inspectionSchedules)
+          .set({
+            scheduledDate: item.scheduledDate,
+            batchId: targetBatchId,
+            ...(item.driver !== undefined && {
+              details: sql`jsonb_set(
+                COALESCE(${inspectionSchedules.details}, '{}'::jsonb), 
+                '{assignedDriver}', 
+                ${JSON.stringify(item.driver)}::jsonb
+              )`,
+            }),
+            updatedAt: now,
+          })
+          .where(eq(inspectionSchedules.id, currentScheduleId));
+      } else {
+        const [insertedSchedule] = await tx
+          .insert(inspectionSchedules)
+          .values({
+            applicationId: item.applicationId,
+            batchId: targetBatchId,
+            scheduledDate: item.scheduledDate,
+            status: "SCHEDULED",
+            ...(item.driver !== undefined && {
+              details: { assignedDriver: item.driver },
+            }),
+          })
+          .returning({ id: inspectionSchedules.id });
+
+        currentScheduleId = insertedSchedule.id;
+        newlyLinkedAppIds.push(item.applicationId);
+      }
+
+      activeScheduleDbIds.push(currentScheduleId);
+
+      await tx
+        .delete(inspectionTeamAssignments)
+        .where(eq(inspectionTeamAssignments.scheduleId, currentScheduleId));
+
+      if (item.inspectors.length > 0) {
+        const assignmentValues = item.inspectors.map((ins) => ({
+          scheduleId: currentScheduleId!,
+          inspectorId: ins.inspectorId,
+          role: ins.role,
+        }));
+
+        await tx.insert(inspectionTeamAssignments).values(assignmentValues);
+      }
+    }
+
+    if (targetBatchId) {
+      const unlinkingConditions = [eq(inspectionSchedules.batchId, targetBatchId)];
+      if (activeScheduleIds.length > 0) {
+        unlinkingConditions.push(notInArray(inspectionSchedules.id, activeScheduleIds));
+      }
+
+      const removedSchedules = await tx
+        .select({ 
+          id: inspectionSchedules.id,
+          applicationId: inspectionSchedules.applicationId 
+        })
+        .from(inspectionSchedules)
+        .where(and(...unlinkingConditions));
+
+      const unlinkedAppIds = removedSchedules
+        .map((s) => s.applicationId)
+        .filter((id): id is number => id !== null);
+
+      if (removedSchedules.length > 0) {
+        await tx
+          .update(inspectionSchedules)
+          .set({ 
+            batchId: null,
+            updatedAt: now,
+          })
+          .where(and(...unlinkingConditions));
+      }
+
+      if (unlinkedAppIds.length > 0) {
+        await tx
+          .update(qmsTimelines)
+          .set({ endTime: now })
+          .where(
+            and(
+              inArray(qmsTimelines.applicationId, unlinkedAppIds),
+              isNull(qmsTimelines.endTime)
+            )
+          );
+
+        for (const appId of unlinkedAppIds) {
+          await tx.insert(qmsTimelines).values({
+            applicationId: appId,
+            staff_id: userId,
+            point: pendingStep.currentPoint,
+            division: pendingStep.division,
+            startTime: now,
+            details: { reverted_from: draftStep.key },
+          });
+        }
+
+        await tx
+          .update(applications)
+          .set({
+            currentPoint: pendingStep.currentPoint,
+            status: pendingStep.statusLabel,
+            details: sql`jsonb_set(
+              COALESCE(${applications.details}, '{}'::jsonb), 
+              '{inspectionWorkflowMeta,currentStepKey}', 
+              ${JSON.stringify(pendingStep.key)}::jsonb
+            )`,
+            updatedAt: now,
+          })
+          .where(inArray(applications.id, unlinkedAppIds));
+      }
+    }
+
+    if (allScheduledDates.length > 0) {
+      await tx
+        .update(scheduleBatches)
+        .set({
+          startDate: calculatedStartDate,
+          endDate: calculatedEndDate,
+          title: `${isForeign ? "GMP Foreign" : "VMAP"} Inspection Schedule (${calculatedStartDate} to ${calculatedEndDate})`,
+          updatedAt: now,
+        })
+        .where(eq(scheduleBatches.id, targetBatchId));
+    }
+
+    if (activeScheduleDbIds.length > 0) {
+      const activeSchedules = await tx
+        .select({ 
+          applicationId: inspectionSchedules.applicationId,
+          scheduledDate: inspectionSchedules.scheduledDate 
+        })
+        .from(inspectionSchedules)
+        .where(inArray(inspectionSchedules.id, activeScheduleDbIds));
+
+      const activeAppIds = activeSchedules
+        .map((s) => s.applicationId)
+        .filter((id): id is number => id !== null);
+
+      if (activeAppIds.length > 0) {
+        if (newlyLinkedAppIds.length > 0) {
+          await tx
+            .update(qmsTimelines)
+            .set({ endTime: now })
+            .where(
+              and(
+                inArray(qmsTimelines.applicationId, newlyLinkedAppIds),
+                isNull(qmsTimelines.endTime)
+              )
+            );
+
+          for (const appId of newlyLinkedAppIds) {
+            await tx.insert(qmsTimelines).values({
+              applicationId: appId,
+              staff_id: userId,
+              point: draftStep.currentPoint,
+              division: draftStep.division,
+              startTime: now,
+              details: { routed_from: pendingStep.key, assigned_role: draftStep.role },
+            });
+          }
+        }
+
+        await tx
+          .update(applications)
+          .set({
+            currentPoint: draftStep.currentPoint,
+            status: draftStep.statusLabel,
+            details: sql`jsonb_set(
+              COALESCE(${applications.details}, '{}'::jsonb), 
+              '{inspectionWorkflowMeta,currentStepKey}', 
+              ${JSON.stringify(draftStep.key)}::jsonb
+            )`,
+            updatedAt: now,
+          })
+          .where(inArray(applications.id, activeAppIds));
+
+        for (const sch of activeSchedules) {
+          if (!sch.applicationId) continue;
+          const [appData] = await tx
+            .select()
+            .from(applications)
+            .where(eq(applications.id, sch.applicationId));
+
+          if (appData) {
+            const [comp] = await tx
+              .select({ name: companies.name })
+              .from(companies)
+              .where(eq(companies.id, appData.companyId));
+
+            const [fac] = await tx
+              .select({ name: facilities.name })
+              .from(facilities)
+              .where(eq(facilities.id, appData.facilityId));
+
+            emailDispatchQueue.push({
+              appNumber: appData.applicationNumber,
+              type: appData.type,
+              companyName: comp?.name || "Registered Establishment",
+              facilityName: fac?.name || "Manufacturing Facility",
+              scheduledDate: sch.scheduledDate || calculatedStartDate,
+              notificationEmail: (appData.details as any)?.notificationEmail,
+            });
+          }
+        }
+      }
+    }
+  });
+
+  return { targetBatchId, emailDispatchQueue };
+}

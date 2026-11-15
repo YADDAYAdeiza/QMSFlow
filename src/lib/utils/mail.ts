@@ -22,7 +22,7 @@ export async function sendOversightEmail(appDetails: {
 
     const ccOversight = [
       "adeiza.yusuf@nafdac.gov.ng",
-      // "agboola.waheed@nafdac.gov.ng",
+      "agboola.waheed@nafdac.gov.ng",
       // "emmanuel.ngu@nafdac.gov.ng",
     ];
     

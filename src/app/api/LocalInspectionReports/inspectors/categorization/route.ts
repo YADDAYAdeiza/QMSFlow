@@ -158,7 +158,9 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true, message: 'Facility categorization saved and processed successfully.' });
+
   } catch (error: any) {
+    
     console.error('Categorization endpoint error:', error);
     return NextResponse.json({ success: false, error: error.message || 'Internal Server Error' }, { status: 500 });
   }

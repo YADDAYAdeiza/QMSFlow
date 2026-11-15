@@ -82,6 +82,17 @@ const createColoredIcon = (colorHex: string) => {
   });
 };
 
+// Helper to normalize any incoming date format into strict YYYY-MM-DD for HTML date inputs & PostgreSQL
+const formatDateForInput = (dateStr?: string) => {
+  if (!dateStr) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().split('T')[0];
+  }
+  return "";
+};
+
 interface PendingAssignment {
   company_name: string;
   application_id: number;
@@ -160,7 +171,7 @@ export default function ScheduleConsoleBatchClient({ batchId, initialUsers = [],
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>("");
   const [assignedFacilities, setAssignedFacilities] = useState<FacilityOption[]>(initialBatchData?.assignedFacilities || []);
 
-  const [inspectionDate, setInspectionDate] = useState(initialBatchData?.startDate || "");
+  const [inspectionDate, setInspectionDate] = useState(() => formatDateForInput(initialBatchData?.startDate));
   const [batchTitle, setBatchTitle] = useState(initialBatchData?.title || "");
   const [teamLeader, setTeamLeader] = useState(initialBatchData?.teamLeader || "");
   const [coInspectors, setCoInspectors] = useState<string[]>(initialBatchData?.coInspectors || []);
@@ -261,7 +272,8 @@ export default function ScheduleConsoleBatchClient({ batchId, initialUsers = [],
   }, [centerLat, centerLng, activeFacility]);
 
   const handleUpdateBatch = async () => {
-    if (!inspectionDate || !teamLeader) {
+    const cleanDate = formatDateForInput(inspectionDate);
+    if (!cleanDate || !teamLeader) {
       alert("Validation Error: Inspection target date and designated Team Leader are required.");
       return;
     }
@@ -283,8 +295,8 @@ export default function ScheduleConsoleBatchClient({ batchId, initialUsers = [],
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: batchTitle,
-          startDate: inspectionDate,
-          endDate: inspectionDate,
+          startDate: cleanDate,
+          endDate: cleanDate,
           inspectors: inspectorPayload,
           facilities: assignedFacilities.map(f => f.id),
         }),
