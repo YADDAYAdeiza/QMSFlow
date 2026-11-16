@@ -1,7 +1,16 @@
 // @/app/api/LocalInspectionReports/schedule/director-action/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { scheduleBatches, inspectionSchedules, applications, qmsTimelines, companies, facilities } from "@/db/schema";
+import { 
+  scheduleBatches, 
+  inspectionSchedules, 
+  inspectionTeamAssignments, 
+  applications, 
+  qmsTimelines, 
+  companies, 
+  facilities, 
+  users 
+} from "@/db/schema";
 import { eq, inArray, notInArray, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { inspectionScheduleBatchWorkflow } from "@/config/workflows/inspectionScheduleBatchWorkflow";
 import { sendOversightEmail } from "@/lib/utils/mail";
@@ -197,7 +206,6 @@ export async function POST(request: Request) {
     }
 
     // --- ACTION HANDLER 2: Final Director Approval ---
-    // --- ACTION HANDLER 2: Final Director Approval ---
     if (action === "APPROVE") {
       const currentStep = inspectionScheduleBatchWorkflow.steps.SCHEDULE_DRAFT;
       const resolvedIsForeign = typeof isForeign === "boolean" ? isForeign : !!batch.isForeign;
@@ -233,7 +241,7 @@ export async function POST(request: Request) {
 
         const applicationIds = await getBatchApplicationIds(tx, batchId);
 
-        // --- NEW: Fetch assigned inspectors for this batch to notify them internally ---
+        // --- Fetch assigned inspectors for this batch to notify them internally ---
         const batchSchedules = await tx
           .select({ scheduleId: inspectionSchedules.id })
           .from(inspectionSchedules)
@@ -332,7 +340,7 @@ export async function POST(request: Request) {
         });
       }
 
-      // --- NEW: Dispatch custom notification emails directly to the inspection team ---
+      // --- Dispatch custom notification emails directly to the inspection team ---
       for (const inspectorEmail of inspectorEmails) {
         try {
           await sendOversightEmail({
