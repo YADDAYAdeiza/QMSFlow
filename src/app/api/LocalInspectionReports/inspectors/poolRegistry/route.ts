@@ -8,7 +8,7 @@ export async function GET() {
   try {
     const supabase = await createClient();
 
-    // 1. Fetch all personnel from the registry (no role restriction)
+    // 1. Fetch all personnel from the registry
     const { data: staffList, error: staffError } = await supabase
       .from('users')
       .select('id, name, division, role')
@@ -19,8 +19,7 @@ export async function GET() {
       return NextResponse.json({ inspectors: [] });
     }
 
-    // 2. Fetch assignments joined with application stage metadata
-    // Fetch ONLY assignments where the application is actively in STAFF_TECHNICAL_REVIEW
+    // 2. Fetch assignments joined with application stage metadata for auditing purposes
     const { data: activeAssignments, error: joinError } = await supabase
       .from('inspection_team_assignments')
       .select(`
@@ -46,9 +45,8 @@ export async function GET() {
       const app = assignment.inspection_schedules?.applications;
       
       if (app) {
-        // 🔒 Personnel are locked ONLY if the application is actively in STAFF_TECHNICAL_REVIEW
         if (app.current_point === inspectionReportWorkflow.steps.STAFF_TECHNICAL_REVIEW.title) {
-          const detailsObj = typeof app.details === 'string' ? JSON.parse(app.details) : app.details;
+          const detailsObj = typeof app.details === 'string' ? JSON.parse(app.details) : (app.details || {});
           const siteName = detailsObj?.savedChecklistSnapshot?.inspected_site_name || "Unknown Facility";
 
           if (!trackingMap[inspectorId]) {
@@ -67,14 +65,14 @@ export async function GET() {
     });
 
     const structuredWorkforceMatrix = staffList.map((user) => {
-      const lockedWorkflows = trackingMap[user.id] || [];
+      const activeWorkflows = trackingMap[user.id] || [];
       return {
         id: user.id,
         full_name: user.name, 
         division: user.division,
-        role: user.role, // Added role field back in for complete visibility
-        is_available: lockedWorkflows.length === 0,
-        locked_workflows: lockedWorkflows
+        role: user.role,
+        is_available: true, // 👈 ALLOWED: All staff are now available for scheduling regardless of technical review stage
+        locked_workflows: activeWorkflows // Preserved for sidebar audit visibility
       };
     });
 
