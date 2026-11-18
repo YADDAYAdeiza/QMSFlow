@@ -35,16 +35,17 @@ export async function PATCH(request: Request, { params }: RouteParams) {
         })
         .where(eq(scheduleBatches.id, batchId));
 
-      // 2. Surgical Foreign Factory Resolution
+      // 2. Surgical Facility UUID Resolution
       let targetAppIds: number[] = [];
       if (Array.isArray(facilities) && facilities.length > 0) {
-        const parsedFacilityIds = facilities.map(id => Number(id)).filter(id => !isNaN(id));
+        // Keep facility IDs as clean strings (UUIDs) matching facilities.id / applications.facility_id
+        const parsedFacilityIds = facilities.map(id => String(id)).filter(Boolean);
 
         if (parsedFacilityIds.length > 0) {
           const matchingApps = await tx
             .select({ id: applications.id })
             .from(applications)
-            .where(inArray(applications.foreignFactoryId, parsedFacilityIds));
+            .where(inArray(applications.facilityId, parsedFacilityIds));
 
           targetAppIds = Array.from(new Set(matchingApps.map(app => app.id)));
         }
@@ -52,7 +53,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
       // 🛡️ CRITICAL GUARD: Never allow an update that results in zero schedules (orphaned batch shell)
       if (targetAppIds.length === 0) {
-        throw new Error("Batch Update Failed: The selected foreign factories do not map to any active foreign regulatory applications.");
+        throw new Error("Batch Update Failed: The selected facilities do not map to any active regulatory applications.");
       }
 
       // 3. Clean up stale schedules for this batch ID or target apps

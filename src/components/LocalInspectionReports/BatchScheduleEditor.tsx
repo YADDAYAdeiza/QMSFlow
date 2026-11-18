@@ -30,6 +30,8 @@ interface BatchScheduleEditorProps {
   userId?: string;
   isReadOnly?: boolean;
   isForeign?: boolean;
+  hideWorkflowModal?: boolean; // Hides Divisional Deputy Director RecommendApprovalModal when used in PRS
+  redirectPath?: string;       // Custom redirect path passed down to useBatchScheduleManager
 }
 
 export default function BatchScheduleEditor({
@@ -45,6 +47,8 @@ export default function BatchScheduleEditor({
   userId,
   isReadOnly = false,
   isForeign = false,
+  hideWorkflowModal = false,
+  redirectPath,
 }: BatchScheduleEditorProps) {
   const [isPending, startTransition] = useTransition();
 
@@ -71,6 +75,7 @@ export default function BatchScheduleEditor({
     batchId,
     startDate,
     endDate,
+    redirectPath,
   });
 
   const isRework = batchStatus === "REWORK_REQUIRED";
@@ -121,7 +126,7 @@ export default function BatchScheduleEditor({
           {!isReadOnly && !isApproved && (
             <>
               {!isEditMode ? (
-                // VIEW MODE: Show Edit Button and Workflow Modal (Resubmit / Recommend)
+                // VIEW MODE: Show Edit Button and Workflow Modal (if not hidden)
                 <>
                   <button
                     type="button"
@@ -134,21 +139,23 @@ export default function BatchScheduleEditor({
                     <Edit3 className="w-3.5 h-3.5" /> Edit Batch Schedule
                   </button>
 
-                  <RecommendApprovalModal
-                    batchId={batchId}
-                    batchReference={`SCHEDULE-${startDate}`}
-                    title={`Annexure 08 (${startDate} to ${endDate})`}
-                    startDate={startDate}
-                    endDate={endDate}
-                    scheduleIds={currentActiveScheduleIds}
-                    history={batchHistory}
-                    isRework={isRework}
-                    userId={userId}
-                    isForeign={isForeign}
-                  />
+                  {!hideWorkflowModal && (
+                    <RecommendApprovalModal
+                      batchId={batchId}
+                      batchReference={`SCHEDULE-${startDate}`}
+                      title={`Annexure 08 (${startDate} to ${endDate})`}
+                      startDate={startDate}
+                      endDate={endDate}
+                      scheduleIds={currentActiveScheduleIds}
+                      history={batchHistory}
+                      isRework={isRework}
+                      userId={userId}
+                      isForeign={isForeign}
+                    />
+                  )}
                 </>
               ) : (
-                // EDIT MODE: Force explicit Save & Exit or Cancel. No Resubmit modal available here!
+                // EDIT MODE: Force explicit Save & Exit or Cancel.
                 <div className="flex items-center gap-2">
                   <button
                     type="button"

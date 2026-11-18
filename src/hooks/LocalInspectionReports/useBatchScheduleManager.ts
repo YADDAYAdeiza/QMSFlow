@@ -29,6 +29,7 @@ interface UseBatchScheduleManagerProps {
   batchId?: string;
   startDate: string;
   endDate: string;
+  redirectPath?: string; // <-- NEW: Optional custom redirect path after saving
 }
 
 export function useBatchScheduleManager({
@@ -37,6 +38,7 @@ export function useBatchScheduleManager({
   batchId,
   startDate,
   endDate,
+  redirectPath,
 }: UseBatchScheduleManagerProps) {
   const router = useRouter();
   const [rows, setRows] = useState<EditableScheduleItem[]>(initialRows || []);
@@ -45,7 +47,6 @@ export function useBatchScheduleManager({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Sync state when Server Component re-fetches with new initialRows
   useEffect(() => {
     setRows(initialRows || []);
     setHasUnsavedChanges(false);
@@ -174,8 +175,6 @@ export function useBatchScheduleManager({
         updates,
       };
 
-      console.log("📤 SUBMITTING PAYLOAD to batch-update-v2:", JSON.stringify(payload, null, 2));
-
       const res = await fetch("/api/LocalInspectionReports/schedule/batch-update-v2", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -185,10 +184,15 @@ export function useBatchScheduleManager({
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to update schedules.");
 
-      // Success: Exit edit mode and clear dirty flag
       setIsEditMode(false);
       setHasUnsavedChanges(false);
-      router.push(`/LocalInspectionReports/ddd/schedule-inspection/print?batchId=${batchId}&startDate=${startDate}&endDate=${endDate}`);
+
+      // Use custom redirectPath if provided, otherwise default to Divisional Deputy Director route
+      const targetUrl =
+        redirectPath ||
+        `/LocalInspectionReports/ddd/schedule-inspection/print?batchId=${batchId}&startDate=${startDate}&endDate=${endDate}`;
+
+      router.push(targetUrl);
       router.refresh();
     } catch (err: any) {
       console.error("Save error:", err.message);
